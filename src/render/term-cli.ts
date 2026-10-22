@@ -19,7 +19,7 @@ register("summary", "end-of-run totals: summary <runDir> [--plain] [--link <url>
   try { real = realpathSync(runDir); } catch { /* checked below */ }
   let rootReal = sessionsRoot;
   try { rootReal = realpathSync(sessionsRoot); } catch { /* none yet */ }
-  if (!real.startsWith(rootReal + sep)) { err(`refusing: ${runDir} is not a run folder of this project`); return 2; }
+  if (!real.startsWith(rootReal + sep)) { err(`refusing: ${JSON.stringify(runDir)} is not a run folder of this project`); return 2; }
   mkdirSync(join(process.cwd(), ".baseline"), { recursive: true });
   const cfg = loadConfig(process.cwd());
   const rec = buildRunRecord(runDir);

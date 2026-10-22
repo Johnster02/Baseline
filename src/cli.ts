@@ -12,6 +12,10 @@ export function register(name: string, help: string, handler: Handler): void {
   commands.set(name, { handler, help });
 }
 
+export function commandNames(): string[] {
+  return [...commands.keys()];
+}
+
 export function out(text: string): void {
   process.stdout.write(text.endsWith("\n") ? text : text + "\n");
 }
