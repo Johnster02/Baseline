@@ -89,7 +89,9 @@ export function renderProgress(p: Progress, theme: ThemeName, o: TermOpts): stri
 }
 
 /** The end-of-run summary: totals and pass rate only. Detail lives in the report. */
-export function renderSummary(r: RunRecord, theme: ThemeName, o: TermOpts): string[] {
+export type SummaryInput = Pick<RunRecord, "label" | "size" | "durationMin" | "counts">;
+
+export function renderSummary(r: SummaryInput, theme: ThemeName, o: TermOpts): string[] {
   const c = painter(theme, o.color);
   const br = theme === "br2049";
   const rule = c("accentDim", "─".repeat(Math.max(10, Math.min(o.width, 48))));

@@ -1,3 +1,4 @@
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { register, out, err } from "../cli";
 import { loadConfig } from "../config/store";
@@ -12,9 +13,14 @@ const width = () => Math.min(process.stdout.columns || 72, 72);
 register("summary", "end-of-run totals: summary <runDir> [--plain] [--link <url>]", (args) => {
   const runDir = args[0] && !args[0].startsWith("--") ? resolve(args[0]) : activeRunDir(process.cwd());
   if (!runDir) { err("usage: baseline summary <runDir> [--plain] [--link <url>]"); return 2; }
+  mkdirSync(join(process.cwd(), ".baseline"), { recursive: true });
   const cfg = loadConfig(process.cwd());
   const rec = buildRunRecord(runDir);
   const local = join(runDir, "..", "..", "report.html");
+  // The band reads this to show the summary after the run.
+  const p = readProgress(runDir);
+  writeFileSync(join(runDir, "summary.json"), JSON.stringify({ runId: rec.runId, label: rec.label, size: rec.size, durationMin: rec.durationMin, counts: rec.counts, finishedAt: p?.finishedAt ?? new Date().toISOString(), link: flag(args, "--link"), localPath: local }));
+  writeFileSync(join(process.cwd(), ".baseline", "last-run"), runDir);
   out(renderSummary(rec, cfg.theme, { color: args.includes("--plain") ? "none" : colorMode(), width: width(), link: flag(args, "--link"), localPath: local }).join("\n"));
   return 0;
 });

@@ -13,9 +13,10 @@
     "build": "node scripts/build.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "check": "tsc --noEmit && vitest run && node scripts/build.mjs --verify",
+    "check": "tsc --noEmit && vitest run && node scripts/build.mjs --verify && (command -v claude >/dev/null && claude plugin test || echo \"claude CLI not found: mod tests skipped\")",
     "fixture": "tsx test/fixture-app/run.ts",
-    "prepare": "git config core.hooksPath .githooks || true"
+    "prepare": "git config core.hooksPath .githooks || true",
+    "test:mod": "claude plugin test"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

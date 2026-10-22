@@ -1,0 +1,4 @@
+{
+  "description": "Baseline: the live band above the prompt",
+  "modules": ["../mod/pane.js"]
+}
