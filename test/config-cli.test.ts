@@ -50,3 +50,15 @@ describe("config cli", () => {
     expect(out).not.toContain("c@acme.test");
   });
 });
+
+describe("config secret stdin errors", () => {
+  it("bad JSON on stdin never echoes the input", async () => {
+    const { io } = await import("../src/cli");
+    await main(["config", "add-runner", "customer", "customer", "session"]);
+    vi.spyOn(io, "readStdin").mockReturnValue('{"username":"a","password":hunter2}');
+    out = "";
+    const code = await main(["config", "secret", "customer"]);
+    expect(code).toBe(2);
+    expect(out).not.toContain("hunter2");
+  });
+});

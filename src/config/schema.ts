@@ -24,13 +24,37 @@ export const runnerSchema = z.object({
 export type Runner = z.infer<typeof runnerSchema>;
 
 const patternSet = z.object({ urls: z.array(z.string()).default([]), words: z.array(z.string()).default([]) });
-export const patternsSchema = z.object({
-  email: patternSet.default({ urls: [], words: [] }),
-  auth: patternSet.default({ urls: [], words: [] }),
-  delete: patternSet.default({ urls: [], words: [] }),
-  finance: patternSet.default({ urls: [], words: [] }),
+const strictPatterns = z.object({ email: patternSet, auth: patternSet, delete: patternSet, finance: patternSet });
+export type Patterns = z.infer<typeof strictPatterns>;
+
+/** User patterns are added on top of the defaults, never in place of them, so editing one
+ *  category can't leave another unprotected. */
+export const patternsSchema = z.preprocess((raw) => {
+  const user = (raw && typeof raw === "object" ? raw : {}) as Record<string, { urls?: string[]; words?: string[] } | undefined>;
+  const d = defaultPatterns();
+  const merged: Record<string, { urls: string[]; words: string[] }> = {};
+  for (const k of Object.keys(d) as (keyof Patterns)[]) {
+    const u = user[k] || {};
+    merged[k] = {
+      urls: [...new Set([...d[k].urls, ...(Array.isArray(u.urls) ? u.urls : [])])],
+      words: [...new Set([...d[k].words, ...(Array.isArray(u.words) ? u.words.map((w) => String(w).toLowerCase()) : [])])],
+    };
+  }
+  return merged;
+}, strictPatterns);
+
+/** A production entry: a bare host gets https:// added; anything that won't parse as an http(s) URL is rejected. */
+const productionUrl = z.string().transform((v, ctx) => {
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(v) ? v : `https://${v}`;
+  try {
+    const u = new URL(withScheme);
+    if (!/^https?:$/.test(u.protocol) || !u.hostname || /\s/.test(v)) throw new Error();
+    return u.origin;
+  } catch {
+    ctx.addIssue({ code: "custom", message: `"${v}" is not a URL` });
+    return z.NEVER;
+  }
 });
-export type Patterns = z.infer<typeof patternsSchema>;
 
 /** Sensible starting words for every site; setup lets the user add their own. */
 export function defaultPatterns(): Patterns {
@@ -44,9 +68,9 @@ export function defaultPatterns(): Patterns {
 
 export const projectConfigSchema = z.object({
   runners: z.array(runnerSchema).default([]),
-  patterns: patternsSchema.default(defaultPatterns()),
+  patterns: patternsSchema,
   readPosts: z.array(z.string()).default([]),
-  productionUrls: z.array(z.string()).default([]),
+  productionUrls: z.array(productionUrl).default([]),
   lastUrl: z.string().optional(),
   theme: z.enum(THEMES).default("br2049"),
   versionProbe: z.object({ url: z.string(), pattern: z.string() }).optional(),

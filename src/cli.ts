@@ -1,4 +1,8 @@
+import { readFileSync } from "node:fs";
 import manifest from "../.claude-plugin/plugin.json";
+
+/** Indirection so tests can supply stdin. */
+export const io = { readStdin: (): string => readFileSync(0, "utf8") };
 
 export type Handler = (args: string[]) => Promise<number> | number;
 

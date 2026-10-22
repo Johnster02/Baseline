@@ -6,6 +6,9 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
+// src/cli.ts
+var import_node_fs = require("node:fs");
+
 // .claude-plugin/plugin.json
 var plugin_default = {
   name: "baseline",
@@ -54,6 +57,7 @@ var plugin_default = {
 };
 
 // src/cli.ts
+var io = { readStdin: () => (0, import_node_fs.readFileSync)(0, "utf8") };
 var commands = /* @__PURE__ */ new Map();
 function register(name, help, handler) {
   commands.set(name, { handler, help });
@@ -81,9 +85,6 @@ async function main(argv) {
   }
   return await cmd.handler(rest);
 }
-
-// src/config/cli.ts
-var import_node_fs3 = require("node:fs");
 
 // node_modules/.pnpm/zod@4.6.7/node_modules/zod/v4/classic/external.js
 var external_exports = {};
@@ -16218,9 +16219,9 @@ var createToJSONSchemaMethod = (schema, processors = {}) => (params) => {
   extractDefs(ctx, schema);
   return finalize(ctx, schema);
 };
-var createStandardJSONSchemaMethod = (schema, io, processors = {}) => (params) => {
+var createStandardJSONSchemaMethod = (schema, io2, processors = {}) => (params) => {
   const { libraryOptions, target } = params ?? {};
-  const ctx = initializeContext({ ...libraryOptions ?? {}, target, io, processors });
+  const ctx = initializeContext({ ...libraryOptions ?? {}, target, io: io2, processors });
   processSchema(schema, ctx);
   extractDefs(ctx, schema);
   return finalize(ctx, schema);
@@ -19818,11 +19819,30 @@ var runnerSchema = external_exports.object({
   auth
 });
 var patternSet = external_exports.object({ urls: external_exports.array(external_exports.string()).default([]), words: external_exports.array(external_exports.string()).default([]) });
-var patternsSchema = external_exports.object({
-  email: patternSet.default({ urls: [], words: [] }),
-  auth: patternSet.default({ urls: [], words: [] }),
-  delete: patternSet.default({ urls: [], words: [] }),
-  finance: patternSet.default({ urls: [], words: [] })
+var strictPatterns = external_exports.object({ email: patternSet, auth: patternSet, delete: patternSet, finance: patternSet });
+var patternsSchema = external_exports.preprocess((raw) => {
+  const user = raw && typeof raw === "object" ? raw : {};
+  const d = defaultPatterns();
+  const merged = {};
+  for (const k of Object.keys(d)) {
+    const u = user[k] || {};
+    merged[k] = {
+      urls: [.../* @__PURE__ */ new Set([...d[k].urls, ...Array.isArray(u.urls) ? u.urls : []])],
+      words: [.../* @__PURE__ */ new Set([...d[k].words, ...Array.isArray(u.words) ? u.words.map((w) => String(w).toLowerCase()) : []])]
+    };
+  }
+  return merged;
+}, strictPatterns);
+var productionUrl = external_exports.string().transform((v, ctx) => {
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(v) ? v : `https://${v}`;
+  try {
+    const u = new URL(withScheme);
+    if (!/^https?:$/.test(u.protocol) || !u.hostname || /\s/.test(v)) throw new Error();
+    return u.origin;
+  } catch {
+    ctx.addIssue({ code: "custom", message: `"${v}" is not a URL` });
+    return external_exports.NEVER;
+  }
 });
 function defaultPatterns() {
   return {
@@ -19834,9 +19854,9 @@ function defaultPatterns() {
 }
 var projectConfigSchema = external_exports.object({
   runners: external_exports.array(runnerSchema).default([]),
-  patterns: patternsSchema.default(defaultPatterns()),
+  patterns: patternsSchema,
   readPosts: external_exports.array(external_exports.string()).default([]),
-  productionUrls: external_exports.array(external_exports.string()).default([]),
+  productionUrls: external_exports.array(productionUrl).default([]),
   lastUrl: external_exports.string().optional(),
   theme: external_exports.enum(THEMES).default("br2049"),
   versionProbe: external_exports.object({ url: external_exports.string(), pattern: external_exports.string() }).optional(),
@@ -19851,49 +19871,51 @@ var CATEGORY_LABEL = {
 };
 
 // src/config/store.ts
-var import_node_fs = require("node:fs");
+var import_node_fs2 = require("node:fs");
 var import_node_path = require("node:path");
 var configDir = (projectDir) => (0, import_node_path.join)(projectDir, ".baseline");
 var configPath = (projectDir) => (0, import_node_path.join)(configDir(projectDir), "config.json");
 function loadConfig(projectDir) {
   const p = configPath(projectDir);
-  const raw = (0, import_node_fs.existsSync)(p) ? JSON.parse((0, import_node_fs.readFileSync)(p, "utf8")) : {};
+  const raw = (0, import_node_fs2.existsSync)(p) ? JSON.parse((0, import_node_fs2.readFileSync)(p, "utf8")) : {};
   return projectConfigSchema.parse(raw);
 }
 function saveConfig(projectDir, cfg) {
   const valid = projectConfigSchema.parse(cfg);
-  (0, import_node_fs.mkdirSync)(configDir(projectDir), { recursive: true });
-  (0, import_node_fs.writeFileSync)(configPath(projectDir), JSON.stringify(valid, null, 2) + "\n");
+  (0, import_node_fs2.mkdirSync)(configDir(projectDir), { recursive: true });
+  ensureGitignored(projectDir);
+  (0, import_node_fs2.writeFileSync)(configPath(projectDir), JSON.stringify(valid, null, 2) + "\n");
 }
 function newRunner(key, persona, auth2) {
   return runnerSchema.parse({ key, persona, auth: auth2 });
 }
 function ensureGitignored(projectDir) {
   const p = (0, import_node_path.join)(projectDir, ".gitignore");
-  const text = (0, import_node_fs.existsSync)(p) ? (0, import_node_fs.readFileSync)(p, "utf8") : "";
+  const text = (0, import_node_fs2.existsSync)(p) ? (0, import_node_fs2.readFileSync)(p, "utf8") : "";
   if (/^\.baseline\/?$/m.test(text)) return;
   const sep = text === "" || text.endsWith("\n") ? "" : "\n";
-  (0, import_node_fs.writeFileSync)(p, text + sep + ".baseline/\n");
+  (0, import_node_fs2.writeFileSync)(p, text + sep + ".baseline/\n");
 }
-function sameOrigin(a, b) {
-  return a.protocol === b.protocol && a.host === b.host;
+function hostKey(url2) {
+  try {
+    return new URL(url2).hostname.replace(/\.$/, "").toLowerCase() || void 0;
+  } catch {
+    return void 0;
+  }
 }
 function isProduction(url2, cfg) {
+  const h = hostKey(url2);
+  if (!h) return false;
+  return cfg.productionUrls.some((p) => hostKey(p) === h);
+}
+function checkTarget(url2, cfg, live) {
   let u;
   try {
     u = new URL(url2);
   } catch {
-    return false;
+    return { ok: false, reason: "invalid" };
   }
-  return cfg.productionUrls.some((p) => {
-    try {
-      return sameOrigin(u, new URL(p));
-    } catch {
-      return false;
-    }
-  });
-}
-function checkTarget(url2, cfg, live) {
+  if (!/^https?:$/.test(u.protocol)) return { ok: false, reason: "invalid" };
   if (isProduction(url2, cfg) && !live) return { ok: false, reason: "production" };
   return { ok: true };
 }
@@ -19921,7 +19943,7 @@ function describePermissions(runner, patterns) {
 }
 
 // src/config/secrets.ts
-var import_node_fs2 = require("node:fs");
+var import_node_fs3 = require("node:fs");
 var import_node_crypto = require("node:crypto");
 var import_node_os = require("node:os");
 var import_node_path2 = require("node:path");
@@ -19929,22 +19951,54 @@ function dataDir() {
   return process.env.BASELINE_DATA || process.env.CLAUDE_PLUGIN_DATA || (0, import_node_path2.join)((0, import_node_os.homedir)(), ".config", "baseline");
 }
 function projectHash(projectDir) {
-  return (0, import_node_crypto.createHash)("sha256").update((0, import_node_path2.resolve)(projectDir)).digest("hex").slice(0, 16);
+  let p = (0, import_node_path2.resolve)(projectDir);
+  try {
+    p = (0, import_node_fs3.realpathSync)(p);
+  } catch {
+  }
+  return (0, import_node_crypto.createHash)("sha256").update(p).digest("hex").slice(0, 16);
 }
 function secretsPath(data, projectDir) {
   return (0, import_node_path2.join)(data, "secrets", `${projectHash(projectDir)}.json`);
 }
 function readAll(data, projectDir) {
   const p = secretsPath(data, projectDir);
-  return (0, import_node_fs2.existsSync)(p) ? JSON.parse((0, import_node_fs2.readFileSync)(p, "utf8")) : {};
+  if (!(0, import_node_fs3.existsSync)(p)) return {};
+  try {
+    return JSON.parse((0, import_node_fs3.readFileSync)(p, "utf8"));
+  } catch {
+    throw new Error(`secrets file is unreadable (${p}). Re-run setup to save sign-in details again.`);
+  }
+}
+function writeAll(data, projectDir, all) {
+  const dir = (0, import_node_path2.join)(data, "secrets");
+  (0, import_node_fs3.mkdirSync)(dir, { recursive: true, mode: 448 });
+  (0, import_node_fs3.chmodSync)(dir, 448);
+  const p = secretsPath(data, projectDir);
+  const tmp = `${p}.${process.pid}.${Date.now()}.tmp`;
+  const fd = (0, import_node_fs3.openSync)(tmp, "wx", 384);
+  try {
+    (0, import_node_fs3.writeSync)(fd, JSON.stringify(all));
+  } finally {
+    (0, import_node_fs3.closeSync)(fd);
+  }
+  (0, import_node_fs3.renameSync)(tmp, p);
 }
 function setSecret(data, projectDir, runnerKey, creds) {
   const all = readAll(data, projectDir);
   all[runnerKey] = creds;
-  const p = secretsPath(data, projectDir);
-  (0, import_node_fs2.mkdirSync)((0, import_node_path2.join)(data, "secrets"), { recursive: true, mode: 448 });
-  (0, import_node_fs2.writeFileSync)(p, JSON.stringify(all), { mode: 384 });
-  (0, import_node_fs2.chmodSync)(p, 384);
+  writeAll(data, projectDir, all);
+}
+function removeSecret(data, projectDir, runnerKey) {
+  const all = readAll(data, projectDir);
+  if (runnerKey in all) {
+    delete all[runnerKey];
+    writeAll(data, projectDir, all);
+  }
+  (0, import_node_fs3.rmSync)(sessionPath(data, projectDir, runnerKey), { force: true });
+}
+function sessionPath(data, projectDir, runnerKey) {
+  return (0, import_node_path2.join)(data, "sessions", projectHash(projectDir), `${runnerKey}.json`);
 }
 
 // src/config/cli.ts
@@ -20001,7 +20055,8 @@ register("config", "show | describe | add-runner | remove-runner | depth | allow
         return 2;
       }
       saveConfig(dir, cfg);
-      out(`removed runner ${a[0]}`);
+      removeSecret(dataDir(), dir, a[0]);
+      out(`removed runner ${a[0]} and its saved sign-in`);
       return 0;
     }
     case "depth": {
@@ -20037,9 +20092,13 @@ register("config", "show | describe | add-runner | remove-runner | depth | allow
         return 2;
       }
       let parsed = value;
-      try {
-        parsed = JSON.parse(value);
-      } catch {
+      if (/^\s*[[{]/.test(value)) {
+        try {
+          parsed = JSON.parse(value);
+        } catch {
+          err(`${field} must be valid JSON`);
+          return 2;
+        }
       }
       if (field === "theme" && !THEMES.includes(parsed)) {
         err(`theme must be one of ${THEMES.join(", ")}`);
@@ -20057,7 +20116,13 @@ register("config", "show | describe | add-runner | remove-runner | depth | allow
     case "secret": {
       const r = runnerOr(cfg, a[0]);
       if (!r) return 2;
-      const creds = JSON.parse((0, import_node_fs3.readFileSync)(0, "utf8"));
+      let creds;
+      try {
+        creds = JSON.parse(io.readStdin());
+      } catch {
+        err('stdin must be JSON: {"username":..., "password":...}');
+        return 2;
+      }
       if (typeof creds.username !== "string" || typeof creds.password !== "string") {
         err('stdin must be {"username":..., "password":...}');
         return 2;
@@ -20079,7 +20144,7 @@ register("target-check", "check a URL is safe to test: target-check <url> [--liv
   }
   const res = checkTarget(url2, loadConfig(process.cwd()), args.includes("--live"));
   if (!res.ok) {
-    err(`refusing: ${url2} is marked as production. Ask for a live run explicitly to test it.`);
+    err(res.reason === "production" ? `refusing: ${url2} is marked as production. Ask for a live run explicitly to test it.` : `refusing: "${url2}" is not a full http(s) URL. Include the scheme, e.g. https://staging.example.com`);
     return 3;
   }
   out("ok");

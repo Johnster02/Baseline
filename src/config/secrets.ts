@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -11,7 +11,9 @@ export function dataDir(): string {
 }
 
 export function projectHash(projectDir: string): string {
-  return createHash("sha256").update(resolve(projectDir)).digest("hex").slice(0, 16);
+  let p = resolve(projectDir);
+  try { p = realpathSync(p); } catch { /* not created yet */ }
+  return createHash("sha256").update(p).digest("hex").slice(0, 16);
 }
 
 export function secretsPath(data: string, projectDir: string): string {
@@ -20,16 +22,40 @@ export function secretsPath(data: string, projectDir: string): string {
 
 function readAll(data: string, projectDir: string): Record<string, Credentials> {
   const p = secretsPath(data, projectDir);
-  return existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : {};
+  if (!existsSync(p)) return {};
+  try {
+    return JSON.parse(readFileSync(p, "utf8"));
+  } catch {
+    // Never let a parse error echo the file: it holds passwords.
+    throw new Error(`secrets file is unreadable (${p}). Re-run setup to save sign-in details again.`);
+  }
+}
+
+function writeAll(data: string, projectDir: string, all: Record<string, Credentials>): void {
+  const dir = join(data, "secrets");
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  chmodSync(dir, 0o700);
+  const p = secretsPath(data, projectDir);
+  const tmp = `${p}.${process.pid}.${Date.now()}.tmp`;
+  // Exclusive create at 0600, then rename: no window with looser permissions, no half-written file.
+  const fd = openSync(tmp, "wx", 0o600);
+  try { writeSync(fd, JSON.stringify(all)); } finally { closeSync(fd); }
+  renameSync(tmp, p);
 }
 
 export function setSecret(data: string, projectDir: string, runnerKey: string, creds: Credentials): void {
   const all = readAll(data, projectDir);
   all[runnerKey] = creds;
-  const p = secretsPath(data, projectDir);
-  mkdirSync(join(data, "secrets"), { recursive: true, mode: 0o700 });
-  writeFileSync(p, JSON.stringify(all), { mode: 0o600 });
-  chmodSync(p, 0o600);
+  writeAll(data, projectDir, all);
+}
+
+export function removeSecret(data: string, projectDir: string, runnerKey: string): void {
+  const all = readAll(data, projectDir);
+  if (runnerKey in all) {
+    delete all[runnerKey];
+    writeAll(data, projectDir, all);
+  }
+  rmSync(sessionPath(data, projectDir, runnerKey), { force: true });
 }
 
 export function getSecret(data: string, projectDir: string, runnerKey: string): Credentials | undefined {

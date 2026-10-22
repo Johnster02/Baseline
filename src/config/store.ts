@@ -15,6 +15,7 @@ export function loadConfig(projectDir: string): ProjectConfig {
 export function saveConfig(projectDir: string, cfg: ProjectConfig): void {
   const valid = projectConfigSchema.parse(cfg);
   mkdirSync(configDir(projectDir), { recursive: true });
+  ensureGitignored(projectDir);
   writeFileSync(configPath(projectDir), JSON.stringify(valid, null, 2) + "\n");
 }
 
@@ -30,19 +31,22 @@ export function ensureGitignored(projectDir: string): void {
   writeFileSync(p, text + sep + ".baseline/\n");
 }
 
-function sameOrigin(a: URL, b: URL): boolean {
-  return a.protocol === b.protocol && a.host === b.host;
+/** Hostname without a trailing dot, lowercased. Protocol and port are ignored on purpose:
+ *  http://shop and https://shop:8443 are the same production site. */
+export function hostKey(url: string): string | undefined {
+  try { return new URL(url).hostname.replace(/\.$/, "").toLowerCase() || undefined; } catch { return undefined; }
 }
 
 export function isProduction(url: string, cfg: ProjectConfig): boolean {
-  let u: URL;
-  try { u = new URL(url); } catch { return false; }
-  return cfg.productionUrls.some((p) => {
-    try { return sameOrigin(u, new URL(p)); } catch { return false; }
-  });
+  const h = hostKey(url);
+  if (!h) return false;
+  return cfg.productionUrls.some((p) => hostKey(p) === h);
 }
 
-export function checkTarget(url: string, cfg: ProjectConfig, live: boolean): { ok: true } | { ok: false; reason: "production" } {
+export function checkTarget(url: string, cfg: ProjectConfig, live: boolean): { ok: true } | { ok: false; reason: "production" | "invalid" } {
+  let u: URL;
+  try { u = new URL(url); } catch { return { ok: false, reason: "invalid" }; }
+  if (!/^https?:$/.test(u.protocol)) return { ok: false, reason: "invalid" };
   if (isProduction(url, cfg) && !live) return { ok: false, reason: "production" };
   return { ok: true };
 }
