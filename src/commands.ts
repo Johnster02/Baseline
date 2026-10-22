@@ -5,3 +5,4 @@ import "./browser/signin-cli";
 import "./inputs/cli";
 import "./run/cli";
 import "./findings/cli";
+import "./render/cli";

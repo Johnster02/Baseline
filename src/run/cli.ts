@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { register, out, err } from "../cli";
-import { loadConfig } from "../config/store";
+import { describePermissions, loadConfig } from "../config/store";
 import { activeRunDir } from "../browser/runner-script";
 import { newRun, finishRun } from "./state";
 import { PHASES, updateProgress, readProgress } from "./progress";
@@ -23,7 +23,10 @@ register("run", "run new --url <u> --label <l> [--session <id>] | run finish", (
   if (args[0] === "new") {
     const url = flag(args, "--url"), label = flag(args, "--label");
     if (!url || !label) { err("usage: baseline run new --url <url> --label <label> [--session <id>]"); return 2; }
-    out(JSON.stringify(newRun(process.cwd(), flag(args, "--session"), { url, label })));
+    const cfg = loadConfig(process.cwd());
+    const permissions = cfg.runners.map((r) => ({ runner: r.key, ...describePermissions(r, cfg.patterns) }));
+    const created = newRun(process.cwd(), flag(args, "--session"), { url, label, permissions });
+    out(JSON.stringify(created));
     return 0;
   }
   if (args[0] === "finish") { finishRun(process.cwd()); out("run finished"); return 0; }

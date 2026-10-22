@@ -232,10 +232,11 @@ export async function openSession(o: OpenOptions): Promise<Session> {
     async title() { return page.title(); },
     async shot(name: string, caption: string) {
       const safe = name.replace(/[^a-z0-9-]+/gi, "-").slice(0, 60) || "shot";
-      const file = join(o.runDir, "shots", `${o.runner.key}-${safe}-${++shots}.png`);
-      await page.screenshot({ path: file, fullPage: false });
-      appendJson(join(o.runDir, "shots.json"), { runner: o.runner.key, name: safe, path: file, caption, at: new Date().toISOString() });
-      return file;
+      const file = join(o.runDir, "shots", `${o.runner.key}-${safe}-${++shots}.jpg`);
+      await page.screenshot({ path: file, fullPage: false, type: "jpeg", quality: 70 });
+      const rel = join("shots", `${o.runner.key}-${safe}-${shots}.jpg`);
+      appendJson(join(o.runDir, "shots.json"), { runner: o.runner.key, name: safe, path: rel, caption, at: new Date().toISOString() });
+      return rel;
     },
     created(kind: string, label: string, url?: string) {
       appendJson(join(o.runDir, "created.json"), {

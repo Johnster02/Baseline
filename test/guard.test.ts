@@ -93,10 +93,11 @@ describe("session guard against Acme shop", () => {
   });
 
   it("records created objects and screenshots", async () => {
-    const dir = await withSession(look, {}, async (s) => {
+    const dir = await withSession(look, {}, async (s, d) => {
       await s.goto("/cart");
       const p = await s.shot("cart", "Cart as customer");
-      expect(existsSync(p)).toBe(true);
+      expect(p).toMatch(/^shots\/customer-cart-1\.jpg$/);
+      expect(existsSync(join(d, p))).toBe(true);
       s.created("order", "Baseline r-test order", "/orders/1");
     });
     expect(read(join(dir, "created.json"))).toContainEqual(expect.objectContaining({ runner: "customer", label: "Baseline r-test order" }));

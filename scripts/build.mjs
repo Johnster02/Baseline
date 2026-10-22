@@ -13,8 +13,14 @@ const targets = [
 ];
 if (existsSync("src/mod/pane.ts")) targets.push({ entry: "src/mod/pane.ts", out: "mod/pane.js", format: "esm" });
 
+// `import css from "./x.css?raw"` bundles the file as a string (vitest does the same natively).
+const raw = { name: "raw", setup(b) {
+  b.onResolve({ filter: /\?raw$/ }, (a) => ({ path: join(a.resolveDir, a.path.replace(/\?raw$/, "")), namespace: "raw" }));
+  b.onLoad({ filter: /.*/, namespace: "raw" }, (a) => ({ contents: readFileSync(a.path, "utf8"), loader: "text" }));
+} };
+
 for (const t of targets) {
-  await build({
+  await build({ plugins: [raw],
     entryPoints: [t.entry], bundle: true, platform: "node", target: "node20", format: t.format,
     outfile: join(outRoot, t.out), external: ["playwright", "playwright-core"], legalComments: "none", logLevel: "error",
     banner: t.format === "cjs" ? { js: "/* Baseline engine. Built from src/ by scripts/build.mjs. Do not edit. */" } : undefined,
