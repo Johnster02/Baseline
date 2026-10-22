@@ -118,3 +118,17 @@ describe("commitInfo probe safety", () => {
     expect(r.deployed).toBeUndefined();
   });
 });
+
+describe("probe origin", () => {
+  it("a different port or scheme on the same host is refused", async () => {
+    const d = tmp();
+    execFileSync("git", ["init", "-q"], { cwd: d });
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "x", "--allow-empty"], { cwd: d });
+    let called = 0;
+    const probe = async () => { called++; return '{"commit":"abc1234"}'; };
+    const mk = (url: string) => ({ ...loadConfig(d), versionProbe: { url, pattern: '"commit":"([0-9a-f]+)"' } });
+    await commitInfo(d, mk("http://staging.acme.dev:2375/version"), probe, "http://staging.acme.dev");
+    await commitInfo(d, mk("https://staging.acme.dev/version"), probe, "http://staging.acme.dev");
+    expect(called).toBe(0);
+  });
+});

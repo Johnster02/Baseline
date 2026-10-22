@@ -158,11 +158,11 @@ export async function openSession(o: OpenOptions): Promise<Session> {
     });
   });
 
-  // What this run created, as the site itself reported it (Location headers of writes we allowed).
-  // Agents can't add to this; created() is only metadata for the report and cleanup.
+  // What this run created, as the site itself reported it: the Location of a 201 Created answer to a
+  // write the guard allowed. Agents can't add to this; created() is only metadata for the report.
   context.on("response", (res) => {
     const m = res.request().method();
-    if (m === "GET" || m === "HEAD") return;
+    if (m === "GET" || m === "HEAD" || res.status() !== 201) return;
     const loc = res.headers()["location"];
     if (!loc) return;
     try {

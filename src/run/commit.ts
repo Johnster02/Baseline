@@ -10,7 +10,7 @@ function probeAllowed(probeUrl: string, runUrl?: string): boolean {
   try {
     const p = new URL(probeUrl);
     if (!/^https?:$/.test(p.protocol)) return false;
-    return !!runUrl && p.hostname === new URL(runUrl).hostname;
+    return !!runUrl && p.origin === new URL(runUrl).origin;
   } catch { return false; }
 }
 
@@ -21,7 +21,7 @@ export async function commitInfo(projectDir: string, cfg: ProjectConfig, probe?:
   let deployed: string | undefined;
   if (cfg.versionProbe && probeAllowed(cfg.versionProbe.url, runUrl ?? cfg.lastUrl) && cfg.versionProbe.pattern.length <= 200) {
     try {
-      const body = probe ? await probe(cfg.versionProbe.url) : await (await fetch(cfg.versionProbe.url, { signal: AbortSignal.timeout(5000) })).text();
+      const body = probe ? await probe(cfg.versionProbe.url) : await (await fetch(cfg.versionProbe.url, { signal: AbortSignal.timeout(5000), redirect: "error" })).text();
       deployed = body.slice(0, 100_000).match(new RegExp(cfg.versionProbe.pattern))?.[1];
     } catch { deployed = undefined; }
   }
