@@ -85,17 +85,18 @@ Every finding gets one verdict:
 
 ![One finding of each verdict in the report](docs/screenshots/verdicts.png)
 
-| Verdict | Meaning |
-|---|---|
-| spec ≠ built | the code does something other than the spec |
-| built ≠ observed | the code looks right but the site does something else |
-| not built | nothing implements it |
-| guide ≠ spec | the user guide promises something different |
-| unspecced | the site does something the spec never mentions |
-| product | works, but fails the [product checklist](checklists/product.md) |
-| unverified | the code says yes, but the site never showed it |
-| skipped | a permission stopped the check (see below) |
-| match | spec, code and site agree |
+<table>
+<tr><th align="left" nowrap>Verdict</th><th align="left" width="2000">Meaning</th></tr>
+<tr><td nowrap><b>spec ≠ built</b></td><td>the code does something other than the spec</td></tr>
+<tr><td nowrap><b>built ≠ observed</b></td><td>the code looks right but the site does something else</td></tr>
+<tr><td nowrap><b>not built</b></td><td>nothing implements it</td></tr>
+<tr><td nowrap><b>guide ≠ spec</b></td><td>the user guide promises something different</td></tr>
+<tr><td nowrap><b>unspecced</b></td><td>the site does something the spec never mentions</td></tr>
+<tr><td nowrap><b>product</b></td><td>works, but fails the <a href="checklists/product.md">product checklist</a></td></tr>
+<tr><td nowrap><b>unverified</b></td><td>the code says yes, but the site never showed it</td></tr>
+<tr><td nowrap><b>skipped</b></td><td>a permission stopped the check (see below)</td></tr>
+<tr><td nowrap><b>match</b></td><td>spec, code and site agree</td></tr>
+</table>
 
 Code is optional but recommended. Run inside the product's repository and you get all three
 columns. Without the code, Baseline compares the spec with the site and says so.
