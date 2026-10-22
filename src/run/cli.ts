@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { register, out, err } from "../cli";
 import { describePermissions, loadConfig } from "../config/store";
 import { activeRunDir } from "../browser/runner-script";
@@ -79,11 +79,17 @@ register("size", "size the active run from its inputs.json: size --personas a,b 
   return 0;
 });
 
-register("commit", "which commit the code is at and which the site is running", async () => {
+register("commit", "which commit the code is at and which the site is running: commit [--out <file>]", async (args) => {
   const runDir = activeRunDir(process.cwd());
   let runUrl: string | undefined;
   try { runUrl = runDir ? JSON.parse(readFileSync(join(runDir, "run.json"), "utf8")).url : undefined; } catch { runUrl = undefined; }
-  out(JSON.stringify(await commitInfo(process.cwd(), loadConfig(process.cwd()), undefined, runUrl)));
+  const info = JSON.stringify(await commitInfo(process.cwd(), loadConfig(process.cwd()), undefined, runUrl));
+  const outFile = flag(args, "--out");
+  if (outFile) {
+    if (!runDir || !resolve(outFile).startsWith(runDir)) { err("--out must be inside the active run folder"); return 2; }
+    writeFileSync(outFile, info);
+  }
+  out(info);
   return 0;
 });
 

@@ -1,7 +1,7 @@
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync, writeSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 
 export type Credentials = { username: string; password: string };
 
@@ -13,13 +13,26 @@ export function recordPluginData(dir: string, home = homedir()): void {
   writeFileSync(pointerFile(home), dir + "\n", { mode: 0o600 });
 }
 
-/** Durable per-user data dir: env first, then the pointer the plugin's hook wrote, then a default. */
-export function dataDir(): string {
-  if (process.env.BASELINE_DATA) return process.env.BASELINE_DATA;
-  if (process.env.CLAUDE_PLUGIN_DATA) return process.env.CLAUDE_PLUGIN_DATA;
+/** The pointer is trusted only if it is ours and points inside ~/.claude/plugins. */
+function readPointer(home: string): string | undefined {
+  try {
+    const f = pointerFile(home);
+    if (typeof process.getuid === "function" && statSync(f).uid !== process.getuid()) return undefined;
+    const p = resolve(readFileSync(f, "utf8").trim());
+    return p.startsWith(join(home, ".claude", "plugins") + sep) ? p : undefined;
+  } catch { return undefined; }
+}
+
+/**
+ * Durable per-user data dir: env first, then the pointer the plugin's hook wrote, then a default.
+ * Never inside the project, so credentials can't end up in a repository.
+ */
+export function dataDir(projectDir = process.cwd()): string {
   const home = process.env.HOME || homedir();
-  try { const p = readFileSync(pointerFile(home), "utf8").trim(); if (p) return p; } catch { /* none */ }
-  return join(home, ".config", "baseline");
+  const dir = resolve(process.env.BASELINE_DATA || process.env.CLAUDE_PLUGIN_DATA || readPointer(home) || join(home, ".config", "baseline"));
+  const proj = resolve(projectDir);
+  if (dir === proj || dir.startsWith(proj + sep)) throw new Error(`Refusing a Baseline data folder inside the project (${dir}).`);
+  return dir;
 }
 
 export function projectHash(projectDir: string): string {

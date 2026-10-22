@@ -19,10 +19,10 @@ choices. Re-running setup edits what is there; it never starts over.
    - how it signs in: **with an email and password** (ask for the sign-in page path, e.g.
      `/login`) or **by hand once** (for SSO, MFA or magic links);
    - `baseline config add-runner <key> <persona> form <loginPath>` or `... session`;
-   - for a password runner, save the details without echoing them: tell the user you will ask
-     for them, then pipe JSON on stdin:
-     `printf '%s' '{"username":"…","password":"…"}' | baseline config secret <key>`. Never print
-     them back, and never write them to a file;
+   - for a password runner, run `baseline config secret <key> --form`. It opens a one-time form
+     in the user's browser, and the details go straight to a private file. **Never ask for a
+     password in the chat, and never put one in a command.** If the user types one into the chat
+     anyway, don't repeat it: tell them it was not saved and to use the form;
    - **depth**, explained plainly: **Look only** (default: browses and reads, never submits
      anything), **Create and tidy** (may create its own test items labelled with the run id, and
      delete only those), **Full workflow** (may take its own test items through every step).
@@ -43,9 +43,13 @@ choices. Re-running setup edits what is there; it never starts over.
 7. **Version (optional).** If the site shows its deployed commit somewhere (a /version endpoint),
    set `baseline config set versionProbe '{"url":"https://staging…/version","pattern":"\"commit\":\"([0-9a-f]+)\""}'`.
 8. **Theme:** BR2049 (default), Light or Dark. `baseline config set theme <br2049|light|dark>`.
+   **Report link:** ask whether to publish reports as private claude.ai artifacts (a shareable
+   link) or keep them as local files only. `baseline config set publish true` or `false`.
 9. **Trackers.** If they use Jira or Linear and have no connector for it, tell them to add the URL
    and token with `/plugin configure baseline` (stored in their system's secure store).
-10. **Sign in now:** ask for the test URL, then `baseline signin --all --url <url>`. A runner that
+10. **Sign in now:** ask for the test URL, check it with `baseline target-check <url>` (if it is
+    refused as production, say so and ask for a test or staging URL instead), then
+    `baseline signin --all --url <url>`. A runner that
     signs in by hand: `baseline signin <key> --manual --url <url>` opens a browser window; they
     sign in and close it.
 11. **Finish** with `baseline config describe`, shown as-is: the plain list of what each runner

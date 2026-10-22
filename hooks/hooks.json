@@ -1,12 +1,38 @@
 {
-  "description": "Baseline: the live band above the prompt, tracker options for the CLI, and a Bash guard while a run is active",
-  "modules": ["../mod/pane.js"],
+  "description": "Baseline: the live band above the prompt, tracker options for the CLI, and guards on Bash and browser tools while a run is active",
+  "modules": [
+    "../mod/pane.js"
+  ],
   "hooks": {
     "SessionStart": [
-      { "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/baseline\" hook store-options" }] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/baseline\" hook store-options"
+          }
+        ]
+      }
     ],
     "PreToolUse": [
-      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/baseline\" hook bash-guard" }] }
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/baseline\" hook bash-guard"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/baseline\" hook tool-guard"
+          }
+        ]
+      }
     ]
   }
 }

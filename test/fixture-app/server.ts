@@ -52,7 +52,7 @@ async function readBody(req: IncomingMessage) {
   return s;
 }
 
-export async function startFixture(): Promise<{ url: string; requests: { method: string; path: string }[]; stop(): Promise<void> }> {
+export async function startFixture(port = 0): Promise<{ url: string; requests: { method: string; path: string }[]; stop(): Promise<void> }> {
   const requests: { method: string; path: string }[] = [];
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const path = new URL(req.url || "/", "http://x").pathname;
@@ -86,7 +86,7 @@ export async function startFixture(): Promise<{ url: string; requests: { method:
     if (path.startsWith("/api/")) { res.writeHead(200, { "content-type": "application/json" }); res.end('{"ok":true}'); return; }
     res.writeHead(404); res.end("not found");
   });
-  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  const { port } = server.address() as AddressInfo;
-  return { url: `http://127.0.0.1:${port}`, requests, stop: () => new Promise((r) => server.close(() => r())) };
+  await new Promise<void>((r) => server.listen(port, "127.0.0.1", r));
+  const { port: bound } = server.address() as AddressInfo;
+  return { url: `http://127.0.0.1:${bound}`, requests, stop: () => new Promise((r) => server.close(() => r())) };
 }

@@ -2,7 +2,7 @@
 name: run
 description: Run a Baseline acceptance check. Point it at a PR, issue, Jira or Linear ticket, spec, guide, file, folder or pasted text, and a URL. It reads the code if there is any, walks the site as your test accounts, and reports where the spec, the code and the site disagree, plus product-sense problems. Every finding is advisory.
 argument-hint: <PR | issue | ticket | file | folder | "text"> [--live] [--quick | --full]
-allowed-tools: Bash(baseline:*) Read Write Glob Grep
+allowed-tools: Bash(baseline:*) Bash(git diff:*) Bash(git log:*) Bash(git show:*) Read Write(.baseline/**) Glob Grep
 ---
 
 # Baseline run
@@ -25,6 +25,11 @@ messages short: the band above the prompt shows progress, and the report holds t
 5. **Evidence or it did not happen.** A finding needs something seen on the site or a cited line
    of code. Code alone never makes a `match`: that is `unverified`.
 6. **Every finding is advisory.** The run ends with result `Complete`. Never say pass or fail.
+7. **Always close the run.** Once `baseline run new` has run, any stop (an error, no runner
+   signed in, the user cancels) ends with `baseline progress done` and `baseline run finish`, so
+   the guards switch off.
+8. **Permissions never change during a run.** Only step 7, after `run finish`, may change them,
+   and only with the user's answer.
 
 ## 0. Preflight
 
@@ -37,8 +42,9 @@ messages short: the band above the prompt shows progress, and the report holds t
    stop and tell the user why, in one line.
 4. `baseline run new --url <url> --label "<short name of what is being checked>" --session ${CLAUDE_SESSION_ID}`.
    Keep `runDir` and `sessionDir` from its JSON.
-5. Sign in: `baseline signin --all --url <url>`. A runner that fails is left out of the run; say
-   which, and why, in one line. If none sign in, stop.
+5. Sign in: `baseline signin --all --url <url>` (add `--live` if the user passed `--live`). A
+   runner that fails is left out of the run; say which, and why, in one line. If none sign in,
+   close the run (rule 7) and stop.
 
 ## 1. Gather and plan
 
@@ -50,7 +56,7 @@ messages short: the band above the prompt shows progress, and the report holds t
    `[{ "id": "R-01", "text": "one testable statement", "source": "where it came from", "personas": ["..."] }]`.
    Requirements come only from what the inputs say. A bug report becomes "the bug no longer
    happens" plus the expected behaviour it describes.
-4. `baseline commit > <runDir>/commit.json`. If `codeRead` is false, there is no code reader this
+4. `baseline commit --out <runDir>/commit.json`. If `codeRead` is false, there is no code reader this
    run. If `mismatch` is true, tell the user in one line that the site runs a different commit.
 5. Pick the personas each requirement affects from the runners. Then
    `baseline size --personas <comma list>` (add `--guide` if a guide is among the inputs). Respect
@@ -117,10 +123,12 @@ If `<runDir>/created.json` has entries: `baseline progress phase clean-up active
 ## 6. Report
 
 1. `baseline progress done`, then `baseline report <sessionDir>`. It prints the report path.
-2. If the Artifact tool is available, publish that file. If `<sessionDir>/artifact-url` exists,
-   publish to that URL so this session's runs stay on one page; otherwise publish a new artifact
-   and save its URL to `<sessionDir>/artifact-url`. If the Artifact tool is not available, or
-   publishing fails, use the local path.
+2. Publishing: if `publish` is true in `baseline config show` and the Artifact tool is
+   available, publish the report as a private artifact. On a `--live` run, ask first with
+   AskUserQuestion, because the report holds data from the live site. If
+   `<sessionDir>/artifact-url` exists, publish to that URL so this session's runs stay on one
+   page; otherwise publish a new artifact and save its URL there. Otherwise, or if publishing
+   fails, give the local path.
 3. `baseline summary <runDir> --plain --link <artifact url, if any>` and show its output as-is in
    a code block. No finding titles in your message: the detail is in the report.
 4. `baseline run finish`.

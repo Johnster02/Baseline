@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { register, out, err, io } from "../cli";
-import { bashGuard, activeRunUrl } from "../hooks/bash-guard";
+import { bashGuard, activeRunUrl, toolGuard } from "../hooks/bash-guard";
 import { recordPluginData } from "../config/secrets";
 import { resolveInputs } from "./resolve";
 import type { InputKind, InputRef } from "./resolve";
@@ -41,10 +41,12 @@ register("hook", "internal: hook handlers (store-options, bash-guard)", (args) =
     storeTrackersFromEnv(process.env);
     return 0;
   }
-  if (args[0] === "bash-guard") {
-    let input: { tool_input?: { command?: string }; cwd?: string } = {};
+  if (args[0] === "bash-guard" || args[0] === "tool-guard") {
+    // Malformed input is allowed through: this is a best-effort second layer behind the browser guard.
+    let input: { tool_name?: string; tool_input?: { command?: string }; cwd?: string } = {};
     try { input = JSON.parse(io.readStdin()); } catch { return 0; }
-    const res = bashGuard(input.tool_input?.command ?? "", { runUrl: activeRunUrl(input.cwd || process.cwd()) });
+    const ctx = { runUrl: activeRunUrl(process.env.CLAUDE_PROJECT_DIR || input.cwd || process.cwd()) };
+    const res = args[0] === "bash-guard" ? bashGuard(input.tool_input?.command ?? "", ctx) : toolGuard(input.tool_name ?? "", ctx);
     if ("deny" in res) { err(res.deny); return 2; }
     return 0;
   }

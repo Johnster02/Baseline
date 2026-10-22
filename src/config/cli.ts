@@ -3,8 +3,9 @@ import { CATEGORIES, DEPTHS, THEMES, projectConfigSchema } from "./schema";
 import type { Category, Depth } from "./schema";
 import { checkTarget, describePermissions, ensureGitignored, loadConfig, newRunner, saveConfig } from "./store";
 import { dataDir, removeSecret, setSecret } from "./secrets";
+import { secretForm } from "./secret-form";
 
-const SETTABLE = ["patterns", "readPosts", "productionUrls", "lastUrl", "theme", "versionProbe", "checklistExtra"] as const;
+const SETTABLE = ["patterns", "readPosts", "productionUrls", "lastUrl", "theme", "versionProbe", "checklistExtra", "publish"] as const;
 
 function runnerOr(cfg: ReturnType<typeof loadConfig>, key: string | undefined) {
   const r = cfg.runners.find((x) => x.key === key);
@@ -82,7 +83,7 @@ register("config", "show | describe | add-runner | remove-runner | depth | allow
         return 2;
       }
       let parsed: unknown = value;
-      if (/^\s*[[{]/.test(value)) {
+      if (/^\s*[[{]/.test(value) || value === "true" || value === "false") {
         try { parsed = JSON.parse(value); } catch { err(`${field} must be valid JSON`); return 2; }
       }
       if (field === "theme" && !THEMES.includes(parsed as never)) { err(`theme must be one of ${THEMES.join(", ")}`); return 2; }
@@ -93,9 +94,16 @@ register("config", "show | describe | add-runner | remove-runner | depth | allow
       return 0;
     }
     case "secret": {
-      // Credentials arrive on stdin as JSON so they never sit in shell history or argv.
       const r = runnerOr(cfg, a[0]);
       if (!r) return 2;
+      // The default: a one-time local form, so the password never passes through the chat.
+      if (a.includes("--form")) {
+        const res = await secretForm({ data: dataDir(), projectDir: dir, runner: r.key });
+        if (!res.ok) { err("The form closed without saving. Run it again when ready."); return 1; }
+        out(`saved sign-in details for ${r.key}`);
+        return 0;
+      }
+      // For scripts and CI: JSON on stdin, so it never sits in shell history or argv.
       let creds: { username?: unknown; password?: unknown };
       try { creds = JSON.parse(io.readStdin()); } catch { err("stdin must be JSON: {\"username\":..., \"password\":...}"); return 2; }
       if (typeof creds.username !== "string" || typeof creds.password !== "string") { err("stdin must be {\"username\":..., \"password\":...}"); return 2; }

@@ -49,8 +49,12 @@ export type OpenOptions = {
 
 /** Playwright is installed by setup into the plugin data dir. */
 export function loadPlaywright(): typeof import("playwright") {
-  const bases = [join(process.cwd(), "noop.js"), join(dataDir(), "noop.js")];
+  // The plugin's own pinned copy first; the project's copy last, so a project can't swap in its own.
+  const data = dataDir();
+  if (!process.env.PLAYWRIGHT_BROWSERS_PATH && existsSync(join(data, "browsers"))) process.env.PLAYWRIGHT_BROWSERS_PATH = join(data, "browsers");
+  const bases = [join(data, "noop.js")];
   if (typeof __filename !== "undefined") bases.push(__filename);
+  bases.push(join(process.cwd(), "noop.js"));
   let last: unknown;
   for (const b of bases) {
     try { return createRequire(b)("playwright"); } catch (e) { last = e; }

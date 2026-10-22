@@ -60,7 +60,8 @@ Each run asks which URL to test (the last one is the default): staging, a previe
 Add `--quick` or `--full` to choose. `--live` is needed to test a URL you marked as production.
 
 While it runs, a band above the prompt shows each phase and what every agent is doing. When it
-ends you get totals only: pass rate, counts, `Complete`, and a link to the report.
+ends you get totals only: pass rate, counts, `Complete`, and a link to the report (a private
+claude.ai artifact if you chose that in setup, otherwise a local file).
 
 ```text
 BASELINE // PR #412 · quick · 9m 12s
@@ -127,8 +128,11 @@ Baseline drives a real browser through someone's site, so it is careful by defau
 - **Agents never touch the browser directly.** Their scripts talk to a browser held by Baseline
   through a short list of commands (go to, click, fill, read, screenshot). A Bash hook also blocks
   HTTP writes to the site and direct Playwright use while a run is active.
-- **Credentials** live in a 0600 file in the plugin's data folder, never in your project, logs or
-  reports. Accounts behind SSO or MFA are signed in by hand once and the session is reused.
+- **Credentials** are typed into a one-time form in your own browser, so Claude never sees them.
+  They live in a 0600 file in the plugin's data folder, never in your project, logs or reports.
+  Accounts behind SSO or MFA are signed in by hand once and the session is reused.
+- **Nothing changes mid-run.** While a run is active, agents can't change permissions, runners or
+  production settings, and browser tools other than Baseline's own are switched off.
 
 **The honest limit:** blocking every write for look-only runners is enforced in code. Spotting a
 protected action on a site Baseline has never seen (that a button sends an email, say) is best

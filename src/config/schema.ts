@@ -75,6 +75,8 @@ export const projectConfigSchema = z.object({
   theme: z.enum(THEMES).default("br2049"),
   versionProbe: z.object({ url: z.string(), pattern: z.string() }).optional(),
   checklistExtra: z.array(z.string()).default([]),
+  /** Publish reports as private claude.ai artifacts. Asked in setup; live runs always ask again. */
+  publish: z.boolean().default(false),
 });
 export type ProjectConfig = z.infer<typeof projectConfigSchema>;
 
