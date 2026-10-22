@@ -6,3 +6,4 @@ import "./inputs/cli";
 import "./run/cli";
 import "./findings/cli";
 import "./render/cli";
+import "./render/term-cli";
