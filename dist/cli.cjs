@@ -2096,8 +2096,8 @@ function emoji() {
 }
 var ipv4 = /^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$/;
 var ipv6 = /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:))$/;
-var mac = (delimiter) => {
-  const escapedDelim = escapeRegex(delimiter ?? ":");
+var mac = (delimiter2) => {
+  const escapedDelim = escapeRegex(delimiter2 ?? ":");
   return new RegExp(`^(?:[0-9A-F]{2}${escapedDelim}){5}[0-9A-F]{2}$|^(?:[0-9a-f]{2}${escapedDelim}){5}[0-9a-f]{2}$`);
 };
 var cidrv4 = /^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\/([0-9]|[1-2][0-9]|3[0-2])$/;
@@ -5153,7 +5153,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve2) {
+function isRecursive(inst, stack, resolve3) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -5163,7 +5163,7 @@ function isRecursive(inst, stack, resolve2) {
   let result = NONE;
   const check2 = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve2);
+      const answer = isRecursive(child, stack, resolve3);
       if (answer > result)
         result = answer;
     }
@@ -5174,7 +5174,7 @@ function isRecursive(inst, stack, resolve2) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve2) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve3) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -5238,7 +5238,7 @@ function isRecursive(inst, stack, resolve2) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve2 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve3 ? inst._zod.innerType : void 0);
       merge2(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -20149,6 +20149,51 @@ register("target-check", "check a URL is safe to test: target-check <url> [--liv
   }
   out("ok");
   return 0;
+});
+
+// src/browser/runner-script.ts
+var import_node_child_process = require("node:child_process");
+var import_node_fs4 = require("node:fs");
+var import_node_path3 = require("node:path");
+function pluginRoot() {
+  return typeof __dirname !== "undefined" ? (0, import_node_path3.resolve)(__dirname, "..") : process.cwd();
+}
+function activeRunDir(projectDir, flag) {
+  if (flag) return (0, import_node_path3.resolve)(flag);
+  if (process.env.BASELINE_RUN_DIR) return process.env.BASELINE_RUN_DIR;
+  const p = (0, import_node_path3.join)(projectDir, ".baseline", "active-run");
+  return (0, import_node_fs4.existsSync)(p) ? (0, import_node_fs4.readFileSync)(p, "utf8").trim() : void 0;
+}
+function shimDir(root) {
+  const dir = (0, import_node_path3.join)(dataDir(), "shim", "node_modules", "baseline");
+  (0, import_node_fs4.mkdirSync)(dir, { recursive: true });
+  (0, import_node_fs4.writeFileSync)((0, import_node_path3.join)(dir, "index.js"), `module.exports = require(${JSON.stringify((0, import_node_path3.join)(root, "dist", "api.cjs"))});
+`);
+  return (0, import_node_path3.dirname)(dir);
+}
+register("script", "run an agent's browser script as a runner: script <runner> <file.cjs> [--run <dir>]", (args) => {
+  const runIdx = args.indexOf("--run");
+  const runFlag = runIdx >= 0 ? args[runIdx + 1] : void 0;
+  const [runnerKey, file2] = args.filter((_, i) => i !== runIdx && i !== runIdx + 1);
+  const projectDir = process.cwd();
+  const cfg = loadConfig(projectDir);
+  if (!runnerKey || !file2 || !cfg.runners.some((r2) => r2.key === runnerKey)) {
+    err(`usage: baseline script <runner> <file.cjs> [--run <dir>]. Runners: ${cfg.runners.map((r2) => r2.key).join(", ") || "none"}`);
+    return 2;
+  }
+  const runDir = activeRunDir(projectDir, runFlag);
+  if (!runDir || !(0, import_node_fs4.existsSync)((0, import_node_path3.join)(runDir, "run.json"))) {
+    err("no active run. Start one with /baseline:run.");
+    return 2;
+  }
+  const root = pluginRoot();
+  const nodePath = [shimDir(root), (0, import_node_path3.join)(dataDir(), "node_modules"), (0, import_node_path3.join)(root, "node_modules"), process.env.NODE_PATH].filter(Boolean).join(import_node_path3.delimiter);
+  const r = (0, import_node_child_process.spawnSync)(process.execPath, [(0, import_node_path3.resolve)(file2)], {
+    cwd: projectDir,
+    stdio: "inherit",
+    env: { ...process.env, NODE_PATH: nodePath, BASELINE_RUN_DIR: runDir, BASELINE_RUNNER: runnerKey, BASELINE_PROJECT_DIR: projectDir, BASELINE_DATA: dataDir() }
+  });
+  return r.status ?? 1;
 });
 
 // src/entry.ts

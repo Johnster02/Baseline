@@ -9,6 +9,7 @@ const verify = process.argv.includes("--verify");
 const outRoot = verify ? mkdtempSync(join(tmpdir(), "baseline-build-")) : ".";
 const targets = [
   { entry: "src/entry.ts", out: "dist/cli.cjs", format: "cjs" },
+  { entry: "src/browser/api.ts", out: "dist/api.cjs", format: "cjs" },
 ];
 if (existsSync("src/mod/pane.ts")) targets.push({ entry: "src/mod/pane.ts", out: "mod/pane.js", format: "esm" });
 
