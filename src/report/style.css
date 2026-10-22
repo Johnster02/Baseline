@@ -448,6 +448,15 @@ html.dark .tally i{border-radius:2px}
 .row{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(0,1fr);gap:12px;padding:10px 4px;border-bottom:1px solid var(--rule);font-size:13px;color:var(--ink-2)}
 .row .k{font-family:var(--font-data);font-size:11.5px;color:var(--ink-3);word-break:break-all}
 @media (max-width:720px){.row{grid-template-columns:1fr}}
+.fold>summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid var(--rule);transition:border-color .2s var(--ease),background .2s var(--ease)}
+.fold>summary::-webkit-details-marker{display:none}
+.fold>summary:hover{border-color:var(--ink-3)}
+.fold>summary:hover h2{color:var(--ink-2)}
+.fold .tog{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-data);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--phos)}
+.fold .tog::after{content:"\25BE";font-size:12px;transition:transform .2s var(--ease)}
+.fold[open] .tog::after{transform:rotate(180deg)}
+.fold .hd,.fold[open] .sh{display:none}
+.fold[open] .hd{display:inline}
 .perm{display:grid;grid-template-columns:minmax(0,12rem) minmax(0,1fr) minmax(0,1fr);gap:12px;padding:10px 4px;border-bottom:1px solid var(--rule);font-size:13px}
 .perm ul{margin:0;padding-left:16px;color:var(--ink-2)}
 .perm .no li{color:var(--ink-3)}

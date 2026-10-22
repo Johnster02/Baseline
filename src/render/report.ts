@@ -138,8 +138,8 @@ function runHTML(r: RunRecord, hidden: boolean): string {
   const uniqSkipped = [...new Map(r.skipped.map((s) => [`${s.runner}|${s.category}|${s.method}|${s.path}`, s])).values()];
   const skippedHTML = uniqSkipped.length ? `<section class="sec wp" style="--w:5"><h2>Skipped · ${uniqSkipped.length}</h2><div class="rows">${uniqSkipped.map((s) =>
     `<div class="row"><span><b>${esc(s.runner)}</b> <span class="k">${esc(s.method)} ${esc(s.host)}${esc(s.path)}</span></span><span>${esc(s.reason)}${s.trigger ? ` (“${esc(s.trigger)}”)` : ""}</span><span class="k">To include it next time: ${esc(ALLOW_HINT[s.category] ?? "change this runner's permissions")}</span></div>`).join("")}</div></section>` : "";
-  const permHTML = r.permissions.length ? `<section class="sec wp" style="--w:6"><h2>Permissions this run had</h2><div class="rows">${r.permissions.map((p) =>
-    `<div class="perm"><b>${esc(p.runner)}</b><ul>${p.can.map((c) => `<li>${esc(c)}</li>`).join("")}</ul><ul class="no">${p.cannot.map((c) => `<li>not: ${esc(c)}</li>`).join("")}</ul></div>`).join("")}</div></section>` : "";
+  const permHTML = r.permissions.length ? `<details class="sec fold wp" style="--w:6"><summary><h2>Permissions this run had · ${r.permissions.length}</h2><span class="tog" aria-hidden="true"><span class="sh">Show</span><span class="hd">Hide</span></span></summary><div class="rows">${r.permissions.map((p) =>
+    `<div class="perm"><b>${esc(p.runner)}</b><ul>${p.can.map((c) => `<li>${esc(c)}</li>`).join("")}</ul><ul class="no">${p.cannot.map((c) => `<li>not: ${esc(c)}</li>`).join("")}</ul></div>`).join("")}</div></details>` : "";
   const runnersHTML = (r.runners ?? []).some((x) => !x.ok) ? `<section class="sec wp" style="--w:5"><h2>Runners</h2><div class="rows">${r.runners.map((x) =>
     `<div class="row"><span><b>${esc(x.key)}</b></span><span>${x.ok ? "signed in" : "not signed in"}</span><span class="k">${esc(x.error ?? "")}</span></div>`).join("")}</div></section>` : "";
   const leftHTML = (r.leftBehind ?? []).length ? `<section class="sec wp" style="--w:6"><h2>Left behind · ${r.leftBehind.length}</h2><div class="rows">${r.leftBehind.map((x) =>

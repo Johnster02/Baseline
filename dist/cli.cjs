@@ -22391,6 +22391,15 @@ html.dark .tally i{border-radius:2px}
 .row{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(0,1fr);gap:12px;padding:10px 4px;border-bottom:1px solid var(--rule);font-size:13px;color:var(--ink-2)}
 .row .k{font-family:var(--font-data);font-size:11.5px;color:var(--ink-3);word-break:break-all}
 @media (max-width:720px){.row{grid-template-columns:1fr}}
+.fold>summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid var(--rule);transition:border-color .2s var(--ease),background .2s var(--ease)}
+.fold>summary::-webkit-details-marker{display:none}
+.fold>summary:hover{border-color:var(--ink-3)}
+.fold>summary:hover h2{color:var(--ink-2)}
+.fold .tog{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-data);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--phos)}
+.fold .tog::after{content:"\\25BE";font-size:12px;transition:transform .2s var(--ease)}
+.fold[open] .tog::after{transform:rotate(180deg)}
+.fold .hd,.fold[open] .sh{display:none}
+.fold[open] .hd{display:inline}
 .perm{display:grid;grid-template-columns:minmax(0,12rem) minmax(0,1fr) minmax(0,1fr);gap:12px;padding:10px 4px;border-bottom:1px solid var(--rule);font-size:13px}
 .perm ul{margin:0;padding-left:16px;color:var(--ink-2)}
 .perm .no li{color:var(--ink-3)}
@@ -22529,7 +22538,7 @@ function runHTML(r, hidden) {
   const otherHTML = r.other.length || r.otherHidden ? `<section class="sec wp" style="--w:4"><h2>Other observations \xB7 not related to this change</h2><div class="list" style="${idWidth(r.other)}">${r.other.map((f, i) => findingHTML(f, r, i, budget)).join("")}</div>${r.otherHidden ? `<p class="more">+${r.otherHidden} more, not listed</p>` : ""}</section>` : "";
   const uniqSkipped = [...new Map(r.skipped.map((s) => [`${s.runner}|${s.category}|${s.method}|${s.path}`, s])).values()];
   const skippedHTML = uniqSkipped.length ? `<section class="sec wp" style="--w:5"><h2>Skipped \xB7 ${uniqSkipped.length}</h2><div class="rows">${uniqSkipped.map((s) => `<div class="row"><span><b>${esc2(s.runner)}</b> <span class="k">${esc2(s.method)} ${esc2(s.host)}${esc2(s.path)}</span></span><span>${esc2(s.reason)}${s.trigger ? ` (\u201C${esc2(s.trigger)}\u201D)` : ""}</span><span class="k">To include it next time: ${esc2(ALLOW_HINT[s.category] ?? "change this runner's permissions")}</span></div>`).join("")}</div></section>` : "";
-  const permHTML = r.permissions.length ? `<section class="sec wp" style="--w:6"><h2>Permissions this run had</h2><div class="rows">${r.permissions.map((p) => `<div class="perm"><b>${esc2(p.runner)}</b><ul>${p.can.map((c) => `<li>${esc2(c)}</li>`).join("")}</ul><ul class="no">${p.cannot.map((c) => `<li>not: ${esc2(c)}</li>`).join("")}</ul></div>`).join("")}</div></section>` : "";
+  const permHTML = r.permissions.length ? `<details class="sec fold wp" style="--w:6"><summary><h2>Permissions this run had \xB7 ${r.permissions.length}</h2><span class="tog" aria-hidden="true"><span class="sh">Show</span><span class="hd">Hide</span></span></summary><div class="rows">${r.permissions.map((p) => `<div class="perm"><b>${esc2(p.runner)}</b><ul>${p.can.map((c) => `<li>${esc2(c)}</li>`).join("")}</ul><ul class="no">${p.cannot.map((c) => `<li>not: ${esc2(c)}</li>`).join("")}</ul></div>`).join("")}</div></details>` : "";
   const runnersHTML = (r.runners ?? []).some((x) => !x.ok) ? `<section class="sec wp" style="--w:5"><h2>Runners</h2><div class="rows">${r.runners.map((x) => `<div class="row"><span><b>${esc2(x.key)}</b></span><span>${x.ok ? "signed in" : "not signed in"}</span><span class="k">${esc2(x.error ?? "")}</span></div>`).join("")}</div></section>` : "";
   const leftHTML = (r.leftBehind ?? []).length ? `<section class="sec wp" style="--w:6"><h2>Left behind \xB7 ${r.leftBehind.length}</h2><div class="rows">${r.leftBehind.map((x) => `<div class="row"><span><b>${esc2(x.label)}</b></span><span>${esc2(x.note)}</span><span class="k">Remove it by hand on the site.</span></div>`).join("")}</div></section>` : "";
   const unread = r.unreadLinks.length ? `<section class="sec wp" style="--w:7"><h2>Links that could not be read</h2><div class="rows">${r.unreadLinks.map((l) => `<div class="row"><span class="k">${esc2(l)}</span></div>`).join("")}</div></section>` : "";

@@ -28,8 +28,9 @@ messages short: the band above the prompt shows progress, and the report holds t
 7. **Always close the run.** Once `baseline run new` has run, any stop (an error, no runner
    signed in, the user cancels) ends with `baseline progress done` and `baseline run finish`, so
    the guards switch off.
-8. **Permissions never change during a run.** Only step 7, after `run finish`, may change them,
-   and only with the user's answer.
+8. **Permissions never change during a run.** Only two places may change them, both after
+   `run finish` and only with the user's answer: the reach check (step 1.6), which restarts the
+   run, and step 7.
 
 ## 0. Preflight
 
@@ -88,7 +89,30 @@ messages short: the band above the prompt shows progress, and the report holds t
    visible on the site, or you are unsure, explore as normal.
    Say in one line: "PR run, N agents" (add "code only" when it is), "Quick run, N agents" or
    "Full run, N agents", then carry on without waiting.
-6. `baseline progress start <pr|quick|full> <agents>` and `baseline progress phase gather done`.
+6. **Reach check, before any agent runs.** For each requirement, ask how a user would see it
+   on the site, and whether getting there needs an action the chosen runners can't do: a
+   category in their `cannot` list (finance, email, auth, delete), or any write when their depth
+   is `look`. Pressing a button that starts a payment, sends an invite or saves a form counts,
+   even when the thing to check is only on the page after it. Read each runner's `can` and
+   `cannot` from `baseline config describe`.
+   If the requirements this change is about (the bug it fixes, the headline behaviour) can only
+   be seen past such an action, do not run on and report them skipped: that run tests nothing
+   the change is about. Stop and ask with AskUserQuestion, naming the action and the runner,
+   for example "The fix only shows on the Stripe page, which needs 'Pay by card' (finance).
+   test-admin is look only." Offer:
+   - **"Allow <runner>: <category> and restart (Recommended)"**: `baseline progress done`,
+     `baseline run finish`, then `baseline config allow <runner> <category>` (for any write at
+     depth `look`, `baseline config depth <runner> create`). Start a new run (step 0.4, same
+     URL and label), copy `inputs.json`, `linked/`, `requirements.json` and `commit.json` from
+     the old run folder into the new one, delete the old run folder (it is inside `.baseline/`
+     and never reached the site), and carry on from step 1.5 with the new `runDir`.
+   - **"Stop the run"**: `baseline progress done`, `baseline run finish`, delete the run folder,
+     and tell the user in one line what the run would need.
+   - **"Run anyway"**: carry on. Those requirements end `skipped` and the summary says the
+     change itself was not seen.
+   Ask once per run, covering every blocked action in one question. Requirements that are only
+   partly affected (a side screen, an edge case) don't trigger it: they end `skipped` as usual.
+7. `baseline progress start <pr|quick|full> <agents>` and `baseline progress phase gather done`.
 
 ## 2. Read code and explore (agents in parallel, one message)
 
