@@ -113,6 +113,15 @@ export function decide(req: GuardRequest, ctx: GuardContext): Decision {
 
 /** Message text as words: JSON decoded (escapes resolved), camelCase, snake_case and kebab-case split. */
 export function normaliseMessage(message: string): string {
+  return splitWords(decodeMessage(message).text);
+}
+
+function splitWords(text: string): string {
+  return { text, undecodable: /%[0-9a-f]{2}/i.test(text) };
+}
+
+/** JSON and percent-decoded text, and whether escapes were still left (checked before any splitting). */
+export function decodeMessage(message: string): { text: string; undecodable: boolean } {
   let text = message;
   try {
     const parts: string[] = [];
@@ -158,9 +167,10 @@ export function wsDecide(req: { url: string; loading: boolean; message?: string 
   for (const cat of PATTERN_ORDER) {
     if (runner.allow.includes(cat)) continue;
     // Words and message go through the same normalisation; the raw message is checked too.
-    const text = normaliseMessage(req.message);
+    const decoded = decodeMessage(req.message);
+    const text = splitWords(decoded.text);
     // Escapes left after decoding mean we can't read it: fail closed.
-    if (/%[0-9a-f]{2}/i.test(text)) return { action: "abort", category: "unknown-write", reason: "WebSocket message could not be decoded to check it" };
+    if (decoded.undecodable) return { action: "abort", category: "unknown-write", reason: "WebSocket message could not be decoded to check it" };
     const word = cfg.patterns[cat].words.find((w) => wordHit(text, normaliseMessage(w)) || wordHit(req.message!, w));
     if (word) return { action: "abort", category: cat, reason: `WebSocket message looks like ${cat}`, trigger: word.toLowerCase() };
   }

@@ -141,3 +141,13 @@ describe("fail closed on undecodable escapes", () => {
     expect(wsDecide({ url: "wss://s.acme.dev/ws", loading: false, message: m }, { runner: create, cfg: loadConfig(tmp()) })).toMatchObject({ action: "abort", category: "unknown-write" });
   });
 });
+
+describe("leftover escapes are checked before splitting", () => {
+  it("an escape that camelCase splitting would break apart still fails closed", async () => {
+    const { decodeMessage } = await import("../src/browser/guard");
+    let m = "x";
+    for (let i = 0; i < 25; i++) m = encodeURIComponent(m + "-");
+    expect(decodeMessage(m).undecodable).toBe(true);
+    expect(decodeMessage("%73end").undecodable).toBe(false);
+  });
+});

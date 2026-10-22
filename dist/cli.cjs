@@ -20410,6 +20410,12 @@ function decide(req, ctx) {
   return { action: "continue" };
 }
 function normaliseMessage(message) {
+  return splitWords(decodeMessage(message).text);
+}
+function splitWords(text) {
+  return { text, undecodable: /%[0-9a-f]{2}/i.test(text) };
+}
+function decodeMessage(message) {
   let text = message;
   try {
     const parts = [];
@@ -20451,8 +20457,9 @@ function wsDecide(req, ctx) {
   }
   for (const cat of PATTERN_ORDER) {
     if (runner.allow.includes(cat)) continue;
-    const text = normaliseMessage(req.message);
-    if (/%[0-9a-f]{2}/i.test(text)) return { action: "abort", category: "unknown-write", reason: "WebSocket message could not be decoded to check it" };
+    const decoded = decodeMessage(req.message);
+    const text = splitWords(decoded.text);
+    if (decoded.undecodable) return { action: "abort", category: "unknown-write", reason: "WebSocket message could not be decoded to check it" };
     const word = cfg.patterns[cat].words.find((w) => wordHit(text, normaliseMessage(w)) || wordHit(req.message, w));
     if (word) return { action: "abort", category: cat, reason: `WebSocket message looks like ${cat}`, trigger: word.toLowerCase() };
   }
