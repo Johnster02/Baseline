@@ -20271,22 +20271,22 @@ async function isSignedOut(page, runner) {
   if (runner.auth.kind === "form" && path === new URL(runner.auth.loginUrl, page.url()).pathname) return true;
   return await page.locator(PASSWORD).first().isVisible().catch(() => false) === true;
 }
-function saveState(file5, state) {
-  (0, import_node_fs4.mkdirSync)((0, import_node_path3.dirname)(file5), { recursive: true, mode: 448 });
-  (0, import_node_fs4.chmodSync)((0, import_node_path3.dirname)(file5), 448);
-  (0, import_node_fs4.writeFileSync)(file5, JSON.stringify(state), { mode: 384 });
-  (0, import_node_fs4.chmodSync)(file5, 384);
+function saveState(file6, state) {
+  (0, import_node_fs4.mkdirSync)((0, import_node_path3.dirname)(file6), { recursive: true, mode: 448 });
+  (0, import_node_fs4.chmodSync)((0, import_node_path3.dirname)(file6), 448);
+  (0, import_node_fs4.writeFileSync)(file6, JSON.stringify(state), { mode: 384 });
+  (0, import_node_fs4.chmodSync)(file6, 384);
 }
 async function signIn(runner, cfg, ctx) {
   const target = checkTarget(ctx.baseUrl, cfg, ctx.live ?? runner.allow.includes("live"));
   if (!target.ok) return { key: runner.key, ok: false, error: `refusing to sign in: ${ctx.baseUrl} is ${target.reason === "production" ? "marked as production" : "not a valid URL"}` };
-  const file5 = sessionPath(ctx.data, ctx.projectDir, runner.key);
+  const file6 = sessionPath(ctx.data, ctx.projectDir, runner.key);
   const { chromium } = loadPlaywright();
   const browser = await chromium.launch({ headless: true });
   try {
     if (runner.auth.kind === "session") {
-      if (!(0, import_node_fs4.existsSync)(file5)) return { key: runner.key, ok: false, error: "No saved session. Sign in by hand once: baseline signin " + runner.key + " --manual" };
-      const context2 = await browser.newContext({ baseURL: ctx.baseUrl, storageState: file5 });
+      if (!(0, import_node_fs4.existsSync)(file6)) return { key: runner.key, ok: false, error: "No saved session. Sign in by hand once: baseline signin " + runner.key + " --manual" };
+      const context2 = await browser.newContext({ baseURL: ctx.baseUrl, storageState: file6 });
       const page2 = await context2.newPage();
       await page2.goto(ctx.baseUrl, { waitUntil: "load" });
       if (await isSignedOut(page2, runner)) return { key: runner.key, ok: false, error: "Saved session has expired. Sign in by hand again: baseline signin " + runner.key + " --manual" };
@@ -20314,7 +20314,7 @@ async function signIn(runner, cfg, ctx) {
     await page.waitForLoadState("networkidle", { timeout: 5e3 }).catch(() => {
     });
     if (await isSignedOut(page, runner)) return { key: runner.key, ok: false, error: "Sign-in did not succeed: still on the sign-in page. Check the saved details in setup." };
-    saveState(file5, await context.storageState());
+    saveState(file6, await context.storageState());
     return { key: runner.key, ok: true, landed: new URL(page.url()).pathname };
   } catch (e) {
     return { key: runner.key, ok: false, error: `Sign-in failed: ${e.name || "error"}` };
@@ -20325,7 +20325,7 @@ async function signIn(runner, cfg, ctx) {
 async function captureSession(runner, cfg, ctx) {
   const target = checkTarget(ctx.baseUrl, cfg, ctx.live ?? runner.allow.includes("live"));
   if (!target.ok) return { key: runner.key, ok: false, error: "refusing: that URL is marked as production or is invalid" };
-  const file5 = sessionPath(ctx.data, ctx.projectDir, runner.key);
+  const file6 = sessionPath(ctx.data, ctx.projectDir, runner.key);
   const { chromium } = loadPlaywright();
   const browser = await chromium.launch({ headless: false });
   const context = await browser.newContext({ baseURL: ctx.baseUrl });
@@ -20334,7 +20334,7 @@ async function captureSession(runner, cfg, ctx) {
   let saved = false;
   const timer = setInterval(async () => {
     try {
-      saveState(file5, await context.storageState());
+      saveState(file6, await context.storageState());
       saved = true;
     } catch {
     }
@@ -20549,10 +20549,10 @@ async function openSession(o) {
     },
     async shot(name, caption) {
       const safe = name.replace(/[^a-z0-9-]+/gi, "-").slice(0, 60) || "shot";
-      const file5 = (0, import_node_path4.join)(o.runDir, "shots", `${o.runner.key}-${safe}-${++shots}.png`);
-      await page.screenshot({ path: file5, fullPage: false });
-      appendJson((0, import_node_path4.join)(o.runDir, "shots.json"), { runner: o.runner.key, name: safe, path: file5, caption, at: (/* @__PURE__ */ new Date()).toISOString() });
-      return file5;
+      const file6 = (0, import_node_path4.join)(o.runDir, "shots", `${o.runner.key}-${safe}-${++shots}.png`);
+      await page.screenshot({ path: file6, fullPage: false });
+      appendJson((0, import_node_path4.join)(o.runDir, "shots.json"), { runner: o.runner.key, name: safe, path: file6, caption, at: (/* @__PURE__ */ new Date()).toISOString() });
+      return file6;
     },
     created(kind, label, url2) {
       if (url2) {
@@ -20625,11 +20625,11 @@ function parseScriptArgs(args) {
   return { runnerKey: rest[0], file: rest[1], runFlag };
 }
 register("script", "run an agent's browser script as a runner: script <runner> <file.cjs> [--run <dir>]", async (args) => {
-  const { runnerKey, file: file5, runFlag } = parseScriptArgs(args);
+  const { runnerKey, file: file6, runFlag } = parseScriptArgs(args);
   const projectDir = process.cwd();
   const cfg = loadConfig(projectDir);
   const runner = cfg.runners.find((r) => r.key === runnerKey);
-  if (!runner || !file5) {
+  if (!runner || !file6) {
     err(`usage: baseline script <runner> <file.cjs> [--run <dir>]. Runners: ${cfg.runners.map((r) => r.key).join(", ") || "none"}`);
     return 2;
   }
@@ -20640,7 +20640,7 @@ register("script", "run an agent's browser script as a runner: script <runner> <
   }
   const run = JSON.parse((0, import_node_fs6.readFileSync)((0, import_node_path5.join)(runDir, "run.json"), "utf8"));
   let session;
-  const child = (0, import_node_child_process.fork)((0, import_node_path5.resolve)(file5), [], {
+  const child = (0, import_node_child_process.fork)((0, import_node_path5.resolve)(file6), [], {
     cwd: projectDir,
     stdio: ["inherit", "inherit", "inherit", "ipc"],
     // The script gets only the shim on its module path, and none of Baseline's own settings.
@@ -20950,6 +20950,24 @@ function finishRun(projectDir) {
 var import_node_fs12 = require("node:fs");
 var import_node_path11 = require("node:path");
 
+// src/findings/schema.ts
+var VERDICTS = ["match", "spec-built", "built-observed", "not-built", "guide-spec", "unspecced", "product", "unverified", "skipped"];
+var SEVERITIES = ["critical", "high", "medium", "low"];
+var findingSchema = external_exports.object({
+  id: external_exports.string(),
+  title: external_exports.string(),
+  verdict: external_exports.enum(VERDICTS),
+  severity: external_exports.enum(SEVERITIES).default("medium"),
+  personas: external_exports.array(external_exports.string()).default([]),
+  scope: external_exports.enum(["related", "unrelated"]).default("related"),
+  route: external_exports.string().optional(),
+  specced: external_exports.object({ text: external_exports.string(), ref: external_exports.string() }),
+  built: external_exports.object({ text: external_exports.string(), ref: external_exports.string() }).optional(),
+  observed: external_exports.object({ text: external_exports.string(), shots: external_exports.array(external_exports.string()).default([]), steps: external_exports.array(external_exports.string()).default([]) }).optional(),
+  refuter: external_exports.object({ kept: external_exports.boolean(), note: external_exports.string().default("") }).optional(),
+  checklistItem: external_exports.string().optional()
+});
+
 // src/findings/counts.ts
 var emptyCounts = () => ({ checked: 0, passed: 0, passRate: 0, conflicts: 0, product: 0, unspecced: 0, unverified: 0, skipped: 0 });
 
@@ -21151,6 +21169,41 @@ register("sitemap", "sitemap show | merge <file.json>", (args) => {
   }
   err("usage: baseline sitemap show|merge <file>");
   return 2;
+});
+
+// src/findings/notes.ts
+var import_node_fs15 = require("node:fs");
+var import_node_path14 = require("node:path");
+var file5 = (p) => (0, import_node_path14.join)(p, ".baseline", "notes.json");
+function listNotes(projectDir) {
+  try {
+    return JSON.parse((0, import_node_fs15.readFileSync)(file5(projectDir), "utf8"));
+  } catch {
+    return [];
+  }
+}
+function addNote(projectDir, findingId, text) {
+  const n = { findingId, text, at: (/* @__PURE__ */ new Date()).toISOString() };
+  const all = [...listNotes(projectDir), n];
+  (0, import_node_fs15.mkdirSync)((0, import_node_path14.join)(projectDir, ".baseline"), { recursive: true });
+  (0, import_node_fs15.writeFileSync)(file5(projectDir), JSON.stringify(all, null, 2));
+  return n;
+}
+
+// src/findings/cli.ts
+register("dismiss", 'record that a finding is not applicable: dismiss <finding-id> "<reason>" | dismiss --list', (args) => {
+  if (args[0] === "--list") {
+    out(JSON.stringify(listNotes(process.cwd()), null, 2));
+    return 0;
+  }
+  const [id, ...reason] = args;
+  if (!id || !reason.join(" ").trim()) {
+    err('usage: baseline dismiss <finding-id> "<why it does not apply>"');
+    return 2;
+  }
+  addNote(process.cwd(), id, reason.join(" ").trim());
+  out(`noted: ${id} will be treated as not applicable on later runs`);
+  return 0;
 });
 
 // src/entry.ts
