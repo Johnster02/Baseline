@@ -5153,7 +5153,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve3) {
+function isRecursive(inst, stack, resolve5) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -5163,7 +5163,7 @@ function isRecursive(inst, stack, resolve3) {
   let result = NONE;
   const check2 = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve3);
+      const answer = isRecursive(child, stack, resolve5);
       if (answer > result)
         result = answer;
     }
@@ -5174,7 +5174,7 @@ function isRecursive(inst, stack, resolve3) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve3) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve5) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -5238,7 +5238,7 @@ function isRecursive(inst, stack, resolve3) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve3 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve5 ? inst._zod.innerType : void 0);
       merge2(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -5703,7 +5703,7 @@ function az_default() {
 }
 
 // node_modules/.pnpm/zod@4.6.7/node_modules/zod/v4/locales/be.js
-function getBelarusianPlural(count, one, few, many) {
+function getBelarusianPlural(count, one2, few, many) {
   const absCount = Math.abs(count);
   const lastDigit = absCount % 10;
   const lastTwoDigits = absCount % 100;
@@ -5711,7 +5711,7 @@ function getBelarusianPlural(count, one, few, many) {
     return many;
   }
   if (lastDigit === 1) {
-    return one;
+    return one2;
   }
   if (lastDigit >= 2 && lastDigit <= 4) {
     return few;
@@ -8351,8 +8351,8 @@ function hu_default() {
 }
 
 // node_modules/.pnpm/zod@4.6.7/node_modules/zod/v4/locales/hy.js
-function getArmenianPlural(count, one, many) {
-  return Math.abs(count) === 1 ? one : many;
+function getArmenianPlural(count, one2, many) {
+  return Math.abs(count) === 1 ? one2 : many;
 }
 function withDefiniteArticle(word) {
   if (!word)
@@ -11090,7 +11090,7 @@ function ro_default() {
 }
 
 // node_modules/.pnpm/zod@4.6.7/node_modules/zod/v4/locales/ru.js
-function getRussianPlural(count, one, few, many) {
+function getRussianPlural(count, one2, few, many) {
   const absCount = Math.abs(count);
   const lastDigit = absCount % 10;
   const lastTwoDigits = absCount % 100;
@@ -11098,7 +11098,7 @@ function getRussianPlural(count, one, few, many) {
     return many;
   }
   if (lastDigit === 1) {
-    return one;
+    return one2;
   }
   if (lastDigit >= 2 && lastDigit <= 4) {
     return few;
@@ -20177,10 +20177,10 @@ function shimDir(root) {
 register("script", "run an agent's browser script as a runner: script <runner> <file.cjs> [--run <dir>]", (args) => {
   const runIdx = args.indexOf("--run");
   const runFlag = runIdx >= 0 ? args[runIdx + 1] : void 0;
-  const [runnerKey, file2] = args.filter((_, i) => i !== runIdx && i !== runIdx + 1);
+  const [runnerKey, file3] = args.filter((_, i) => i !== runIdx && i !== runIdx + 1);
   const projectDir = process.cwd();
   const cfg = loadConfig(projectDir);
-  if (!runnerKey || !file2 || !cfg.runners.some((r2) => r2.key === runnerKey)) {
+  if (!runnerKey || !file3 || !cfg.runners.some((r2) => r2.key === runnerKey)) {
     err(`usage: baseline script <runner> <file.cjs> [--run <dir>]. Runners: ${cfg.runners.map((r2) => r2.key).join(", ") || "none"}`);
     return 2;
   }
@@ -20191,7 +20191,7 @@ register("script", "run an agent's browser script as a runner: script <runner> <
   }
   const root = pluginRoot();
   const nodePath = [shimDir(root), (0, import_node_path3.join)(dataDir(), "node_modules"), (0, import_node_path3.join)(root, "node_modules"), process.env.NODE_PATH].filter(Boolean).join(import_node_path3.delimiter);
-  const r = (0, import_node_child_process.spawnSync)(process.execPath, [(0, import_node_path3.resolve)(file2)], {
+  const r = (0, import_node_child_process.spawnSync)(process.execPath, [(0, import_node_path3.resolve)(file3)], {
     cwd: projectDir,
     stdio: "inherit",
     env: { ...process.env, NODE_PATH: nodePath, BASELINE_RUN_DIR: runDir, BASELINE_RUNNER: runnerKey, BASELINE_PROJECT_DIR: projectDir, BASELINE_DATA: dataDir() }
@@ -20228,22 +20228,22 @@ async function isSignedOut(page, runner) {
   if (runner.auth.kind === "form" && path === new URL(runner.auth.loginUrl, page.url()).pathname) return true;
   return await page.locator(PASSWORD).first().isVisible().catch(() => false) === true;
 }
-function saveState(file2, state) {
-  (0, import_node_fs5.mkdirSync)((0, import_node_path5.dirname)(file2), { recursive: true, mode: 448 });
-  (0, import_node_fs5.chmodSync)((0, import_node_path5.dirname)(file2), 448);
-  (0, import_node_fs5.writeFileSync)(file2, JSON.stringify(state), { mode: 384 });
-  (0, import_node_fs5.chmodSync)(file2, 384);
+function saveState(file3, state) {
+  (0, import_node_fs5.mkdirSync)((0, import_node_path5.dirname)(file3), { recursive: true, mode: 448 });
+  (0, import_node_fs5.chmodSync)((0, import_node_path5.dirname)(file3), 448);
+  (0, import_node_fs5.writeFileSync)(file3, JSON.stringify(state), { mode: 384 });
+  (0, import_node_fs5.chmodSync)(file3, 384);
 }
 async function signIn(runner, cfg, ctx) {
   const target = checkTarget(ctx.baseUrl, cfg, ctx.live ?? runner.allow.includes("live"));
   if (!target.ok) return { key: runner.key, ok: false, error: `refusing to sign in: ${ctx.baseUrl} is ${target.reason === "production" ? "marked as production" : "not a valid URL"}` };
-  const file2 = sessionPath(ctx.data, ctx.projectDir, runner.key);
+  const file3 = sessionPath(ctx.data, ctx.projectDir, runner.key);
   const { chromium } = loadPlaywright();
   const browser = await chromium.launch({ headless: true });
   try {
     if (runner.auth.kind === "session") {
-      if (!(0, import_node_fs5.existsSync)(file2)) return { key: runner.key, ok: false, error: "No saved session. Sign in by hand once: baseline signin " + runner.key + " --manual" };
-      const context2 = await browser.newContext({ baseURL: ctx.baseUrl, storageState: file2 });
+      if (!(0, import_node_fs5.existsSync)(file3)) return { key: runner.key, ok: false, error: "No saved session. Sign in by hand once: baseline signin " + runner.key + " --manual" };
+      const context2 = await browser.newContext({ baseURL: ctx.baseUrl, storageState: file3 });
       const page2 = await context2.newPage();
       await page2.goto(ctx.baseUrl, { waitUntil: "load" });
       if (await isSignedOut(page2, runner)) return { key: runner.key, ok: false, error: "Saved session has expired. Sign in by hand again: baseline signin " + runner.key + " --manual" };
@@ -20271,7 +20271,7 @@ async function signIn(runner, cfg, ctx) {
     await page.waitForLoadState("networkidle", { timeout: 5e3 }).catch(() => {
     });
     if (await isSignedOut(page, runner)) return { key: runner.key, ok: false, error: "Sign-in did not succeed: still on the sign-in page. Check the saved details in setup." };
-    saveState(file2, await context.storageState());
+    saveState(file3, await context.storageState());
     return { key: runner.key, ok: true, landed: new URL(page.url()).pathname };
   } catch (e) {
     return { key: runner.key, ok: false, error: `Sign-in failed: ${e.name || "error"}` };
@@ -20282,7 +20282,7 @@ async function signIn(runner, cfg, ctx) {
 async function captureSession(runner, cfg, ctx) {
   const target = checkTarget(ctx.baseUrl, cfg, ctx.live ?? runner.allow.includes("live"));
   if (!target.ok) return { key: runner.key, ok: false, error: "refusing: that URL is marked as production or is invalid" };
-  const file2 = sessionPath(ctx.data, ctx.projectDir, runner.key);
+  const file3 = sessionPath(ctx.data, ctx.projectDir, runner.key);
   const { chromium } = loadPlaywright();
   const browser = await chromium.launch({ headless: false });
   const context = await browser.newContext({ baseURL: ctx.baseUrl });
@@ -20291,7 +20291,7 @@ async function captureSession(runner, cfg, ctx) {
   let saved = false;
   const timer = setInterval(async () => {
     try {
-      saveState(file2, await context.storageState());
+      saveState(file3, await context.storageState());
       saved = true;
     } catch {
     }
@@ -20327,6 +20327,221 @@ register("signin", "sign runners in: signin <runner>|--all [--url <url>] [--manu
   for (const r of runners) results.push(args.includes("--manual") ? await captureSession(r, cfg, ctx) : await signIn(r, cfg, ctx));
   out(JSON.stringify(results));
   return results.every((r) => r.ok) ? 0 : 1;
+});
+
+// src/inputs/cli.ts
+var import_node_fs9 = require("node:fs");
+var import_node_path9 = require("node:path");
+
+// src/inputs/resolve.ts
+var import_node_fs6 = require("node:fs");
+var import_node_path6 = require("node:path");
+var KEY = /^[A-Z][A-Z0-9]+-\d+$/;
+function one(arg, ctx) {
+  const a = arg.trim();
+  let u;
+  try {
+    u = /^https?:\/\//i.test(a) ? new URL(a) : void 0;
+  } catch {
+    u = void 0;
+  }
+  if (u) {
+    if (u.hostname === "github.com" && /\/pull\/\d+/.test(u.pathname)) return { kind: "github-pr", ref: a };
+    if (u.hostname === "github.com" && /\/issues\/\d+/.test(u.pathname)) return { kind: "github-issue", ref: a };
+    const jira = u.hostname.endsWith(".atlassian.net") && u.pathname.match(/\/browse\/([A-Z][A-Z0-9]+-\d+)/);
+    if (jira) return { kind: "jira", ref: jira[1] };
+    const lin = u.hostname === "linear.app" && u.pathname.match(/\/issue\/([A-Z][A-Z0-9]+-\d+)/);
+    if (lin) return { kind: "linear", ref: lin[1] };
+    return { kind: "url", ref: a };
+  }
+  if (/^#?\d+$/.test(a)) return { kind: "github-pr", ref: a.replace(/^#/, "") };
+  if (KEY.test(a)) {
+    const { jira, linear } = ctx.trackers;
+    if (jira && !linear) return { kind: "jira", ref: a };
+    if (linear && !jira) return { kind: "linear", ref: a };
+    return { ambiguous: a, options: ["jira", "linear"] };
+  }
+  const p = (0, import_node_path6.resolve)(ctx.cwd, a);
+  if (a.length < 1024 && (0, import_node_fs6.existsSync)(p)) return { kind: (0, import_node_fs6.statSync)(p).isDirectory() ? "folder" : "file", ref: p };
+  return { kind: "text", ref: a };
+}
+function resolveInputs(args, ctx) {
+  const out2 = [];
+  for (const a of args) {
+    const r = one(a, ctx);
+    if ("ambiguous" in r) return r;
+    out2.push(r);
+  }
+  return out2;
+}
+
+// src/inputs/fetch.ts
+var import_node_child_process2 = require("node:child_process");
+var import_node_fs7 = require("node:fs");
+var import_node_path7 = require("node:path");
+var import_node_util = require("node:util");
+
+// src/inputs/jira.ts
+function adfToText(node2) {
+  if (!node2) return "";
+  const lines = [];
+  const inline = (n) => (n.text ?? "") + (n.content ?? []).map(inline).join("");
+  const walk = (n, prefix = "") => {
+    if (n.type === "paragraph" || n.type === "heading") {
+      lines.push(prefix + inline(n));
+      return;
+    }
+    if (n.type === "listItem") {
+      (n.content ?? []).forEach((c, i) => walk(c, i === 0 ? "- " : "  "));
+      return;
+    }
+    if (n.type === "codeBlock") {
+      lines.push(inline(n));
+      return;
+    }
+    (n.content ?? []).forEach((c) => walk(c, prefix));
+  };
+  walk(node2);
+  return lines.filter((l) => l.trim() !== "").join("\n");
+}
+
+// src/inputs/fetch.ts
+var SPEC_EXT = /* @__PURE__ */ new Set([".md", ".markdown", ".txt", ".html", ".htm", ".pdf", ".rst", ".adoc"]);
+var defaultExec = async (cmd, args) => (await (0, import_node_util.promisify)(import_node_child_process2.execFile)(cmd, args, { maxBuffer: 20 * 1024 * 1024 })).stdout;
+function extractLinks(body, exclude) {
+  const found = body.match(/https?:\/\/[^\s)>\]"'`]+/g) ?? [];
+  return [...new Set(found.map((l) => l.replace(/[.,;:]+$/, "")))].filter((l) => l !== exclude);
+}
+async function fetchInput(ref, env) {
+  const exec = env.exec ?? defaultExec;
+  const http = env.http ?? ((url2, init) => fetch(url2, init));
+  switch (ref.kind) {
+    case "github-pr": {
+      try {
+        const j = JSON.parse(await exec("gh", ["pr", "view", ref.ref, "--json", "title,body,files,headRefOid"]));
+        return { ref, title: j.title, body: j.body ?? "", links: extractLinks(j.body ?? ""), changedFiles: (j.files ?? []).map((f) => f.path), headSha: j.headRefOid };
+      } catch (e) {
+        if (/^\d+$/.test(ref.ref)) return fetchInput({ kind: "github-issue", ref: ref.ref }, env);
+        throw e;
+      }
+    }
+    case "github-issue": {
+      const j = JSON.parse(await exec("gh", ["issue", "view", ref.ref, "--json", "title,body"]));
+      return { ref, title: j.title, body: j.body ?? "", links: extractLinks(j.body ?? "") };
+    }
+    case "jira": {
+      const t = env.trackers?.jira;
+      if (!t?.baseUrl || !t.token) throw new Error("Jira is not set up. Connect the Jira connector, or add the Jira URL, email and token with /plugin configure baseline.");
+      const r = await http(`${t.baseUrl.replace(/\/$/, "")}/rest/api/3/issue/${encodeURIComponent(ref.ref)}?fields=summary,description`, {
+        headers: { authorization: "Basic " + Buffer.from(`${t.email}:${t.token}`).toString("base64"), accept: "application/json" }
+      });
+      if (!r.ok) throw new Error(`Jira returned ${r.status} for ${ref.ref}`);
+      const j = await r.json();
+      const body = adfToText(j.fields?.description);
+      return { ref, title: `${ref.ref} ${j.fields?.summary ?? ""}`.trim(), body, links: extractLinks(body) };
+    }
+    case "linear": {
+      const t = env.trackers?.linear;
+      if (!t?.apiKey) throw new Error("Linear is not set up. Connect the Linear connector, or add a Linear API key with /plugin configure baseline.");
+      const r = await http("https://api.linear.app/graphql", {
+        method: "POST",
+        headers: { authorization: t.apiKey, "content-type": "application/json" },
+        body: JSON.stringify({ query: "query($id:String!){issue(id:$id){identifier title description}}", variables: { id: ref.ref } })
+      });
+      if (!r.ok) throw new Error(`Linear returned ${r.status} for ${ref.ref}`);
+      const issue2 = (await r.json()).data?.issue;
+      if (!issue2) throw new Error(`Linear has no issue ${ref.ref}`);
+      const body = issue2.description ?? "";
+      return { ref, title: `${issue2.identifier} ${issue2.title}`, body, links: extractLinks(body) };
+    }
+    case "file": {
+      const isPdf = (0, import_node_path7.extname)(ref.ref).toLowerCase() === ".pdf";
+      const body = isPdf ? "" : (0, import_node_fs7.readFileSync)(ref.ref, "utf8");
+      return { ref, title: (0, import_node_path7.basename)(ref.ref), body, links: extractLinks(body), ...isPdf ? { files: [ref.ref] } : {} };
+    }
+    case "folder": {
+      const files = (0, import_node_fs7.readdirSync)(ref.ref).filter((n) => SPEC_EXT.has((0, import_node_path7.extname)(n).toLowerCase())).sort().map((n) => (0, import_node_path7.join)(ref.ref, n));
+      return { ref, title: (0, import_node_path7.basename)(ref.ref), body: "", links: [], files };
+    }
+    case "url":
+      return { ref, title: ref.ref, body: "", links: [ref.ref] };
+    case "text":
+      return { ref, title: ref.ref.slice(0, 60), body: ref.ref, links: extractLinks(ref.ref) };
+  }
+}
+
+// src/inputs/trackers.ts
+var import_node_fs8 = require("node:fs");
+var import_node_path8 = require("node:path");
+var file2 = () => (0, import_node_path8.join)(dataDir(), "trackers.json");
+function storeTrackersFromEnv(env) {
+  const o = (k) => (env[`CLAUDE_PLUGIN_OPTION_${k}`] || "").trim();
+  const t = {};
+  if (o("JIRA_BASE_URL") && o("JIRA_TOKEN")) t.jira = { baseUrl: o("JIRA_BASE_URL"), email: o("JIRA_EMAIL"), token: o("JIRA_TOKEN") };
+  if (o("LINEAR_API_KEY")) t.linear = { apiKey: o("LINEAR_API_KEY") };
+  (0, import_node_fs8.mkdirSync)(dataDir(), { recursive: true, mode: 448 });
+  (0, import_node_fs8.writeFileSync)(file2(), JSON.stringify(t), { mode: 384 });
+  (0, import_node_fs8.chmodSync)(file2(), 384);
+}
+function loadTrackers() {
+  let t = {};
+  if ((0, import_node_fs8.existsSync)(file2())) {
+    try {
+      t = JSON.parse((0, import_node_fs8.readFileSync)(file2(), "utf8"));
+    } catch {
+      t = {};
+    }
+  }
+  const e = process.env;
+  if (e.BASELINE_JIRA_BASE_URL && e.BASELINE_JIRA_TOKEN) t.jira = { baseUrl: e.BASELINE_JIRA_BASE_URL, email: e.BASELINE_JIRA_EMAIL || "", token: e.BASELINE_JIRA_TOKEN };
+  if (e.BASELINE_LINEAR_API_KEY) t.linear = { apiKey: e.BASELINE_LINEAR_API_KEY };
+  return t;
+}
+
+// src/inputs/cli.ts
+register("inputs", "fetch what a run checks against: inputs --run <dir> [--as jira|linear] <input...>", async (args) => {
+  const runIdx = args.indexOf("--run");
+  const asIdx = args.indexOf("--as");
+  if (runIdx < 0 || !args[runIdx + 1]) {
+    err("usage: baseline inputs --run <dir> [--as jira|linear] <input...>");
+    return 2;
+  }
+  const runDir = (0, import_node_path9.resolve)(args[runIdx + 1]);
+  const as = asIdx >= 0 ? args[asIdx + 1] : void 0;
+  const skip = /* @__PURE__ */ new Set([runIdx, runIdx + 1, ...asIdx >= 0 ? [asIdx, asIdx + 1] : []]);
+  const raw = args.filter((_, i) => !skip.has(i));
+  const trackers = loadTrackers();
+  const res = resolveInputs(raw, { trackers: { jira: !!trackers.jira, linear: !!trackers.linear }, cwd: process.cwd() });
+  let refs;
+  if ("ambiguous" in res) {
+    if (!as || !res.options.includes(as)) {
+      out(JSON.stringify(res));
+      return 4;
+    }
+    refs = resolveInputs(raw.map((a) => a === res.ambiguous ? "\0" : a), { trackers: { jira: false, linear: false }, cwd: process.cwd() });
+    refs = refs.map((r) => r.ref === "\0" ? { kind: as, ref: res.ambiguous } : r);
+  } else refs = res;
+  const items = [];
+  for (const r of refs) {
+    try {
+      items.push(await fetchInput(r, { trackers }));
+    } catch (e) {
+      err(e.message);
+      return 1;
+    }
+  }
+  (0, import_node_fs9.mkdirSync)(runDir, { recursive: true });
+  (0, import_node_fs9.writeFileSync)((0, import_node_path9.join)(runDir, "inputs.json"), JSON.stringify({ items, unreadLinks: [] }, null, 2));
+  out(JSON.stringify({ items: items.map((i) => ({ kind: i.ref.kind, title: i.title, changedFiles: i.changedFiles?.length ?? 0, links: i.links.length, files: i.files?.length ?? 0 })) }));
+  return 0;
+});
+register("hook", "internal: hook handlers (store-options)", (args) => {
+  if (args[0] === "store-options") {
+    storeTrackersFromEnv(process.env);
+    return 0;
+  }
+  err("unknown hook");
+  return 2;
 });
 
 // src/entry.ts
