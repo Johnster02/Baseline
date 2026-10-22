@@ -17,13 +17,14 @@ register("inputs", "fetch what a run checks against: inputs --run <dir> [--as ji
   const skip = new Set([runIdx, runIdx + 1, ...(asIdx >= 0 ? [asIdx, asIdx + 1] : [])]);
   const raw = args.filter((_, i) => !skip.has(i));
   const trackers = loadTrackers();
-  const res = resolveInputs(raw, { trackers: { jira: !!trackers.jira, linear: !!trackers.linear }, cwd: io.origCwd });
-  let refs: InputRef[];
-  if ("ambiguous" in res) {
+  // Each argument on its own; --as settles every ambiguous key the same way.
+  const refs: InputRef[] = [];
+  for (const a of raw) {
+    const res = resolveInputs([a], { trackers: { jira: !!trackers.jira, linear: !!trackers.linear }, cwd: io.origCwd });
+    if (!("ambiguous" in res)) { refs.push(...res); continue; }
     if (!as || !res.options.includes(as)) { out(JSON.stringify(res)); return 4; }
-    refs = resolveInputs(raw.map((a) => (a === res.ambiguous ? "\u0000" : a)), { trackers: { jira: false, linear: false }, cwd: io.origCwd }) as InputRef[];
-    refs = refs.map((r) => (r.ref === "\u0000" ? { kind: as, ref: res.ambiguous } : r));
-  } else refs = res;
+    refs.push({ kind: as, ref: res.ambiguous });
+  }
   const items = [];
   for (const r of refs) {
     try { items.push(await fetchInput(r, { trackers })); }

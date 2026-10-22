@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { Browser, BrowserContext, Locator, Page } from "playwright";
 import type { ProjectConfig, Runner } from "../config/schema";
 import { dataDir } from "../config/secrets";
-import { decide, redactUrl } from "./guard";
+import { decide, redactUrl, wsDecide } from "./guard";
 import { isSignedOut, SignedOutError } from "./signin";
 
 export type BlockedEntry = {
@@ -149,15 +149,16 @@ export async function openSession(o: OpenOptions): Promise<Session> {
     }
   });
 
-  // WebSockets: a look-only runner may send while a page loads (subscriptions), never after.
+  // WebSockets: same rules as requests (see wsDecide).
   await context.routeWebSocket(/.*/, (ws) => {
+    const u = new URL(ws.url().replace(/^ws/i, "http"));
+    const entry = { method: "WS", host: u.host, path: redactUrl(u.toString()) };
+    const open = wsDecide({ url: ws.url(), loading: state.loading }, { runner: o.runner, cfg: o.cfg });
+    if (open.action === "abort") { block({ ...entry, category: open.category, reason: open.reason }); ws.close(); return; }
     const server = ws.connectToServer();
     ws.onMessage((msg) => {
-      if (o.runner.depth === "look" && !state.loading) {
-        const u = new URL(ws.url());
-        block({ method: "WS", host: u.host, path: redactUrl(ws.url()), category: "unknown-write", reason: "look-only runner: WebSocket message after the page loaded" });
-        return;
-      }
+      const d = wsDecide({ url: ws.url(), loading: state.loading, message: typeof msg === "string" ? msg : "" }, { runner: o.runner, cfg: o.cfg });
+      if (d.action === "abort") { block({ ...entry, category: d.category, reason: d.reason, ...(d.trigger ? { trigger: d.trigger } : {}) }); return; }
       server.send(msg);
     });
   });
@@ -196,6 +197,11 @@ export async function openSession(o: OpenOptions): Promise<Session> {
     const label = await l.evaluate(new Function(`return (${LABEL_JS})`)() as (el: Element) => string).catch(() => "");
     clicks.push({ text: String(label || ""), at: Date.now() });
   };
+  // After an action: give a navigation a moment to land, then check the runner is still signed in.
+  const settle = async () => {
+    await page.waitForLoadState("domcontentloaded", { timeout: 2000 }).catch(() => {});
+    await afterNav();
+  };
   const afterNav = async () => {
     if (await isSignedOut(page, o.runner)) throw new SignedOutError(o.runner.key, new URL(page.url()).pathname);
   };
@@ -222,9 +228,9 @@ export async function openSession(o: OpenOptions): Promise<Session> {
       // Never let an agent sign in again on its own: a signed-out runner stops here.
       await afterNav();
     },
-    async click(t) { const l = loc(t); await noteTarget(l); await l.click(); },
+    async click(t) { const l = loc(t); await noteTarget(l); await l.click(); await settle(); },
     async fill(t, value) { await loc(t).fill(value); },
-    async press(key, t) { if (t) { const l = loc(t); await noteTarget(l); await l.press(key); } else await page.keyboard.press(key); },
+    async press(key, t) { if (t) { const l = loc(t); await noteTarget(l); await l.press(key); } else await page.keyboard.press(key); await settle(); },
     async select(t, value) { await loc(t).selectOption(value); },
     async check(t) { const l = loc(t); await noteTarget(l); await l.check(); },
     async hover(t) { await loc(t).hover(); },
@@ -236,9 +242,13 @@ export async function openSession(o: OpenOptions): Promise<Session> {
     async title() { return page.title(); },
     async shot(name: string, caption: string) {
       const safe = name.replace(/[^a-z0-9-]+/gi, "-").slice(0, 60) || "shot";
-      const file = join(o.runDir, "shots", `${o.runner.key}-${safe}-${++shots}.jpg`);
+      // Never reuse a name: earlier scripts in this run may have taken the same one.
+      let file: string, rel: string;
+      do {
+        rel = join("shots", `${o.runner.key}-${safe}-${++shots}.jpg`);
+        file = join(o.runDir, rel);
+      } while (existsSync(file));
       await page.screenshot({ path: file, fullPage: false, type: "jpeg", quality: 70 });
-      const rel = join("shots", `${o.runner.key}-${safe}-${shots}.jpg`);
       appendJson(join(o.runDir, "shots.json"), { runner: o.runner.key, name: safe, path: rel, caption, at: new Date().toISOString() });
       return rel;
     },

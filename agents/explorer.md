@@ -50,7 +50,8 @@ What to record, for every requirement your persona can reach:
   product checklist (a greyed control with no reason, nothing showing it is busy, text that clips,
   a dead end). These get ids `U-<runner>-<n>` and a one-line title.
 - Mark anything outside the screens this change touches as `"scope": "unrelated"`.
-- Skip anything the dismissed notes already explain.
+- Skip anything the dismissed notes already explain. Match a note by its `title` and `route`
+  (ids change between runs).
 
 Output: write `<runDir>/explore-<runner>.json`:
 

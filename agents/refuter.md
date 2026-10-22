@@ -17,7 +17,7 @@ For each finding, decide:
    reference. Re-read the explorer's steps. If you can re-check on the site, use
    `baseline script <runner> <file.cjs>` (read-only steps only).
 2. **Is it deliberate?** If the product's own flow, copy, code or a dismissed note explains it as
-   intended (a role that is not meant to see a page, a state the spec describes), it does not hold.
+   intended (match notes by their `title` and `route`, not their id: ids are renumbered each run) (a role that is not meant to see a page, a state the spec describes), it does not hold.
 3. **Is it about this change?** `related` if it touches a requirement or a screen this change
    touches; otherwise `unrelated`.
 4. **Is there evidence?** A conflict or product finding needs something seen on the site (steps or

@@ -20394,6 +20394,23 @@ function decide(req, ctx) {
   if (runner.depth === "look") return { action: "abort", category: "unknown-write", reason: "look-only runner: this would change data" };
   return { action: "continue" };
 }
+function wsDecide(req, ctx) {
+  const { runner, cfg } = ctx;
+  const httpish = req.url.replace(/^ws/i, "http");
+  if (isProduction(httpish, cfg) && !runner.allow.includes("live")) {
+    return { action: "abort", category: "live", reason: "production site, live testing not allowed for this runner" };
+  }
+  if (req.message === void 0) return { action: "continue" };
+  if (runner.depth === "look") {
+    return req.loading ? { action: "continue" } : { action: "abort", category: "unknown-write", reason: "look-only runner: WebSocket message after the page loaded" };
+  }
+  for (const cat of PATTERN_ORDER) {
+    if (runner.allow.includes(cat)) continue;
+    const word = cfg.patterns[cat].words.find((w) => wordHit(req.message, w));
+    if (word) return { action: "abort", category: cat, reason: `WebSocket message looks like ${cat}`, trigger: word.toLowerCase() };
+  }
+  return { action: "continue" };
+}
 function redactUrl(raw) {
   const u = new URL(raw);
   const looksSecret = (seg) => seg.length >= 20 && /[a-z]/i.test(seg) && /\d/.test(seg) && /^[A-Za-z0-9_.~-]+$/.test(seg);
@@ -20616,11 +20633,19 @@ async function openSession(o) {
     }
   });
   await context.routeWebSocket(/.*/, (ws) => {
+    const u = new URL(ws.url().replace(/^ws/i, "http"));
+    const entry = { method: "WS", host: u.host, path: redactUrl(u.toString()) };
+    const open2 = wsDecide({ url: ws.url(), loading: state.loading }, { runner: o.runner, cfg: o.cfg });
+    if (open2.action === "abort") {
+      block({ ...entry, category: open2.category, reason: open2.reason });
+      ws.close();
+      return;
+    }
     const server = ws.connectToServer();
     ws.onMessage((msg) => {
-      if (o.runner.depth === "look" && !state.loading) {
-        const u = new URL(ws.url());
-        block({ method: "WS", host: u.host, path: redactUrl(ws.url()), category: "unknown-write", reason: "look-only runner: WebSocket message after the page loaded" });
+      const d = wsDecide({ url: ws.url(), loading: state.loading, message: typeof msg === "string" ? msg : "" }, { runner: o.runner, cfg: o.cfg });
+      if (d.action === "abort") {
+        block({ ...entry, category: d.category, reason: d.reason, ...d.trigger ? { trigger: d.trigger } : {} });
         return;
       }
       server.send(msg);
@@ -20658,6 +20683,11 @@ async function openSession(o) {
     const label = await l.evaluate(new Function(`return (${LABEL_JS})`)()).catch(() => "");
     clicks.push({ text: String(label || ""), at: Date.now() });
   };
+  const settle2 = async () => {
+    await page.waitForLoadState("domcontentloaded", { timeout: 2e3 }).catch(() => {
+    });
+    await afterNav();
+  };
   const afterNav = async () => {
     if (await isSignedOut(page, o.runner)) throw new SignedOutError(o.runner.key, new URL(page.url()).pathname);
   };
@@ -20691,6 +20721,7 @@ async function openSession(o) {
       const l = loc(t);
       await noteTarget(l);
       await l.click();
+      await settle2();
     },
     async fill(t, value) {
       await loc(t).fill(value);
@@ -20701,6 +20732,7 @@ async function openSession(o) {
         await noteTarget(l);
         await l.press(key);
       } else await page.keyboard.press(key);
+      await settle2();
     },
     async select(t, value) {
       await loc(t).selectOption(value);
@@ -20735,9 +20767,12 @@ async function openSession(o) {
     },
     async shot(name, caption) {
       const safe = name.replace(/[^a-z0-9-]+/gi, "-").slice(0, 60) || "shot";
-      const file6 = (0, import_node_path5.join)(o.runDir, "shots", `${o.runner.key}-${safe}-${++shots}.jpg`);
+      let file6, rel;
+      do {
+        rel = (0, import_node_path5.join)("shots", `${o.runner.key}-${safe}-${++shots}.jpg`);
+        file6 = (0, import_node_path5.join)(o.runDir, rel);
+      } while ((0, import_node_fs6.existsSync)(file6));
       await page.screenshot({ path: file6, fullPage: false, type: "jpeg", quality: 70 });
-      const rel = (0, import_node_path5.join)("shots", `${o.runner.key}-${safe}-${shots}.jpg`);
       appendJson((0, import_node_path5.join)(o.runDir, "shots.json"), { runner: o.runner.key, name: safe, path: rel, caption, at: (/* @__PURE__ */ new Date()).toISOString() });
       return rel;
     },
@@ -21163,16 +21198,19 @@ register("inputs", "fetch what a run checks against: inputs --run <dir> [--as ji
   const skip = /* @__PURE__ */ new Set([runIdx, runIdx + 1, ...asIdx >= 0 ? [asIdx, asIdx + 1] : []]);
   const raw = args.filter((_, i) => !skip.has(i));
   const trackers = loadTrackers();
-  const res = resolveInputs(raw, { trackers: { jira: !!trackers.jira, linear: !!trackers.linear }, cwd: io.origCwd });
-  let refs;
-  if ("ambiguous" in res) {
+  const refs = [];
+  for (const a of raw) {
+    const res = resolveInputs([a], { trackers: { jira: !!trackers.jira, linear: !!trackers.linear }, cwd: io.origCwd });
+    if (!("ambiguous" in res)) {
+      refs.push(...res);
+      continue;
+    }
     if (!as || !res.options.includes(as)) {
       out(JSON.stringify(res));
       return 4;
     }
-    refs = resolveInputs(raw.map((a) => a === res.ambiguous ? "\0" : a), { trackers: { jira: false, linear: false }, cwd: io.origCwd });
-    refs = refs.map((r) => r.ref === "\0" ? { kind: as, ref: res.ambiguous } : r);
-  } else refs = res;
+    refs.push({ kind: as, ref: res.ambiguous });
+  }
   const items = [];
   for (const r of refs) {
     try {
@@ -21519,6 +21557,10 @@ register("sitemap", "sitemap show | merge <file.json>", (args) => {
   return 2;
 });
 
+// src/findings/cli.ts
+var import_node_fs19 = require("node:fs");
+var import_node_path18 = require("node:path");
+
 // src/findings/notes.ts
 var import_node_fs18 = require("node:fs");
 var import_node_path17 = require("node:path");
@@ -21530,8 +21572,8 @@ function listNotes(projectDir) {
     return [];
   }
 }
-function addNote(projectDir, findingId, text) {
-  const n = { findingId, text, at: (/* @__PURE__ */ new Date()).toISOString() };
+function addNote(projectDir, findingId, text, about) {
+  const n = { findingId, ...about?.title ? { title: about.title } : {}, ...about?.route ? { route: about.route } : {}, text, at: (/* @__PURE__ */ new Date()).toISOString() };
   const all = [...listNotes(projectDir), n];
   (0, import_node_fs18.mkdirSync)((0, import_node_path17.join)(projectDir, ".baseline"), { recursive: true });
   (0, import_node_fs18.writeFileSync)(file5(projectDir), JSON.stringify(all, null, 2));
@@ -21539,6 +21581,19 @@ function addNote(projectDir, findingId, text) {
 }
 
 // src/findings/cli.ts
+function findFinding(id) {
+  const base = (0, import_node_path18.join)(process.cwd(), ".baseline");
+  for (const pointer of ["active-run", "last-run"]) {
+    try {
+      const runDir = (0, import_node_fs19.readFileSync)((0, import_node_path18.join)(base, pointer), "utf8").trim();
+      const all = JSON.parse((0, import_node_fs19.readFileSync)((0, import_node_path18.join)(runDir, "findings.json"), "utf8"));
+      const f = all.find((x) => x.id === id);
+      if (f) return { title: f.title, route: f.route };
+    } catch {
+    }
+  }
+  return void 0;
+}
 register("dismiss", 'record that a finding is not applicable: dismiss <finding-id> "<reason>" | dismiss --list', (args) => {
   if (args[0] === "--list") {
     out(JSON.stringify(listNotes(process.cwd()), null, 2));
@@ -21549,18 +21604,18 @@ register("dismiss", 'record that a finding is not applicable: dismiss <finding-i
     err('usage: baseline dismiss <finding-id> "<why it does not apply>"');
     return 2;
   }
-  addNote(process.cwd(), id, reason.join(" ").trim());
+  addNote(process.cwd(), id, reason.join(" ").trim(), findFinding(id));
   out(`noted: ${id} will be treated as not applicable on later runs`);
   return 0;
 });
 
 // src/render/cli.ts
-var import_node_fs20 = require("node:fs");
-var import_node_path19 = require("node:path");
+var import_node_fs21 = require("node:fs");
+var import_node_path20 = require("node:path");
 
 // src/render/report.ts
-var import_node_fs19 = require("node:fs");
-var import_node_path18 = require("node:path");
+var import_node_fs20 = require("node:fs");
+var import_node_path19 = require("node:path");
 
 // src/findings/filter.ts
 var NEEDS_CODE = /* @__PURE__ */ new Set(["spec-built", "not-built"]);
@@ -22224,30 +22279,30 @@ var ALLOW_HINT = {
 };
 function readJson2(p, fallback) {
   try {
-    return JSON.parse((0, import_node_fs19.readFileSync)(p, "utf8"));
+    return JSON.parse((0, import_node_fs20.readFileSync)(p, "utf8"));
   } catch {
     return fallback;
   }
 }
 function buildRunRecord(runDir) {
-  const run = readJson2((0, import_node_path18.join)(runDir, "run.json"), { runId: "", url: "", label: "", startedAt: "" });
-  const inputs = readJson2((0, import_node_path18.join)(runDir, "inputs.json"), { items: [] });
-  const progress = readJson2((0, import_node_path18.join)(runDir, "progress.json"), {});
-  const commit = readJson2((0, import_node_path18.join)(runDir, "commit.json"), { codeRead: false, mismatch: false });
-  const raw = readJson2((0, import_node_path18.join)(runDir, "findings.json"), []);
+  const run = readJson2((0, import_node_path19.join)(runDir, "run.json"), { runId: "", url: "", label: "", startedAt: "" });
+  const inputs = readJson2((0, import_node_path19.join)(runDir, "inputs.json"), { items: [] });
+  const progress = readJson2((0, import_node_path19.join)(runDir, "progress.json"), {});
+  const commit = readJson2((0, import_node_path19.join)(runDir, "commit.json"), { codeRead: false, mismatch: false });
+  const raw = readJson2((0, import_node_path19.join)(runDir, "findings.json"), []);
   const parsed = raw.map((r) => findingSchema.safeParse(r)).filter((r) => r.success).map((r) => r.data);
-  const rel = (p) => (0, import_node_path18.isAbsolute)(p) ? (0, import_node_path18.relative)(runDir, p) : p;
+  const rel = (p) => (0, import_node_path19.isAbsolute)(p) ? (0, import_node_path19.relative)(runDir, p) : p;
   for (const f of parsed) if (f.observed) f.observed.shots = f.observed.shots.map(rel);
   const res = filterFindings(parsed, { otherCap: 5, codeRead: commit.codeRead });
   const order = (a, b) => Number(needsAttention(b)) - Number(needsAttention(a)) || severityRank(a.severity) - severityRank(b.severity);
   const findings = [...res.kept].sort(order);
-  const skipped = readJson2((0, import_node_path18.join)(runDir, "blocked.json"), []);
+  const skipped = readJson2((0, import_node_path19.join)(runDir, "blocked.json"), []);
   const shots = {};
   const want = new Set([...findings, ...res.other].flatMap((f) => f.observed?.shots ?? []));
   for (const p of want) {
-    const abs = (0, import_node_path18.join)(runDir, p);
-    if (!abs.startsWith(runDir) || !(0, import_node_fs19.existsSync)(abs)) continue;
-    shots[p] = (0, import_node_fs19.readFileSync)(abs).toString("base64");
+    const abs = (0, import_node_path19.join)(runDir, p);
+    if (!abs.startsWith(runDir) || !(0, import_node_fs20.existsSync)(abs)) continue;
+    shots[p] = (0, import_node_fs20.readFileSync)(abs).toString("base64");
   }
   const start = Date.parse(progress.startedAt ?? run.startedAt), end = Date.parse(progress.finishedAt ?? "");
   return {
@@ -22268,14 +22323,14 @@ function buildRunRecord(runDir) {
     counts: countRun(findings, skipped),
     unreadLinks: inputs.unreadLinks ?? [],
     shots,
-    runners: readJson2((0, import_node_path18.join)(runDir, "runners.json"), []),
-    leftBehind: readJson2((0, import_node_path18.join)(runDir, "cleanup.json"), []).filter((c) => !c.removed).map((c) => ({ label: c.label, note: c.note ?? "" }))
+    runners: readJson2((0, import_node_path19.join)(runDir, "runners.json"), []),
+    leftBehind: readJson2((0, import_node_path19.join)(runDir, "cleanup.json"), []).filter((c) => !c.removed).map((c) => ({ label: c.label, note: c.note ?? "" }))
   };
 }
 function sessionRuns(sessionDir) {
-  const runs = (0, import_node_path18.join)(sessionDir, "runs");
-  if (!(0, import_node_fs19.existsSync)(runs)) return [];
-  return (0, import_node_fs19.readdirSync)(runs).filter((d) => (0, import_node_fs19.existsSync)((0, import_node_path18.join)(runs, d, "run.json"))).map((d) => buildRunRecord((0, import_node_path18.join)(runs, d)));
+  const runs = (0, import_node_path19.join)(sessionDir, "runs");
+  if (!(0, import_node_fs20.existsSync)(runs)) return [];
+  return (0, import_node_fs20.readdirSync)(runs).filter((d) => (0, import_node_fs20.existsSync)((0, import_node_path19.join)(runs, d, "run.json"))).map((d) => buildRunRecord((0, import_node_path19.join)(runs, d)));
 }
 function issueText(f, r) {
   return [
@@ -22379,21 +22434,21 @@ register("report", "write the session's report.html: report <sessionDir>", (args
     err("usage: baseline report <sessionDir>");
     return 2;
   }
-  const sessionDir = (0, import_node_path19.resolve)(io.origCwd, args[0]);
+  const sessionDir = (0, import_node_path20.resolve)(io.origCwd, args[0]);
   const runs = sessionRuns(sessionDir);
   if (!runs.length) {
     err(`no runs in ${sessionDir}`);
     return 2;
   }
-  const file6 = (0, import_node_path19.join)(sessionDir, "report.html");
-  (0, import_node_fs20.writeFileSync)(file6, renderSessionReport(runs, loadConfig(process.cwd()).theme));
+  const file6 = (0, import_node_path20.join)(sessionDir, "report.html");
+  (0, import_node_fs21.writeFileSync)(file6, renderSessionReport(runs, loadConfig(process.cwd()).theme));
   out(file6);
   return 0;
 });
 
 // src/render/term-cli.ts
-var import_node_fs21 = require("node:fs");
-var import_node_path20 = require("node:path");
+var import_node_fs22 = require("node:fs");
+var import_node_path21 = require("node:path");
 
 // src/render/terminal.ts
 function colorMode(env = process.env) {
@@ -22507,33 +22562,33 @@ var flag2 = (args, name) => {
 };
 var width = () => Math.min(process.stdout.columns || 72, 72);
 register("summary", "end-of-run totals: summary <runDir> [--plain] [--link <url>]", (args) => {
-  const runDir = args[0] && !args[0].startsWith("--") ? (0, import_node_path20.resolve)(io.origCwd, args[0]) : activeRunDir(process.cwd());
+  const runDir = args[0] && !args[0].startsWith("--") ? (0, import_node_path21.resolve)(io.origCwd, args[0]) : activeRunDir(process.cwd());
   if (!runDir) {
     err("usage: baseline summary <runDir> [--plain] [--link <url>]");
     return 2;
   }
-  const sessionsRoot = (0, import_node_path20.join)(process.cwd(), ".baseline", "sessions");
+  const sessionsRoot = (0, import_node_path21.join)(process.cwd(), ".baseline", "sessions");
   let real = runDir;
   try {
-    real = (0, import_node_fs21.realpathSync)(runDir);
+    real = (0, import_node_fs22.realpathSync)(runDir);
   } catch {
   }
   let rootReal = sessionsRoot;
   try {
-    rootReal = (0, import_node_fs21.realpathSync)(sessionsRoot);
+    rootReal = (0, import_node_fs22.realpathSync)(sessionsRoot);
   } catch {
   }
-  if (!real.startsWith(rootReal + import_node_path20.sep)) {
+  if (!real.startsWith(rootReal + import_node_path21.sep)) {
     err(`refusing: ${JSON.stringify(runDir)} is not a run folder of this project`);
     return 2;
   }
-  (0, import_node_fs21.mkdirSync)((0, import_node_path20.join)(process.cwd(), ".baseline"), { recursive: true });
+  (0, import_node_fs22.mkdirSync)((0, import_node_path21.join)(process.cwd(), ".baseline"), { recursive: true });
   const cfg = loadConfig(process.cwd());
   const rec = buildRunRecord(runDir);
-  const local = (0, import_node_path20.join)(runDir, "..", "..", "report.html");
+  const local = (0, import_node_path21.join)(runDir, "..", "..", "report.html");
   const p = readProgress(runDir);
-  (0, import_node_fs21.writeFileSync)((0, import_node_path20.join)(runDir, "summary.json"), JSON.stringify({ runId: rec.runId, label: rec.label, size: rec.size, durationMin: rec.durationMin, counts: rec.counts, finishedAt: p?.finishedAt ?? (/* @__PURE__ */ new Date()).toISOString(), link: flag2(args, "--link"), localPath: local }));
-  (0, import_node_fs21.writeFileSync)((0, import_node_path20.join)(process.cwd(), ".baseline", "last-run"), runDir);
+  (0, import_node_fs22.writeFileSync)((0, import_node_path21.join)(runDir, "summary.json"), JSON.stringify({ runId: rec.runId, label: rec.label, size: rec.size, durationMin: rec.durationMin, counts: rec.counts, finishedAt: p?.finishedAt ?? (/* @__PURE__ */ new Date()).toISOString(), link: flag2(args, "--link"), localPath: local }));
+  (0, import_node_fs22.writeFileSync)((0, import_node_path21.join)(process.cwd(), ".baseline", "last-run"), runDir);
   out(renderSummary(rec, cfg.theme, { color: args.includes("--plain") ? "none" : colorMode(), width: width(), link: flag2(args, "--link"), localPath: local }).join("\n"));
   return 0;
 });
@@ -22550,22 +22605,22 @@ register("view", "the active run's progress as text: view [--plain]", (args) => 
 
 // src/setup/install.ts
 var import_node_child_process5 = require("node:child_process");
-var import_node_fs22 = require("node:fs");
-var import_node_path21 = require("node:path");
+var import_node_fs23 = require("node:fs");
+var import_node_path22 = require("node:path");
 var PLAYWRIGHT_VERSION = "1.64.1";
 register("install-browser", "install Playwright and Chromium into the plugin's data folder", () => {
   const dir = dataDir();
-  (0, import_node_fs22.mkdirSync)(dir, { recursive: true });
+  (0, import_node_fs23.mkdirSync)(dir, { recursive: true });
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
   const a = (0, import_node_child_process5.spawnSync)(npm, ["install", "--prefix", dir, "--ignore-scripts", "--no-audit", "--no-fund", `playwright@${PLAYWRIGHT_VERSION}`], { stdio: "inherit", cwd: dir });
   if (a.status !== 0) {
     err("could not install Playwright with npm");
     return 1;
   }
-  const b = (0, import_node_child_process5.spawnSync)(process.execPath, [(0, import_node_path21.join)(dir, "node_modules", "playwright", "cli.js"), "install", "chromium"], {
+  const b = (0, import_node_child_process5.spawnSync)(process.execPath, [(0, import_node_path22.join)(dir, "node_modules", "playwright", "cli.js"), "install", "chromium"], {
     stdio: "inherit",
     cwd: dir,
-    env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: (0, import_node_path21.join)(dir, "browsers") }
+    env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: (0, import_node_path22.join)(dir, "browsers") }
   });
   if (b.status !== 0) {
     err("could not install Chromium");

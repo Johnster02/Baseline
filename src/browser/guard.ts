@@ -111,6 +111,28 @@ export function decide(req: GuardRequest, ctx: GuardContext): Decision {
   return { action: "continue" };
 }
 
+/**
+ * WebSockets: production needs live; look-only may send only while a page loads; deeper runners
+ * may not send a message that names a protected action they aren't allowed.
+ */
+export function wsDecide(req: { url: string; loading: boolean; message?: string }, ctx: { runner: Runner; cfg: ProjectConfig }): Decision {
+  const { runner, cfg } = ctx;
+  const httpish = req.url.replace(/^ws/i, "http");
+  if (isProduction(httpish, cfg) && !runner.allow.includes("live")) {
+    return { action: "abort", category: "live", reason: "production site, live testing not allowed for this runner" };
+  }
+  if (req.message === undefined) return { action: "continue" };
+  if (runner.depth === "look") {
+    return req.loading ? { action: "continue" } : { action: "abort", category: "unknown-write", reason: "look-only runner: WebSocket message after the page loaded" };
+  }
+  for (const cat of PATTERN_ORDER) {
+    if (runner.allow.includes(cat)) continue;
+    const word = cfg.patterns[cat].words.find((w) => wordHit(req.message!, w));
+    if (word) return { action: "abort", category: cat, reason: `WebSocket message looks like ${cat}`, trigger: word.toLowerCase() };
+  }
+  return { action: "continue" };
+}
+
 /** Query values that look like credentials are replaced before anything is logged. */
 export function redactUrl(raw: string): string {
   const u = new URL(raw);
