@@ -20427,7 +20427,13 @@ async function openSession(o) {
         await new Promise((res) => setTimeout(res, 40));
         clickText = recentClicks();
       }
-      const loading = state.loading && !!page && r.frame() === page.mainFrame();
+      const loading = state.loading && !!page && r.frame() === page.mainFrame() && (() => {
+        try {
+          return new URL(page.url()).host === baseHost;
+        } catch {
+          return false;
+        }
+      })();
       const d = decide(
         { method, url: r.url(), loading, clickText, body: r.postData() ?? void 0, document: r.isNavigationRequest() && r.resourceType() === "document" },
         { runner: o.runner, cfg: o.cfg, learned, baseHost, createdPaths }
@@ -20461,6 +20467,17 @@ async function openSession(o) {
       server.send(msg);
     });
   });
+  context.on("response", (res) => {
+    const m = res.request().method();
+    if (m === "GET" || m === "HEAD") return;
+    const loc2 = res.headers()["location"];
+    if (!loc2) return;
+    try {
+      const u = new URL(loc2, res.url());
+      if (u.host === baseHost) createdPaths.push(u.pathname);
+    } catch {
+    }
+  });
   page = await context.newPage();
   const deny = async () => {
     throw new Error("Baseline: direct API requests are not allowed. Drive the page instead.");
@@ -20489,7 +20506,17 @@ async function openSession(o) {
   return {
     page,
     async goto(path) {
-      const url2 = new URL(path, o.baseUrl).toString();
+      const base = new URL(o.baseUrl);
+      let target;
+      try {
+        target = path.startsWith("//") ? void 0 : new URL(path, base);
+      } catch {
+        target = void 0;
+      }
+      if (!target || !/^https?:$/.test(target.protocol) || target.origin !== base.origin) {
+        throw new Error(`goto only goes to pages on ${base.origin}. Use a path like /cart.`);
+      }
+      const url2 = target.toString();
       try {
         await page.goto(url2, { waitUntil: "commit" });
         state.loading = true;
@@ -20555,12 +20582,6 @@ async function openSession(o) {
       return file6;
     },
     created(kind, label, url2) {
-      if (url2) {
-        try {
-          createdPaths.push(new URL(url2, o.baseUrl).pathname);
-        } catch {
-        }
-      }
       appendJson((0, import_node_path4.join)(o.runDir, "created.json"), {
         runner: o.runner.key,
         kind,
@@ -21021,7 +21042,16 @@ function sizeRun(inputs, changedFileCount, personas, codeRead) {
 // src/run/commit.ts
 var import_node_child_process3 = require("node:child_process");
 var import_node_util2 = require("node:util");
-async function commitInfo(projectDir, cfg, probe) {
+function probeAllowed(probeUrl, runUrl) {
+  try {
+    const p = new URL(probeUrl);
+    if (!/^https?:$/.test(p.protocol)) return false;
+    return !!runUrl && p.hostname === new URL(runUrl).hostname;
+  } catch {
+    return false;
+  }
+}
+async function commitInfo(projectDir, cfg, probe, runUrl) {
   let commitRead;
   try {
     commitRead = (await (0, import_node_util2.promisify)(import_node_child_process3.execFile)("git", ["rev-parse", "--short=7", "HEAD"], { cwd: projectDir })).stdout.trim();
@@ -21030,10 +21060,10 @@ async function commitInfo(projectDir, cfg, probe) {
   }
   if (!commitRead) return { codeRead: false, mismatch: false };
   let deployed;
-  if (cfg.versionProbe) {
+  if (cfg.versionProbe && probeAllowed(cfg.versionProbe.url, runUrl ?? cfg.lastUrl) && cfg.versionProbe.pattern.length <= 200) {
     try {
-      const body = probe ? await probe(cfg.versionProbe.url) : await (await fetch(cfg.versionProbe.url)).text();
-      deployed = body.match(new RegExp(cfg.versionProbe.pattern))?.[1];
+      const body = probe ? await probe(cfg.versionProbe.url) : await (await fetch(cfg.versionProbe.url, { signal: AbortSignal.timeout(5e3) })).text();
+      deployed = body.slice(0, 1e5).match(new RegExp(cfg.versionProbe.pattern))?.[1];
     } catch {
       deployed = void 0;
     }
@@ -21147,7 +21177,14 @@ register("size", "size the active run from its inputs.json: size --personas a,b 
   return 0;
 });
 register("commit", "which commit the code is at and which the site is running", async () => {
-  out(JSON.stringify(await commitInfo(process.cwd(), loadConfig(process.cwd()))));
+  const runDir = activeRunDir(process.cwd());
+  let runUrl;
+  try {
+    runUrl = runDir ? JSON.parse((0, import_node_fs14.readFileSync)((0, import_node_path13.join)(runDir, "run.json"), "utf8")).url : void 0;
+  } catch {
+    runUrl = void 0;
+  }
+  out(JSON.stringify(await commitInfo(process.cwd(), loadConfig(process.cwd()), void 0, runUrl)));
   return 0;
 });
 register("sitemap", "sitemap show | merge <file.json>", (args) => {

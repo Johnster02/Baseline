@@ -118,3 +118,27 @@ describe("other review fixes", () => {
     expect(isProduction("https://notacme.dev/x", cfg)).toBe(false);
   });
 });
+
+describe("security review: created paths and goto targets", () => {
+  it("created() cannot whitelist a DELETE: only paths the site itself returned count", async () => {
+    f.requests.length = 0;
+    const dir = await run(create, async (s) => {
+      await s.goto("/admin");
+      s.created("project", "Baseline r-t project", "/api/projects/3");
+      await s.click({ role: "button", name: "Tidy up" });
+      await s.page.getByText("failed").waitFor();
+    });
+    expect(had("DELETE", "/api/projects/3")).toBe(false);
+    expect(blocked(dir)).toContainEqual(expect.objectContaining({ category: "delete" }));
+  });
+
+  it("goto refuses another origin, a scheme-relative URL and non-http schemes", async () => {
+    await run(look, async (s) => {
+      await expect(s.goto("https://example.com/")).rejects.toThrow(/only goes to pages on/);
+      await expect(s.goto("//example.com/x")).rejects.toThrow(/only goes to pages on/);
+      await expect(s.goto("javascript:alert(1)")).rejects.toThrow(/only goes to pages on/);
+      await s.goto(f.url + "/cart");
+      expect(await s.title()).toBe("Cart");
+    });
+  });
+});

@@ -77,7 +77,10 @@ register("size", "size the active run from its inputs.json: size --personas a,b 
 });
 
 register("commit", "which commit the code is at and which the site is running", async () => {
-  out(JSON.stringify(await commitInfo(process.cwd(), loadConfig(process.cwd()))));
+  const runDir = activeRunDir(process.cwd());
+  let runUrl: string | undefined;
+  try { runUrl = runDir ? JSON.parse(readFileSync(join(runDir, "run.json"), "utf8")).url : undefined; } catch { runUrl = undefined; }
+  out(JSON.stringify(await commitInfo(process.cwd(), loadConfig(process.cwd()), undefined, runUrl)));
   return 0;
 });
 

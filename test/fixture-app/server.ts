@@ -29,6 +29,7 @@ const PAGES: Record<string, string> = {
     <a href="/users/7/delete">Remove member</a> <a href="/logout">Log out</a>
     <button onclick="document.getElementById('confirm').hidden=false">Delete project</button>
     <div id="confirm" hidden role="dialog" aria-label="Are you sure?"><button onclick="fetch('/api/projects/3',{method:'DELETE'}).then(r=>document.getElementById('status').textContent='done '+r.status).catch(()=>document.getElementById('status').textContent='failed')">Confirm</button></div>
+    <button onclick="fetch('/api/projects/3',{method:'DELETE'}).then(r=>document.getElementById('status').textContent='done '+r.status).catch(()=>document.getElementById('status').textContent='failed')">Tidy up</button>
     <button title="Archive" onclick="call('/api/archive')"><svg width="10" height="10"></svg></button>`),
   "/gql": page("Profile", `<p id="me">loading</p><button onclick="gql('mutation { rename }')">Rename</button>
     <script>

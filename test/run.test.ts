@@ -87,7 +87,7 @@ describe("commitInfo", () => {
     execFileSync("git", ["add", "."], { cwd: d });
     execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "y"], { cwd: d });
     const cfg = { ...loadConfig(d), versionProbe: { url: "http://x/version", pattern: '"commit":"([0-9a-f]+)"' } };
-    const r = await commitInfo(d, cfg, async () => '{"commit":"a41c9e2"}');
+    const r = await commitInfo(d, { ...cfg, versionProbe: { url: "http://staging.acme.dev/version", pattern: cfg.versionProbe.pattern } }, async () => '{"commit":"a41c9e2"}', "http://staging.acme.dev");
     expect(r.codeRead).toBe(true);
     expect(r.deployed).toBe("a41c9e2");
     expect(r.mismatch).toBe(true);
@@ -103,5 +103,18 @@ describe("site map", () => {
     expect(m.routes).toHaveLength(2);
     expect(m.routes.find((r) => r.path === "/cart")!.personas.sort()).toEqual(["admin", "customer"]);
     expect(m.notes).toEqual(["admin sees billing"]);
+  });
+});
+
+describe("commitInfo probe safety", () => {
+  it("only probes the run's own site", async () => {
+    const d = tmp();
+    execFileSync("git", ["init", "-q"], { cwd: d });
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "x", "--allow-empty"], { cwd: d });
+    const cfg = { ...loadConfig(d), versionProbe: { url: "http://169.254.169.254/latest/meta-data", pattern: "(.*)" } };
+    let called = false;
+    const r = await commitInfo(d, cfg, async () => { called = true; return "x"; }, "https://staging.acme.dev");
+    expect(called).toBe(false);
+    expect(r.deployed).toBeUndefined();
   });
 });

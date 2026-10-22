@@ -124,7 +124,7 @@ export async function openSession(o: OpenOptions): Promise<Session> {
         clickText = recentClicks();
       }
       // Only requests from the main frame, after the new page committed, count as "the page loading".
-      const loading = state.loading && !!page && r.frame() === page.mainFrame();
+      const loading = state.loading && !!page && r.frame() === page.mainFrame() && (() => { try { return new URL(page.url()).host === baseHost; } catch { return false; } })();
       const d = decide(
         { method, url: r.url(), loading, clickText, body: r.postData() ?? undefined, document: r.isNavigationRequest() && r.resourceType() === "document" },
         { runner: o.runner, cfg: o.cfg, learned, baseHost, createdPaths },
@@ -158,6 +158,19 @@ export async function openSession(o: OpenOptions): Promise<Session> {
     });
   });
 
+  // What this run created, as the site itself reported it (Location headers of writes we allowed).
+  // Agents can't add to this; created() is only metadata for the report and cleanup.
+  context.on("response", (res) => {
+    const m = res.request().method();
+    if (m === "GET" || m === "HEAD") return;
+    const loc = res.headers()["location"];
+    if (!loc) return;
+    try {
+      const u = new URL(loc, res.url());
+      if (u.host === baseHost) createdPaths.push(u.pathname);
+    } catch { /* ignore */ }
+  });
+
   page = await context.newPage();
   const deny = async () => { throw new Error("Baseline: direct API requests are not allowed. Drive the page instead."); };
   for (const api of new Set([context.request, page.request])) {
@@ -187,7 +200,13 @@ export async function openSession(o: OpenOptions): Promise<Session> {
   return {
     page,
     async goto(path: string) {
-      const url = new URL(path, o.baseUrl).toString();
+      const base = new URL(o.baseUrl);
+      let target: URL | undefined;
+      try { target = path.startsWith("//") ? undefined : new URL(path, base); } catch { target = undefined; }
+      if (!target || !/^https?:$/.test(target.protocol) || target.origin !== base.origin) {
+        throw new Error(`goto only goes to pages on ${base.origin}. Use a path like /cart.`);
+      }
+      const url = target.toString();
       try {
         await page.goto(url, { waitUntil: "commit" });
         state.loading = true;
@@ -219,7 +238,6 @@ export async function openSession(o: OpenOptions): Promise<Session> {
       return file;
     },
     created(kind: string, label: string, url?: string) {
-      if (url) { try { createdPaths.push(new URL(url, o.baseUrl).pathname); } catch { /* ignore */ } }
       appendJson(join(o.runDir, "created.json"), {
         runner: o.runner.key, kind, label, url, labelled: label.includes(`Baseline ${o.runId}`), at: new Date().toISOString(),
       });
