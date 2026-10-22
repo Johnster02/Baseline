@@ -23,3 +23,13 @@ describe("leakCheck", () => {
     expect(leakCheck([f], join(d, "missing.txt"))).toEqual([]);
   });
 });
+
+describe("leakCheckAuthors", () => {
+  it("flags a banned term in commit author or committer emails", async () => {
+    const { leakCheckAuthors } = await import("../scripts/leak-check-lib.mjs");
+    const d = tmp();
+    const banned = join(d, "banned.txt");
+    writeFileSync(banned, "acmecorp\n");
+    expect(leakCheckAuthors(["abc123 me@gmail.com me@gmail.com", "def456 jo@acmecorp.com me@gmail.com"], banned)).toEqual([{ commit: "def456", term: "acmecorp" }]);
+  });
+});
