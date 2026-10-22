@@ -1,11 +1,7 @@
 # Baseline
 
-[![CI](https://img.shields.io/github/actions/workflow/status/Johnster02/Baseline/ci.yml?branch=main&label=ci)](https://github.com/Johnster02/Baseline/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/Johnster02/Baseline?include_prereleases)](https://github.com/Johnster02/Baseline/releases)
-[![License: MIT](https://img.shields.io/github/license/Johnster02/Baseline)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-d97757)](https://code.claude.com/docs/en/plugins)
-[![Node](https://img.shields.io/badge/node-%3E%3D20-339933)](package.json)
-[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](CONTRIBUTING.md)
+[![License: MIT](https://img.shields.io/github/license/Johnster02/Baseline)](LICENSE)
 
 Acceptance testing for any web app, from inside Claude Code. Point it at a PR, ticket or spec and a
 URL. It reads the code, walks the site as your test users, and reports where **the spec, the code
@@ -16,21 +12,30 @@ and the site** disagree, plus anything that works but would fail a QA engineer's
 Built for QA engineers, and for developers who want the easy QA issues caught before their change
 reaches QA. Every finding is advisory: Baseline never passes or fails a change. You decide.
 
-## Install
+## Quick start
 
-```text
-/plugin marketplace add Johnster02/Baseline
-/plugin install baseline@baseline
-```
+1. Install the plugin in Claude Code:
 
-Then, in the project you want to test:
+   ```text
+   /plugin marketplace add Johnster02/Baseline
+   /plugin install baseline@baseline
+   ```
 
-```text
-/baseline:setup
-```
+2. In the project you want to test, run setup once. It installs a browser (Playwright and
+   Chromium, into the plugin's own data folder) and asks for your test accounts and what each may
+   do. Re-run it any time.
 
-Setup installs a browser once (Playwright and Chromium, into the plugin's own data folder), then
-asks for your test accounts and what each may do. You can re-run it any time.
+   ```text
+   /baseline:setup
+   ```
+
+3. Check something. Give it a PR, ticket or spec, then pick the URL to test when it asks:
+
+   ```text
+   /baseline:run #412
+   ```
+
+When it finishes you get a summary in the terminal and a link to the full report.
 
 **Requirements:** Claude Code (logged in), Node 20 or later, and npm for the one-time browser
 install. The live progress band needs Claude Code v2.1.287 or later. Publishing the report as a
@@ -66,19 +71,7 @@ While it runs, a band above the prompt shows each phase and what every agent is 
 ends you get totals only: pass rate, counts, `Complete`, and a link to the report (a private
 claude.ai artifact if you chose that in setup, otherwise a local file).
 
-```text
-BASELINE // PR #412 · pr · 4m 52s
-────────────────────────────────
-PASS RATE   ██████░░░░ 60%
-checked     10   passed 6
-conflicts     2
-product       1
-unverified    1
-skipped       1
-result      COMPLETE
-────────────────────────────────
-report  https://claude.ai/artifact/…
-```
+![Baseline in the terminal: live progress while it runs, totals when it ends](docs/screenshots/terminal.png)
 
 ### The report
 
