@@ -40,8 +40,10 @@ messages short: the band above the prompt shows progress, and the report holds t
    Then `baseline config set lastUrl <url>`.
 3. `baseline target-check <url>` (add `--live` only if the user passed `--live`). If it refuses,
    stop and tell the user why, in one line.
-4. `baseline run new --url <url> --label "<short name of what is being checked>" --session ${CLAUDE_SESSION_ID}`.
-   Keep `runDir` and `sessionDir` from its JSON.
+4. `baseline run new --url <url> --label "<short name of what is being checked>" --session ${CLAUDE_SESSION_ID}`
+   (add `--live` only if the user passed `--live`). Keep `runDir` and `sessionDir` from its JSON.
+   On a live run, name any runner that is not allowed `live` in `baseline config describe`: the
+   guard will block everything it does, so leave it out and say so in one line.
 5. Sign in: `baseline signin --all --url <url>` (add `--live` if the user passed `--live`). A
    runner that fails is left out of the run; say which, and why, in one line. If none sign in,
    close the run (rule 7) and stop.
@@ -49,7 +51,11 @@ messages short: the band above the prompt shows progress, and the report holds t
 ## 1. Gather and plan
 
 1. `baseline progress phase gather active`
-2. Dispatch the **gatherer** agent with the run folder and the inputs. If it reports an ambiguous
+2. Jira or Linear tickets: if this session has a Jira or Linear connector, fetch each ticket
+   yourself with it and save it as `<runDir>/linked/ticket-<KEY>.md` (title on the first line,
+   then the description). Pass those files to the gatherer in place of the keys. Without a
+   connector, pass the keys and the CLI uses the token from `/plugin configure baseline`.
+   Then dispatch the **gatherer** agent with the run folder and the inputs. If it reports an ambiguous
    key, ask the user Jira or Linear with AskUserQuestion, then have it rerun
    `baseline inputs --run <runDir> --as <kind> ...`.
 3. Read `<runDir>/inputs.json` and `<runDir>/linked/`. Write `<runDir>/requirements.json`:

@@ -19,7 +19,7 @@ const record = (o: Partial<RunRecord> = {}): RunRecord => ({
   findings: [finding({})], other: [], otherHidden: 0,
   skipped: [{ at: "", runner: "customer", method: "POST", host: "staging.acme.dev", path: "/api/invoice/send", category: "email", reason: "clicked control looks like email", trigger: "send invoice" }],
   counts: { checked: 10, passed: 6, passRate: 60, conflicts: 2, product: 1, unspecced: 0, unverified: 1, skipped: 1 },
-  unreadLinks: [], shots: {}, ...o,
+  unreadLinks: [], shots: {}, runners: [], leftBehind: [], ...o,
 });
 
 describe("renderSessionReport", () => {

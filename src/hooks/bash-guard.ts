@@ -3,8 +3,12 @@ import { join, sep } from "node:path";
 
 const STALE_MS = 6 * 3600 * 1000;
 
-/** The url of this project's active run, if one is going (and not abandoned hours ago). */
 export function activeRunUrl(projectDir: string): string | undefined {
+  return activeRun(projectDir)?.url;
+}
+
+/** This project's active run, if one is going (and not abandoned hours ago). */
+export function activeRun(projectDir: string): { url: string; live: boolean } | undefined {
   const pointer = join(projectDir, ".baseline", "active-run");
   if (!existsSync(pointer)) return undefined;
   let runDir: string, root: string;
@@ -14,10 +18,10 @@ export function activeRunUrl(projectDir: string): string | undefined {
   } catch { return undefined; }
   if (!runDir.startsWith(root + sep)) return undefined;
   try {
-    const run = JSON.parse(readFileSync(join(runDir, "run.json"), "utf8")) as { url?: string; startedAt?: string };
+    const run = JSON.parse(readFileSync(join(runDir, "run.json"), "utf8")) as { url?: string; startedAt?: string; live?: boolean };
     const started = Date.parse(run.startedAt ?? "") || statSync(pointer).mtimeMs;
-    if (Date.now() - started > STALE_MS) return undefined;
-    return run.url;
+    if (Date.now() - started > STALE_MS || !run.url) return undefined;
+    return { url: run.url, live: run.live === true };
   } catch { return undefined; }
 }
 
@@ -31,6 +35,8 @@ function hostAliases(runUrl: string): string[] {
 const SEGMENT_SPLIT = /;|&&|\|\||\||\n|`|\$\(/;
 const SHELL_META = /[;&|`$()<>\n]/;
 const MUTATING = /^baseline\s+(config\s+(allow|deny|depth|set|secret|add-runner|remove-runner)\b|.*\s--live\b)/;
+/** A run started with --live may sign its runners in and check its own target with --live. */
+const LIVE_OK = /^baseline\s+(signin|target-check)\s/;
 const BEFORE = String.raw`(^|[\s;&|(\x60'"/])`;
 const HTTP_TOOL = new RegExp(BEFORE + String.raw`(curl|wget|http|https|xh|httpie)['"]?(\s|$)`, "i");
 const SCRIPT_TOOL = new RegExp(BEFORE + String.raw`(python[0-9.]*|node|deno|bun|ruby|php|perl)['"]?(\s|$)`, "i");
@@ -47,10 +53,10 @@ export type GuardResult = { allow: true } | { deny: string };
  * Best-effort second layer while a run is active. Agents should reach the site only through
  * `baseline script`, and nobody changes permissions or production protection mid-run.
  */
-export function bashGuard(command: string, ctx: { runUrl?: string }): GuardResult {
+export function bashGuard(command: string, ctx: { runUrl?: string; live?: boolean }): GuardResult {
   if (!ctx.runUrl) return { allow: true };
   const segments = command.split(SEGMENT_SPLIT).map((s) => s.trim()).filter(Boolean);
-  if (segments.some((s) => MUTATING.test(s))) {
+  if (segments.some((s) => MUTATING.test(s) && !(ctx.live && LIVE_OK.test(s)))) {
     return { deny: "Baseline run in progress: permissions, runners and production settings can't change until the run finishes." };
   }
   if (/^\s*baseline\s/.test(command) && !SHELL_META.test(command)) return { allow: true };

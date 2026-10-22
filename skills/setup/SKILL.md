@@ -33,11 +33,12 @@ choices. Re-running setup edits what is there; it never starts over.
 4. **Name the protected areas on this site.** Explain that Baseline already watches for common
    words ("send invoice", "delete user", "pay now"...). Ask for any URL patterns or button words
    on their site that send email, change accounts, delete things or touch money. Add them with
-   `baseline config set patterns '{"email":{"words":["…"],"urls":["/notify/**"]}}'` (new entries
-   are added to the defaults, never in place of them).
+   `baseline config set patterns '{"email":{"words":["…"],"urls":["/notify/**"]}}'`. New entries
+   are added to what is saved and to the defaults; nothing is removed. The same goes for
+   `readPosts` and `productionUrls`. To replace a list on purpose, add `--replace`.
 5. **Read-only POSTs.** Ask whether the site does searches or reads with POST requests (GraphQL
    queries, search endpoints). Add their paths with `baseline config set readPosts '["/api/search"]'`
-   so look-only runners can use them.
+   so look-only runners can use them. GraphQL mutations to those paths stay blocked.
 6. **Production.** Ask for the live site's URL(s): `baseline config set productionUrls '["https://…"]'`.
    Runs refuse these unless someone asks for a live run.
 7. **Version (optional).** If the site shows its deployed commit somewhere (a /version endpoint),

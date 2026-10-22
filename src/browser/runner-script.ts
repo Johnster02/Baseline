@@ -71,6 +71,13 @@ register("script", "run an agent's browser script as a runner: script <runner> <
         const fn = (session as unknown as Record<string, (...a: unknown[]) => unknown>)[m.method]!;
         return reply(true, await fn(...(m.args ?? [])));
       } catch (e) {
+        if ((e as Error).name === "SignedOutError") {
+          // The report shows which runner was signed out mid-run.
+          const file = join(runDir, "runners.json");
+          let prev: { key: string }[] = [];
+          try { prev = JSON.parse(readFileSync(file, "utf8")); } catch { prev = []; }
+          writeFileSync(file, JSON.stringify([...prev.filter((p) => p.key !== runner.key), { key: runner.key, ok: false, error: (e as Error).message }], null, 2));
+        }
         return reply(false, undefined, `${(e as Error).name}: ${(e as Error).message.split("\n")[0]}`);
       }
     });

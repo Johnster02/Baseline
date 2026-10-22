@@ -79,7 +79,7 @@ register("config", "show | describe | add-runner | remove-runner | depth | allow
     case "set": {
       const [field, value] = a;
       if (!SETTABLE.includes(field as (typeof SETTABLE)[number]) || value === undefined) {
-        err(`usage: baseline config set <${SETTABLE.join("|")}> <json or text>`);
+        err(`usage: baseline config set <${SETTABLE.join("|")}> <json or text> [--replace]`);
         return 2;
       }
       let parsed: unknown = value;
@@ -87,6 +87,19 @@ register("config", "show | describe | add-runner | remove-runner | depth | allow
         try { parsed = JSON.parse(value); } catch { err(`${field} must be valid JSON`); return 2; }
       }
       if (field === "theme" && !THEMES.includes(parsed as never)) { err(`theme must be one of ${THEMES.join(", ")}`); return 2; }
+      // Lists and patterns add to what is saved (re-running setup never drops a protection); --replace replaces.
+      const replace = a.includes("--replace");
+      if (!replace && Array.isArray(parsed) && Array.isArray((cfg as Record<string, unknown>)[field])) {
+        parsed = [...new Set([...((cfg as Record<string, unknown>)[field] as unknown[]), ...parsed])];
+      }
+      if (!replace && field === "patterns" && parsed && typeof parsed === "object") {
+        const cur = cfg.patterns as Record<string, { urls: string[]; words: string[] }>;
+        const add = parsed as Record<string, { urls?: string[]; words?: string[] }>;
+        parsed = Object.fromEntries(Object.keys(cur).map((k) => [k, {
+          urls: [...new Set([...cur[k]!.urls, ...(add[k]?.urls ?? [])])],
+          words: [...new Set([...cur[k]!.words, ...(add[k]?.words ?? [])])],
+        }]));
+      }
       const next = projectConfigSchema.safeParse({ ...cfg, [field]: parsed });
       if (!next.success) { err(next.error.issues.map((i) => i.message).join("; ")); return 2; }
       saveConfig(dir, next.data);

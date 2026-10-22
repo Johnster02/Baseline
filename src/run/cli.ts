@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { register, out, err, io } from "../cli";
-import { describePermissions, loadConfig } from "../config/store";
+import { checkTarget, describePermissions, loadConfig } from "../config/store";
 import { activeRunDir } from "../browser/runner-script";
 import { newRun, finishRun } from "./state";
 import { PHASES, updateProgress, readProgress } from "./progress";
@@ -24,8 +24,11 @@ register("run", "run new --url <u> --label <l> [--session <id>] | run finish", (
     const url = flag(args, "--url"), label = flag(args, "--label");
     if (!url || !label) { err("usage: baseline run new --url <url> --label <label> [--session <id>]"); return 2; }
     const cfg = loadConfig(process.cwd());
+    const live = args.includes("--live");
+    const target = checkTarget(url, cfg, live);
+    if (!target.ok) { err(target.reason === "production" ? "refusing: that URL is marked as production. Start the run with --live to test it." : "refusing: not a full http(s) URL"); return 3; }
     const permissions = cfg.runners.map((r) => ({ runner: r.key, ...describePermissions(r, cfg.patterns) }));
-    const created = newRun(process.cwd(), flag(args, "--session"), { url, label, permissions });
+    const created = newRun(process.cwd(), flag(args, "--session"), { url, label, permissions, live });
     out(JSON.stringify(created));
     return 0;
   }

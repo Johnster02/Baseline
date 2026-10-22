@@ -41,6 +41,18 @@ function wordHit(text: string, word: string): boolean {
 
 /** A learned request is this exact call: host, method, path and body. A different body to the same
  *  path (a GraphQL mutation after a query) is a different request. */
+/** A GraphQL mutation, in a JSON body or as a raw query string. */
+export function looksLikeMutation(body?: string): boolean {
+  if (!body) return false;
+  let q = body;
+  try {
+    const j = JSON.parse(body);
+    const ops = Array.isArray(j) ? j : [j];
+    q = ops.map((o) => (o && typeof o.query === "string" ? o.query : "")).join("\n");
+  } catch { /* not JSON */ }
+  return /(^|[\s{}])mutation\b/.test(q.replace(/#[^\n]*/g, ""));
+}
+
 export const requestKey = (method: string, url: string, body = "") => {
   const u = new URL(url);
   const h = body ? " #" + createHash("sha256").update(body).digest("hex").slice(0, 16) : "";
@@ -93,7 +105,8 @@ export function decide(req: GuardRequest, ctx: GuardContext): Decision {
   // Other hosts during a page load (analytics, the auth provider's session refresh): allowed, never learned.
   if (req.loading) return { action: "continue" };
   if (ctx.learned.has(key)) return { action: "continue" };
-  if (cfg.readPosts.some((g) => globMatch(g, path))) return { action: "continue" };
+  // A read-only POST path is allowed only for reads: a GraphQL mutation to the same path is a write.
+  if (cfg.readPosts.some((g) => globMatch(g, path)) && !looksLikeMutation(req.body)) return { action: "continue" };
   if (runner.depth === "look") return { action: "abort", category: "unknown-write", reason: "look-only runner: this would change data" };
   return { action: "continue" };
 }

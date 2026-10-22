@@ -19,11 +19,21 @@ export type SignInResult = { key: string; ok: boolean; landed?: string; error?: 
 const PASSWORD = 'input[type="password"]';
 const USERNAME = 'input[type="email"], input[autocomplete="username"], input[name*="user" i], input[name*="email" i], input[name*="login" i], input[type="text"]';
 
-/** On a sign-in page: the runner's login path, or any page asking for a password. */
+const SIGN_IN_PATH = /\/(log-?in|sign-?in|auth|session|sso)(\/|$|\?)/i;
+
+/**
+ * Landed on a sign-in page: the runner's own login path, or (for any runner) a sign-in-looking
+ * path that asks for a password. A password field alone (change password, confirm) is not it.
+ */
+export function looksSignedOut(url: string, passwordVisible: boolean, runner: Runner): boolean {
+  const u = new URL(url);
+  if (runner.auth.kind === "form" && u.pathname === new URL(runner.auth.loginUrl, url).pathname) return true;
+  return passwordVisible && SIGN_IN_PATH.test(u.pathname + (u.search ? "?" : ""));
+}
+
 export async function isSignedOut(page: Page, runner: Runner): Promise<boolean> {
-  const path = new URL(page.url()).pathname;
-  if (runner.auth.kind === "form" && path === new URL(runner.auth.loginUrl, page.url()).pathname) return true;
-  return (await page.locator(PASSWORD).first().isVisible().catch(() => false)) === true;
+  const visible = (await page.locator(PASSWORD).first().isVisible().catch(() => false)) === true;
+  return looksSignedOut(page.url(), visible, runner);
 }
 
 function saveState(file: string, state: unknown) {

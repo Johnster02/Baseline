@@ -7,13 +7,11 @@ tools: Bash, Read, Write, WebFetch, Glob
 
 You gather the inputs for one Baseline acceptance run. You do not judge anything.
 
-You are given: the run folder (`<runDir>`), the inputs the user named, and whether Jira or Linear
-connector tools are available in this session.
+You are given: the run folder (`<runDir>`) and the inputs to fetch. Tickets already fetched
+through a connector arrive as files in `<runDir>/linked/`; pass those paths on as inputs.
 
 1. Run `baseline inputs --run <runDir> <inputs...>` from the project folder. If it exits 4, the
    key is ambiguous: stop and report the JSON it printed, so the orchestrator can ask the user.
-   If a Jira or Linear connector is available, prefer it for those tickets and add what it returns
-   to `inputs.json` as an item with `ref.kind` set to `jira` or `linear`.
 2. Read `<runDir>/inputs.json`. For every link in `items[].links` that looks like a spec, design or
    guide (Confluence, Notion, Google Docs, a docs site, a PDF), try to read it with the tools you
    have (WebFetch, a connector). Save what you read as `<runDir>/linked/<n>.md` with the URL on the

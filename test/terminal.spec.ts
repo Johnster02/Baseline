@@ -18,7 +18,7 @@ const record = (): RunRecord => ({
   runId: "r-1", label: "PR #412", inputs: [], url: "https://staging.acme.dev", size: "quick", agents: 3, startedAt: "", durationMin: 9.2,
   commit: { codeRead: true, mismatch: false }, permissions: [],
   findings: [findingSchema.parse({ id: "R-01", title: "Expired code still gives a discount", verdict: "spec-built", specced: { text: "s", ref: "r" } })],
-  other: [], otherHidden: 0, skipped: [], unreadLinks: [], shots: {},
+  other: [], otherHidden: 0, skipped: [], unreadLinks: [], shots: {}, runners: [], leftBehind: [],
   counts: { checked: 10, passed: 6, passRate: 60, conflicts: 2, product: 1, unspecced: 0, unverified: 1, skipped: 1 },
 });
 

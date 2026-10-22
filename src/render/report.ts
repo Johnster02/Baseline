@@ -19,6 +19,10 @@ export type RunRecord = {
   permissions: { runner: string; can: string[]; cannot: string[] }[];
   findings: Finding[]; other: Finding[]; otherHidden: number; skipped: BlockedEntry[]; counts: Counts;
   unreadLinks: string[];
+  /** Each runner's sign-in status this run. */
+  runners: { key: string; ok: boolean; error?: string }[];
+  /** Things the run created and could not remove. */
+  leftBehind: { label: string; note: string }[];
   /** Screenshot path (relative to the run folder) to base64 JPEG/PNG. */
   shots: Record<string, string>;
 };
@@ -64,6 +68,9 @@ export function buildRunRecord(runDir: string): RunRecord {
     durationMin: Number.isFinite(end - start) ? Math.round(((end - start) / 60000) * 10) / 10 : 0,
     commit, permissions: run.permissions ?? [], findings, other: res.other, otherHidden: res.otherHidden,
     skipped, counts: countRun(findings, skipped), unreadLinks: inputs.unreadLinks ?? [], shots,
+    runners: readJson<RunRecord["runners"]>(join(runDir, "runners.json"), []),
+    leftBehind: readJson<{ label: string; removed: boolean; note?: string }[]>(join(runDir, "cleanup.json"), [])
+      .filter((c) => !c.removed).map((c) => ({ label: c.label, note: c.note ?? "" })),
   };
 }
 
@@ -126,6 +133,10 @@ function runHTML(r: RunRecord, hidden: boolean): string {
     `<div class="row"><span><b>${esc(s.runner)}</b> <span class="k">${esc(s.method)} ${esc(s.host)}${esc(s.path)}</span></span><span>${esc(s.reason)}${s.trigger ? ` (“${esc(s.trigger)}”)` : ""}</span><span class="k">To include it next time: ${esc(ALLOW_HINT[s.category] ?? "change this runner's permissions")}</span></div>`).join("")}</div></section>` : "";
   const permHTML = r.permissions.length ? `<section class="sec wp" style="--w:6"><h2>Permissions this run had</h2><div class="rows">${r.permissions.map((p) =>
     `<div class="perm"><b>${esc(p.runner)}</b><ul>${p.can.map((c) => `<li>${esc(c)}</li>`).join("")}</ul><ul class="no">${p.cannot.map((c) => `<li>not: ${esc(c)}</li>`).join("")}</ul></div>`).join("")}</div></section>` : "";
+  const runnersHTML = (r.runners ?? []).some((x) => !x.ok) ? `<section class="sec wp" style="--w:5"><h2>Runners</h2><div class="rows">${r.runners.map((x) =>
+    `<div class="row"><span><b>${esc(x.key)}</b></span><span>${x.ok ? "signed in" : "not signed in"}</span><span class="k">${esc(x.error ?? "")}</span></div>`).join("")}</div></section>` : "";
+  const leftHTML = (r.leftBehind ?? []).length ? `<section class="sec wp" style="--w:6"><h2>Left behind · ${r.leftBehind.length}</h2><div class="rows">${r.leftBehind.map((x) =>
+    `<div class="row"><span><b>${esc(x.label)}</b></span><span>${esc(x.note)}</span><span class="k">Remove it by hand on the site.</span></div>`).join("")}</div></section>` : "";
   const unread = r.unreadLinks.length ? `<section class="sec wp" style="--w:7"><h2>Links that could not be read</h2><div class="rows">${r.unreadLinks.map((l) => `<div class="row"><span class="k">${esc(l)}</span></div>`).join("")}</div></section>` : "";
   return `<section class="run" data-run="${esc(r.runId)}"${hidden ? " hidden" : ""}>
 <header class="case wp" style="--w:0"><div><h1>${esc(r.label)}</h1><div class="tele"><span>run <b>${esc(r.runId)}</b></span><span>${r.size} · <b>${r.agents} agents</b></span><span>${r.durationMin}m</span><span>${esc(r.url)}${r.commit.commitRead ? ` @ <b>${esc(r.commit.commitRead)}</b>` : ""}</span></div></div><span class="result">Complete</span></header>
@@ -141,7 +152,7 @@ ${warn}
 <div class="toolbar wp" style="--w:2"><div class="seg" role="group" aria-label="Filter">${groups.map(([g, l]) => `<button type="button" data-filter="${g}" aria-pressed="${g === "all"}">${l}</button>`).join("")}</div>
 <div class="tools-r"><span class="readout data"><b>${r.findings.length}</b> shown</span><input class="search" type="search" placeholder="Search findings" aria-label="Search findings"></div></div>
 <div class="list wp" style="--w:3">${r.findings.length ? r.findings.map((f, i) => findingHTML(f, r, i, budget)).join("") : `<p class="empty">No findings for this run.</p>`}</div>
-${otherHTML}${skippedHTML}${permHTML}${unread}
+${runnersHTML}${leftHTML}${otherHTML}${skippedHTML}${permHTML}${unread}
 </section>`;
 }
 
