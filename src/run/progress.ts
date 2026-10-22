@@ -10,7 +10,7 @@ export type Progress = {
   runId: string; label: string; size: "quick" | "full"; agents: number; startedAt: string;
   phases: PhaseState[]; active: { persona: string; doing: string }[]; counts: Counts; finishedAt?: string;
 };
-export type ProgressPatch = Partial<Pick<Progress, "runId" | "label" | "size" | "agents" | "counts" | "finishedAt">> & {
+export type ProgressPatch = Partial<Pick<Progress, "runId" | "label" | "size" | "agents" | "counts" | "startedAt" | "finishedAt">> & {
   phase?: PhaseState; agent?: { persona: string; doing: string }; agentDone?: string;
 };
 
