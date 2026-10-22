@@ -117,7 +117,7 @@ export function normaliseMessage(message: string): string {
 }
 
 function splitWords(text: string): string {
-  return { text, undecodable: /%[0-9a-f]{2}/i.test(text) };
+  return text.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_\-.:/=&?]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
 /** JSON and percent-decoded text, and whether escapes were still left (checked before any splitting). */
@@ -141,7 +141,7 @@ export function decodeMessage(message: string): { text: string; undecodable: boo
     if (next === text) break;
     text = next;
   }
-  return text.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_\-.:/=&?]+/g, " ").replace(/\s+/g, " ").trim();
+  return { text, undecodable: /%[0-9a-f]{2}/i.test(text) };
 }
 
 /**

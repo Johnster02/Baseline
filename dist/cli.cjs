@@ -20413,7 +20413,7 @@ function normaliseMessage(message) {
   return splitWords(decodeMessage(message).text);
 }
 function splitWords(text) {
-  return { text, undecodable: /%[0-9a-f]{2}/i.test(text) };
+  return text.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_\-.:/=&?]+/g, " ").replace(/\s+/g, " ").trim();
 }
 function decodeMessage(message) {
   let text = message;
@@ -20437,7 +20437,7 @@ function decodeMessage(message) {
     if (next === text) break;
     text = next;
   }
-  return text.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_\-.:/=&?]+/g, " ").replace(/\s+/g, " ").trim();
+  return { text, undecodable: /%[0-9a-f]{2}/i.test(text) };
 }
 function wsDecide(req, ctx) {
   const { runner, cfg } = ctx;
