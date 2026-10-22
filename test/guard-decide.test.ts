@@ -35,8 +35,8 @@ describe("decide", () => {
   });
   it("learns writes fired while a page loads", () => {
     const c = ctx();
-    expect(decide(req({ loading: true }), c)).toEqual({ action: "continue", learn: "POST /api/x" });
-    c.learned.add("POST /api/x");
+    expect(decide(req({ loading: true }), c)).toEqual({ action: "continue", learn: "POST staging.acme.dev/api/x" });
+    c.learned.add("POST staging.acme.dev/api/x");
     expect(decide(req({}), c).action).toBe("continue");
   });
   it("allows configured read-only posts", () => {
@@ -58,7 +58,7 @@ describe("decide", () => {
   });
   it("a protected write is blocked even when it was learned on load", () => {
     const c = ctx(create);
-    c.learned.add("POST /api/x");
+    c.learned.add("POST staging.acme.dev/api/x");
     expect(decide(req({ clickText: "Delete user" }), c)).toMatchObject({ action: "abort", category: "delete" });
   });
   it("allows a protected category the runner was given", () => {

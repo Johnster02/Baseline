@@ -40,7 +40,10 @@ export function hostKey(url: string): string | undefined {
 export function isProduction(url: string, cfg: ProjectConfig): boolean {
   const h = hostKey(url);
   if (!h) return false;
-  return cfg.productionUrls.some((p) => hostKey(p) === h);
+  return cfg.productionUrls.some((p) => {
+    const ph = hostKey(p);
+    return !!ph && (h === ph || h.endsWith("." + ph));
+  });
 }
 
 export function checkTarget(url: string, cfg: ProjectConfig, live: boolean): { ok: true } | { ok: false; reason: "production" | "invalid" } {

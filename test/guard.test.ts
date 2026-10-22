@@ -46,7 +46,7 @@ describe("session guard against Acme shop", () => {
     f.requests.length = 0;
     const dir = await withSession(look, {}, async (s) => { await s.goto("/tracked"); });
     expect(had("POST", "/api/track")).toBe(true);
-    expect(read(join(dir, "logs", "load-requests.json"))).toContain("POST /api/track");
+    expect(read(join(dir, "logs", "load-requests-customer.json")).some((k: string) => k.startsWith("POST ") && k.includes("/api/track"))).toBe(true);
   });
 
   it("allowlisted read-only POST works for look only", async () => {

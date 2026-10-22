@@ -1,8 +1,10 @@
 import type { Category, ProjectConfig, Runner, PatternCategory } from "../config/schema";
 import { isProduction } from "../config/store";
 
-export type GuardRequest = { method: string; url: string; loading: boolean; clickText?: string };
-export type GuardContext = { runner: Runner; cfg: ProjectConfig; learned: Set<string> };
+import { createHash } from "node:crypto";
+
+export type GuardRequest = { method: string; url: string; loading: boolean; clickText?: string; body?: string; document?: boolean };
+export type GuardContext = { runner: Runner; cfg: ProjectConfig; learned: Set<string>; baseHost?: string; createdPaths?: string[] };
 export type Decision =
   | { action: "continue"; learn?: string }
   | { action: "abort"; category: Category | "unknown-write"; reason: string; trigger?: string };
@@ -10,8 +12,18 @@ export type Decision =
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const PATTERN_ORDER: PatternCategory[] = ["email", "auth", "delete", "finance"];
 
-/** `**` matches across slashes, `*` within one segment. Anchored to the whole path. */
-export function globMatch(pattern: string, path: string): boolean {
+/** Decode, drop ;params and a trailing slash, so /a/%64elete/ and /a/delete;x=1 match like /a/delete. */
+export function normalizePath(path: string): string {
+  let p = path;
+  try { p = decodeURIComponent(p); } catch { /* keep raw */ }
+  p = p.split("/").map((seg) => seg.split(";")[0]).join("/");
+  if (p.length > 1) p = p.replace(/\/+$/, "");
+  return p || "/";
+}
+
+/** `**` matches across slashes, `*` within one segment. Anchored to the whole (normalised) path. */
+export function globMatch(pattern: string, rawPath: string): boolean {
+  const path = normalizePath(rawPath);
   let re = "";
   for (let i = 0; i < pattern.length; i++) {
     const c = pattern[i]!;
@@ -27,7 +39,16 @@ function wordHit(text: string, word: string): boolean {
   return new RegExp(`(^|[^a-z0-9])${w}([^a-z0-9]|$)`, "i").test(text);
 }
 
-export const requestKey = (method: string, url: string) => `${method.toUpperCase()} ${new URL(url).pathname}`;
+/** A learned request is this exact call: host, method, path and body. A different body to the same
+ *  path (a GraphQL mutation after a query) is a different request. */
+export const requestKey = (method: string, url: string, body = "") => {
+  const u = new URL(url);
+  const h = body ? " #" + createHash("sha256").update(body).digest("hex").slice(0, 16) : "";
+  return `${method.toUpperCase()} ${u.host}${u.pathname}${h}`;
+};
+
+/** Categories whose URL patterns also apply to page navigations (GETs with side effects, like /logout). */
+const GET_CATEGORIES: PatternCategory[] = ["auth", "delete"];
 
 /**
  * The look-only and protected-area rules, in order. Pure so it can be tested without a browser.
@@ -39,9 +60,19 @@ export function decide(req: GuardRequest, ctx: GuardContext): Decision {
   if (isProduction(req.url, cfg) && !runner.allow.includes("live")) {
     return { action: "abort", category: "live", reason: "production site, live testing not allowed for this runner" };
   }
-  if (READ_METHODS.has(method)) return { action: "continue" };
+  const u = new URL(req.url);
+  const path = u.pathname;
+  if (READ_METHODS.has(method)) {
+    if (req.document) {
+      for (const cat of GET_CATEGORIES) {
+        if (runner.allow.includes(cat)) continue;
+        const g = cfg.patterns[cat].urls.find((x) => globMatch(x, path));
+        if (g) return { action: "abort", category: cat, reason: `page link matches protected ${cat} URL pattern`, trigger: g };
+      }
+    }
+    return { action: "continue" };
+  }
 
-  const path = new URL(req.url).pathname;
   for (const cat of PATTERN_ORDER) {
     if (runner.allow.includes(cat)) continue;
     const p = cfg.patterns[cat];
@@ -51,8 +82,16 @@ export function decide(req: GuardRequest, ctx: GuardContext): Decision {
     if (word) return { action: "abort", category: cat, reason: `clicked control looks like ${cat}`, trigger: word.toLowerCase() };
   }
 
-  const key = requestKey(method, req.url);
-  if (req.loading) return ctx.learned.has(key) ? { action: "continue" } : { action: "continue", learn: key };
+  if (method === "DELETE" && !runner.allow.includes("delete")) {
+    const own = (ctx.createdPaths ?? []).some((c) => normalizePath(c) === normalizePath(path));
+    if (!own) return { action: "abort", category: "delete", reason: "DELETE request, and this runner may not delete" };
+  }
+
+  const key = requestKey(method, req.url, req.body);
+  const sameHost = !ctx.baseHost || u.host === ctx.baseHost;
+  if (req.loading && sameHost) return ctx.learned.has(key) ? { action: "continue" } : { action: "continue", learn: key };
+  // Other hosts during a page load (analytics, the auth provider's session refresh): allowed, never learned.
+  if (req.loading) return { action: "continue" };
   if (ctx.learned.has(key)) return { action: "continue" };
   if (cfg.readPosts.some((g) => globMatch(g, path))) return { action: "continue" };
   if (runner.depth === "look") return { action: "abort", category: "unknown-write", reason: "look-only runner: this would change data" };
@@ -62,7 +101,9 @@ export function decide(req: GuardRequest, ctx: GuardContext): Decision {
 /** Query values that look like credentials are replaced before anything is logged. */
 export function redactUrl(raw: string): string {
   const u = new URL(raw);
+  const looksSecret = (seg: string) => seg.length >= 20 && /[a-z]/i.test(seg) && /\d/.test(seg) && /^[A-Za-z0-9_.~-]+$/.test(seg);
+  const pathname = u.pathname.split("/").map((seg) => (looksSecret(seg) ? "[redacted]" : seg)).join("/");
   const qs = [...u.searchParams.entries()].map(([k, v]) =>
     `${k}=${/token|jwt|session|code|secret|password|key|auth|sig/i.test(k) || v.length > 48 ? "[redacted]" : v}`);
-  return u.pathname + (qs.length ? "?" + qs.join("&") : "");
+  return pathname + (qs.length ? "?" + qs.join("&") : "");
 }

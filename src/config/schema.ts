@@ -60,8 +60,8 @@ const productionUrl = z.string().transform((v, ctx) => {
 export function defaultPatterns(): Patterns {
   return {
     email: { urls: [], words: ["send email", "send invite", "invite", "notify", "resend", "send invoice", "share via email"] },
-    auth: { urls: ["**/password/**", "**/sign-up**", "**/signup**", "**/register**"], words: ["change password", "reset password", "sign up", "change role", "remove member", "revoke"] },
-    delete: { urls: [], words: ["delete project", "delete user", "delete account", "remove user", "delete workspace", "deactivate"] },
+    auth: { urls: ["**/password/**", "**/sign-up**", "**/signup**", "**/register**", "**/logout**", "**/log-out**", "**/signout**", "**/sign-out**", "**/invite/accept**"], words: ["change password", "reset password", "sign up", "change role", "remove member", "revoke"] },
+    delete: { urls: ["**/delete", "**/delete/**", "**/destroy", "**/destroy/**"], words: ["delete project", "delete user", "delete account", "remove user", "delete workspace", "deactivate"] },
     finance: { urls: ["**/billing/**", "**/checkout/pay**", "**/payments/**"], words: ["pay", "pay now", "place order", "purchase", "refund", "charge", "subscribe", "upgrade plan"] },
   };
 }

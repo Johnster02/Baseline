@@ -25,7 +25,19 @@ const PAGES: Record<string, string> = {
     <label>Search <input id="q"></label> <button onclick="call('/api/search', {q: document.getElementById('q').value})">Search</button>`),
   "/checkout": page("Checkout", `<p>Total: $12.00</p><button onclick="call('/api/pay')">Pay now</button>`),
   "/admin": page("Admin", `<button onclick="call('/api/invoice/send')">Send invoice</button>
-    <button onclick="call('/api/users/7/delete')">Delete user</button>`),
+    <button onclick="call('/api/users/7/delete')">Delete user</button>
+    <a href="/users/7/delete">Remove member</a> <a href="/logout">Log out</a>
+    <button onclick="document.getElementById('confirm').hidden=false">Delete project</button>
+    <div id="confirm" hidden role="dialog" aria-label="Are you sure?"><button onclick="fetch('/api/projects/3',{method:'DELETE'}).then(r=>document.getElementById('status').textContent='done '+r.status).catch(()=>document.getElementById('status').textContent='failed')">Confirm</button></div>
+    <button title="Archive" onclick="call('/api/archive')"><svg width="10" height="10"></svg></button>`),
+  "/gql": page("Profile", `<p id="me">loading</p><button onclick="gql('mutation { rename }')">Rename</button>
+    <script>
+    function gql(q) { return fetch('/graphql', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: q }) })
+      .then(r => document.getElementById('status').textContent = 'done ' + r.status).catch(() => document.getElementById('status').textContent = 'failed'); }
+    gql('query { me { name } }');
+    </script>`),
+  "/users/7/delete": page("Removed", `<p>Member removed.</p>`),
+  "/logout": page("Logged out", `<p>Bye.</p>`),
   "/tracked": page("Tracked", `<p>This page reports a view on load.</p><script>fetch('/api/track', {method: 'POST', body: '{}'})</script>`),
 };
 
@@ -69,6 +81,7 @@ export async function startFixture(): Promise<{ url: string; requests: { method:
       html(PAGES[path]);
       return;
     }
+    if (path === "/graphql") { res.writeHead(200, { "content-type": "application/json" }); res.end('{"data":{}}'); return; }
     if (path.startsWith("/api/")) { res.writeHead(200, { "content-type": "application/json" }); res.end('{"ok":true}'); return; }
     res.writeHead(404); res.end("not found");
   });

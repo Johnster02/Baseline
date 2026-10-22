@@ -1,8 +1,9 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
-import type { Browser, BrowserContext, Page } from "playwright";
+import type { Browser, BrowserContext, Locator, Page } from "playwright";
 import type { ProjectConfig, Runner } from "../config/schema";
+import { dataDir } from "../config/secrets";
 import { decide, redactUrl } from "./guard";
 import { isSignedOut, SignedOutError } from "./signin";
 
@@ -11,9 +12,31 @@ export type BlockedEntry = {
   category: string; reason: string; trigger?: string;
 };
 
+/** How an agent names an element. Role + name first, like a person would. */
+export type Target =
+  | { role: string; name?: string; exact?: boolean; nth?: number }
+  | { text: string; exact?: boolean; nth?: number }
+  | { label: string; nth?: number }
+  | { placeholder: string; nth?: number }
+  | { testId: string; nth?: number }
+  | { css: string; nth?: number };
+
 export type Session = {
+  /** Parent-process only. Agent scripts never receive this. */
   page: Page;
   goto(path: string): Promise<void>;
+  click(t: Target): Promise<void>;
+  fill(t: Target, value: string): Promise<void>;
+  press(key: string, t?: Target): Promise<void>;
+  select(t: Target, value: string): Promise<void>;
+  check(t: Target): Promise<void>;
+  hover(t: Target): Promise<void>;
+  back(): Promise<void>;
+  waitFor(t: Target, opts?: { state?: "visible" | "hidden"; timeout?: number }): Promise<void>;
+  snapshot(): Promise<string>;
+  text(t?: Target): Promise<string>;
+  url(): Promise<string>;
+  title(): Promise<string>;
   shot(name: string, caption: string): Promise<string>;
   created(kind: string, label: string, url?: string): void;
   close(): Promise<void>;
@@ -24,9 +47,9 @@ export type OpenOptions = {
   storageState?: string; headless?: boolean;
 };
 
-/** Playwright is installed by setup into the plugin data dir and reached through NODE_PATH. */
+/** Playwright is installed by setup into the plugin data dir. */
 export function loadPlaywright(): typeof import("playwright") {
-  const bases = [join(process.cwd(), "noop.js")];
+  const bases = [join(process.cwd(), "noop.js"), join(dataDir(), "noop.js")];
   if (typeof __filename !== "undefined") bases.push(__filename);
   let last: unknown;
   for (const b of bases) {
@@ -45,78 +68,149 @@ export function appendJson(p: string, item: unknown): void {
 }
 
 const STATIC = new Set(["script", "stylesheet", "image", "font", "media", "manifest"]);
-const CLICK_WINDOW_MS = 3000;
+const CLICK_WINDOW_MS = 4000;
+const SNAPSHOT_LIMIT = 12000;
 
+const LABEL_JS = `(el) => {
+  const svgTitle = el.querySelector && el.querySelector('svg title');
+  return ((el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('title'))) || el.innerText || el.value || (svgTitle && svgTitle.textContent) || '').trim().slice(0, 200);
+}`;
 const INIT = `(() => {
-  const pick = (el) => el && el.closest && el.closest('button,a,[role=button],[role=menuitem],input[type=submit],input[type=button],summary,label');
-  const text = (el) => ((el.getAttribute && el.getAttribute('aria-label')) || el.innerText || el.value || '').trim().slice(0, 200);
-  document.addEventListener('click', (e) => { const el = pick(e.target); if (el) window.__baselineClick(text(el)); }, true);
-  document.addEventListener('submit', (e) => { const el = e.submitter || e.target; window.__baselineClick(text(el)); }, true);
+  const label = ${LABEL_JS};
+  const pick = (el) => el && el.closest && el.closest('button,a,[role=button],[role=link],[role=menuitem],[role=tab],[role=option],[onclick],input[type=submit],input[type=button],summary,label');
+  document.addEventListener('click', (e) => { const el = pick(e.target); if (el) window.__baselineClick(label(el)); }, true);
+  document.addEventListener('submit', (e) => { const el = e.submitter || e.target; window.__baselineClick(label(el)); }, true);
 })();`;
 
 export async function openSession(o: OpenOptions): Promise<Session> {
   for (const d of ["logs", "shots"]) mkdirSync(join(o.runDir, d), { recursive: true });
-  const loadPath = join(o.runDir, "logs", "load-requests.json");
+  // Learned per runner, never shared: one account's page loads don't unlock another's writes.
+  const loadPath = join(o.runDir, "logs", `load-requests-${o.runner.key}.json`);
   const learned = new Set<string>(readJson<string[]>(loadPath, []));
-  const state = { loading: false, clickText: "", clickAt: 0 };
+  const clicks: { text: string; at: number }[] = [];
+  const state = { loading: false };
   const network: { at: string; method: string; host: string; path: string; type: string; outcome: string }[] = [];
+  const createdPaths: string[] = [];
   const baseHost = new URL(o.baseUrl).host;
+
+  const recentClicks = () => {
+    const now = Date.now();
+    while (clicks.length && now - clicks[0]!.at > CLICK_WINDOW_MS) clicks.shift();
+    return clicks.map((c) => c.text).filter(Boolean).join(" | ") || undefined;
+  };
+  const block = (entry: Omit<BlockedEntry, "runner" | "at">) => {
+    appendJson(join(o.runDir, "blocked.json"), { at: new Date().toISOString(), runner: o.runner.key, ...entry });
+  };
 
   const { chromium } = loadPlaywright();
   const browser: Browser = await chromium.launch({ headless: o.headless ?? true });
   const context: BrowserContext = await browser.newContext({
     baseURL: o.baseUrl,
+    serviceWorkers: "block",
     storageState: o.storageState && existsSync(o.storageState) ? o.storageState : undefined,
   });
   context.setDefaultTimeout(15000);
-  await context.exposeBinding("__baselineClick", (_src, t: string) => { state.clickText = String(t || ""); state.clickAt = Date.now(); });
+  await context.exposeBinding("__baselineClick", (_src, t: string) => { clicks.push({ text: String(t || ""), at: Date.now() }); });
   await context.addInitScript({ content: INIT });
 
+  let page!: Page;
   await context.route("**/*", async (route) => {
-    const r = route.request();
-    const method = r.method();
-    let clickText = Date.now() - state.clickAt < CLICK_WINDOW_MS ? state.clickText : undefined;
-    if (method !== "GET" && method !== "HEAD" && !state.loading && !clickText) {
-      // The click binding can land a moment after the request it caused.
-      await new Promise((res) => setTimeout(res, 40));
-      clickText = Date.now() - state.clickAt < CLICK_WINDOW_MS ? state.clickText : undefined;
+    try {
+      const r = route.request();
+      const method = r.method();
+      let clickText = recentClicks();
+      if (method !== "GET" && method !== "HEAD" && !state.loading && !clickText) {
+        await new Promise((res) => setTimeout(res, 40)); // the click binding can land just after its request
+        clickText = recentClicks();
+      }
+      // Only requests from the main frame, after the new page committed, count as "the page loading".
+      const loading = state.loading && !!page && r.frame() === page.mainFrame();
+      const d = decide(
+        { method, url: r.url(), loading, clickText, body: r.postData() ?? undefined, document: r.isNavigationRequest() && r.resourceType() === "document" },
+        { runner: o.runner, cfg: o.cfg, learned, baseHost, createdPaths },
+      );
+      const u = new URL(r.url());
+      const entry = { method, host: u.host, path: redactUrl(r.url()) };
+      if (d.action === "abort") {
+        block({ ...entry, category: d.category, reason: d.reason, ...(d.trigger ? { trigger: d.trigger } : {}) });
+        network.push({ at: new Date().toISOString(), ...entry, type: r.resourceType(), outcome: `blocked:${d.category}` });
+        return await route.abort("blockedbyclient");
+      }
+      if (d.learn) { learned.add(d.learn); writeFileSync(loadPath, JSON.stringify([...learned], null, 2)); }
+      if (u.host === baseHost && !STATIC.has(r.resourceType())) network.push({ at: new Date().toISOString(), ...entry, type: r.resourceType(), outcome: "allowed" });
+      return await route.continue();
+    } catch {
+      // Fail closed: if anything in the guard breaks, the request does not go out.
+      return route.abort("failed").catch(() => {});
     }
-    const d = decide({ method, url: r.url(), loading: state.loading, clickText }, { runner: o.runner, cfg: o.cfg, learned });
-    const u = new URL(r.url());
-    const entry = { at: new Date().toISOString(), method, host: u.host, path: redactUrl(r.url()) };
-    if (d.action === "abort") {
-      const b: BlockedEntry = { ...entry, runner: o.runner.key, category: d.category, reason: d.reason, ...(d.trigger ? { trigger: d.trigger } : {}) };
-      appendJson(join(o.runDir, "blocked.json"), b);
-      network.push({ ...entry, type: r.resourceType(), outcome: `blocked:${d.category}` });
-      return route.abort("blockedbyclient");
-    }
-    if (d.learn) { learned.add(d.learn); writeFileSync(loadPath, JSON.stringify([...learned], null, 2)); }
-    if (u.host === baseHost && !STATIC.has(r.resourceType())) network.push({ ...entry, type: r.resourceType(), outcome: "allowed" });
-    return route.continue();
   });
 
-  const page = await context.newPage();
-  // Direct API calls skip the route guard, so their methods are disabled. (Playwright still
-  // needs the object itself for clean-up, so the getter stays.)
+  // WebSockets: a look-only runner may send while a page loads (subscriptions), never after.
+  await context.routeWebSocket(/.*/, (ws) => {
+    const server = ws.connectToServer();
+    ws.onMessage((msg) => {
+      if (o.runner.depth === "look" && !state.loading) {
+        const u = new URL(ws.url());
+        block({ method: "WS", host: u.host, path: redactUrl(ws.url()), category: "unknown-write", reason: "look-only runner: WebSocket message after the page loaded" });
+        return;
+      }
+      server.send(msg);
+    });
+  });
+
+  page = await context.newPage();
   const deny = async () => { throw new Error("Baseline: direct API requests are not allowed. Drive the page instead."); };
   for (const api of new Set([context.request, page.request])) {
     for (const m of ["fetch", "get", "post", "put", "patch", "delete", "head"] as const) (api as any)[m] = deny;
   }
 
+  const loc = (t: Target): Locator => {
+    let l: Locator;
+    if ("role" in t) l = page.getByRole(t.role as Parameters<Page["getByRole"]>[0], t.name !== undefined ? { name: t.name, exact: t.exact } : undefined);
+    else if ("text" in t) l = page.getByText(t.text, { exact: t.exact });
+    else if ("label" in t) l = page.getByLabel(t.label);
+    else if ("placeholder" in t) l = page.getByPlaceholder(t.placeholder);
+    else if ("testId" in t) l = page.getByTestId(t.testId);
+    else l = page.locator(t.css);
+    return t.nth !== undefined ? l.nth(t.nth) : l.first();
+  };
+  // The parent knows what is being clicked before the click happens: record it first.
+  const noteTarget = async (l: Locator) => {
+    const label = await l.evaluate(new Function(`return (${LABEL_JS})`)() as (el: Element) => string).catch(() => "");
+    clicks.push({ text: String(label || ""), at: Date.now() });
+  };
+  const afterNav = async () => {
+    if (await isSignedOut(page, o.runner)) throw new SignedOutError(o.runner.key, new URL(page.url()).pathname);
+  };
+
   let shots = 0;
   return {
     page,
     async goto(path: string) {
-      state.loading = true;
+      const url = new URL(path, o.baseUrl).toString();
       try {
-        await page.goto(new URL(path, o.baseUrl).toString(), { waitUntil: "load" });
-        await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
+        await page.goto(url, { waitUntil: "commit" });
+        state.loading = true;
+        await page.waitForLoadState("load");
+        await page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
       } finally {
         state.loading = false;
       }
       // Never let an agent sign in again on its own: a signed-out runner stops here.
-      if (await isSignedOut(page, o.runner)) throw new SignedOutError(o.runner.key, new URL(page.url()).pathname);
+      await afterNav();
     },
+    async click(t) { const l = loc(t); await noteTarget(l); await l.click(); },
+    async fill(t, value) { await loc(t).fill(value); },
+    async press(key, t) { if (t) { const l = loc(t); await noteTarget(l); await l.press(key); } else await page.keyboard.press(key); },
+    async select(t, value) { await loc(t).selectOption(value); },
+    async check(t) { const l = loc(t); await noteTarget(l); await l.check(); },
+    async hover(t) { await loc(t).hover(); },
+    async back() { await page.goBack(); },
+    async waitFor(t, opts) { await loc(t).waitFor({ state: opts?.state ?? "visible", timeout: opts?.timeout }); },
+    async snapshot() { const s = await page.locator("body").ariaSnapshot(); return s.length > SNAPSHOT_LIMIT ? s.slice(0, SNAPSHOT_LIMIT) + "\n… (truncated)" : s; },
+    async text(t) { const s = t ? await loc(t).innerText() : await page.locator("body").innerText(); return s.slice(0, SNAPSHOT_LIMIT); },
+    async url() { return page.url(); },
+    async title() { return page.title(); },
     async shot(name: string, caption: string) {
       const safe = name.replace(/[^a-z0-9-]+/gi, "-").slice(0, 60) || "shot";
       const file = join(o.runDir, "shots", `${o.runner.key}-${safe}-${++shots}.png`);
@@ -125,6 +219,7 @@ export async function openSession(o: OpenOptions): Promise<Session> {
       return file;
     },
     created(kind: string, label: string, url?: string) {
+      if (url) { try { createdPaths.push(new URL(url, o.baseUrl).pathname); } catch { /* ignore */ } }
       appendJson(join(o.runDir, "created.json"), {
         runner: o.runner.key, kind, label, url, labelled: label.includes(`Baseline ${o.runId}`), at: new Date().toISOString(),
       });
