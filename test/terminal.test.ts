@@ -96,3 +96,16 @@ describe("summary and view cli", () => {
     expect(out).not.toContain("\x1b[");
   });
 });
+
+describe("control characters from run data", () => {
+  it("are stripped before painting", () => {
+    const p = progress();
+    p.label = "PR \x1b]0;pwned\x07#412";
+    p.active = [{ persona: "cust\x1b[2Jomer", doing: "opening \x9b31m/cart" }];
+    const t = renderProgress(p, "dark", { color: "none", width: 80 }).join("\n");
+    expect(t).not.toMatch(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/);
+    expect(t).toContain("customer");
+    expect(t).toContain("PR #412");
+    expect(t).toContain("opening /cart");
+  });
+});

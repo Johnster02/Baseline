@@ -12,6 +12,11 @@ export function colorMode(env: NodeJS.ProcessEnv = process.env): ColorMode {
 }
 
 const ANSI = /\x1b\[[0-9;]*m/g;
+/** Run data comes from agents: drop C0/C1 control characters (ESC included) before painting it. */
+const clean = (s: unknown) => String(s ?? "")
+  .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)?/g, "") // OSC sequences (titles, links)
+  .replace(/(\x1b\[|\x9b)[0-9;?]*[ -\/]*[@-~]/g, "") // CSI sequences
+  .replace(/[\x00-\x1f\x7f-\x9f]/g, ""); // anything else that controls the terminal
 export const visibleLength = (s: string) => [...s.replace(ANSI, "")].length;
 
 function rgb(hex: string): [number, number, number] {
@@ -67,14 +72,14 @@ export function renderProgress(p: Progress, theme: ThemeName, o: TermOpts): stri
   const br = theme === "br2049";
   const rule = c("accentDim", "─".repeat(Math.max(10, Math.min(o.width, 48))));
   const glyph = { done: br ? "■" : "✓", active: br ? "▶" : "●", pending: br ? "□" : "○", skipped: br ? "·" : "–" };
-  const lines = [header(theme, c, `${p.label} · ${p.size} run · ${p.agents} agents`), rule];
+  const lines = [header(theme, c, `${clean(p.label)} · ${clean(p.size)} run · ${p.agents} agents`), rule];
   for (const ph of p.phases) {
     const name = (br ? PHASE_NAME[ph.name]! : PHASE_NAME[ph.name]![0]!.toUpperCase() + PHASE_NAME[ph.name]!.slice(1)).padEnd(10);
-    if (ph.status === "done") lines.push(`${c(br ? "accent" : "match", glyph.done)} ${name}  ${c("accent", "done")}   ${c("ink3", ph.note ?? "")}`);
+    if (ph.status === "done") lines.push(`${c(br ? "accent" : "match", glyph.done)} ${name}  ${c("accent", "done")}   ${c("ink3", clean(ph.note))}`);
     else if (ph.status === "active") {
       const [on, off] = bar(ph.pct ?? 0, 16);
-      lines.push(`${c("dust", glyph.active)} ${c("ink", name)}  ${c("accent", on)}${c("accentDim", off)} ${c("ink", `${ph.pct ?? 0}%`)}${ph.note ? " " + c("ink3", ph.note) : ""}`);
-      for (const a of p.active) lines.push(`    ${c("accent", "›")} ${a.persona.padEnd(10)} ${c("ink3", a.doing)}`);
+      lines.push(`${c("dust", glyph.active)} ${c("ink", name)}  ${c("accent", on)}${c("accentDim", off)} ${c("ink", `${ph.pct ?? 0}%`)}${ph.note ? " " + c("ink3", clean(ph.note)) : ""}`);
+      for (const a of p.active) lines.push(`    ${c("accent", "›")} ${clean(a.persona).padEnd(10)} ${c("ink3", clean(a.doing))}`);
     } else if (ph.status === "skipped") lines.push(`${c("ink3", glyph.skipped)} ${c("ink3", name)}  ${c("ink3", "skipped")}`);
     else lines.push(`${c("accentDim", glyph.pending)} ${c("ink3", name)}`);
   }
@@ -93,7 +98,7 @@ export function renderSummary(r: RunRecord, theme: ThemeName, o: TermOpts): stri
   const dur = `${Math.floor(r.durationMin)}m ${String(Math.round((r.durationMin % 1) * 60)).padStart(2, "0")}s`;
   const row = (label: string, token: string, n: number) => `${c(token, label.padEnd(13))} ${c("ink", String(n))}`;
   const lines = [
-    header(theme, c, `${r.label} · ${r.size} · ${dur}`), rule,
+    header(theme, c, `${clean(r.label)} · ${clean(r.size)} · ${dur}`), rule,
     `${c("ink", (br ? "PASS RATE" : "Pass rate").padEnd(11))} ${c("accent", on)}${c("accentDim", off)} ${c("ink", `${k.passRate}%`)}`,
     `${c("ink3", "checked".padEnd(11))} ${c("ink", String(k.checked).padEnd(4))} ${c("ink3", "passed")} ${c("match", String(k.passed))}`,
     "",
@@ -106,7 +111,7 @@ export function renderSummary(r: RunRecord, theme: ThemeName, o: TermOpts): stri
     `${c("ink3", "result".padEnd(11))} ${c("accent", br ? "COMPLETE" : "Complete")}`,
     rule,
   ];
-  if (o.link) lines.push(`${c("ink3", "report")}  ${c("accent", o.link)}`);
-  if (o.localPath) lines.push(`${c("ink3", "local ")}  ${c("ink2", o.localPath)}`);
+  if (o.link) lines.push(`${c("ink3", "report")}  ${c("accent", clean(o.link))}`);
+  if (o.localPath) lines.push(`${c("ink3", "local ")}  ${c("ink2", clean(o.localPath))}`);
   return lines.map((l) => fit(l, o.width));
 }
