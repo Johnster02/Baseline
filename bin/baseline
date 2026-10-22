@@ -1,0 +1,4 @@
+#!/bin/sh
+# Baseline engine. Plugin bin/ is on the Bash tool's PATH.
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
+exec node "$DIR/dist/cli.cjs" "$@"

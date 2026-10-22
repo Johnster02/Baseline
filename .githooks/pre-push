@@ -1,0 +1,2 @@
+#!/bin/sh
+node scripts/leak-check.mjs || exit 1

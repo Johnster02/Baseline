@@ -1,0 +1,45 @@
+{
+  "name": "baseline",
+  "version": "0.1.0",
+  "description": "Acceptance testing for any web app, inside Claude Code. Point it at a PR, ticket or spec and a URL. It reads the code, walks the site as your test users, and reports where spec, code and site disagree.",
+  "author": {
+    "name": "John Chaplin"
+  },
+  "homepage": "https://github.com/Johnster02/Baseline",
+  "repository": "https://github.com/Johnster02/Baseline",
+  "license": "MIT",
+  "keywords": [
+    "qa",
+    "acceptance-testing",
+    "playwright",
+    "testing"
+  ],
+  "userConfig": {
+    "jira_base_url": {
+      "type": "string",
+      "title": "Jira base URL",
+      "description": "For example https://acme.atlassian.net. Only needed for Jira tickets when no Jira connector is set up.",
+      "required": false
+    },
+    "jira_email": {
+      "type": "string",
+      "title": "Jira account email",
+      "required": false,
+      "description": "The email of the Jira account the token belongs to."
+    },
+    "jira_token": {
+      "type": "string",
+      "title": "Jira API token",
+      "required": false,
+      "sensitive": true,
+      "description": "A Jira API token. Stored in your system's secure credential store."
+    },
+    "linear_api_key": {
+      "type": "string",
+      "title": "Linear API key",
+      "description": "Only needed for Linear issues when no Linear connector is set up. Stored in your system's secure credential store.",
+      "required": false,
+      "sensitive": true
+    }
+  }
+}

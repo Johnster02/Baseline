@@ -1,0 +1,14 @@
+{
+  "name": "baseline",
+  "description": "Baseline: acceptance testing for any web app, inside Claude Code.",
+  "owner": {
+    "name": "John Chaplin"
+  },
+  "plugins": [
+    {
+      "name": "baseline",
+      "source": "./",
+      "description": "Acceptance testing for any web app, inside Claude Code."
+    }
+  ]
+}
