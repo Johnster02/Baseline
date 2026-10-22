@@ -111,6 +111,23 @@ export function decide(req: GuardRequest, ctx: GuardContext): Decision {
   return { action: "continue" };
 }
 
+/** Message text as words: JSON decoded (escapes resolved), camelCase, snake_case and kebab-case split. */
+export function normaliseMessage(message: string): string {
+  let text = message;
+  try {
+    const parts: string[] = [];
+    const walk = (v: unknown): void => {
+      if (typeof v === "string") parts.push(v);
+      else if (Array.isArray(v)) v.forEach(walk);
+      else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) { parts.push(k); walk(x); }
+    };
+    walk(JSON.parse(message));
+    text = parts.join(" ");
+  } catch { /* not JSON: use as is */ }
+  try { text = decodeURIComponent(text); } catch { /* keep */ }
+  return text.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_\-.:/]+/g, " ");
+}
+
 /**
  * WebSockets: production needs live; look-only may send only while a page loads; deeper runners
  * may not send a message that names a protected action they aren't allowed.
@@ -121,13 +138,20 @@ export function wsDecide(req: { url: string; loading: boolean; message?: string 
   if (isProduction(httpish, cfg) && !runner.allow.includes("live")) {
     return { action: "abort", category: "live", reason: "production site, live testing not allowed for this runner" };
   }
+  const path = new URL(httpish).pathname;
+  for (const cat of PATTERN_ORDER) {
+    if (runner.allow.includes(cat)) continue;
+    const g = cfg.patterns[cat].urls.find((x) => globMatch(x, path));
+    if (g) return { action: "abort", category: cat, reason: `WebSocket URL matches protected ${cat} pattern`, trigger: g };
+  }
   if (req.message === undefined) return { action: "continue" };
   if (runner.depth === "look") {
     return req.loading ? { action: "continue" } : { action: "abort", category: "unknown-write", reason: "look-only runner: WebSocket message after the page loaded" };
   }
   for (const cat of PATTERN_ORDER) {
     if (runner.allow.includes(cat)) continue;
-    const word = cfg.patterns[cat].words.find((w) => wordHit(req.message!, w));
+    const text = normaliseMessage(req.message);
+    const word = cfg.patterns[cat].words.find((w) => wordHit(text, w));
     if (word) return { action: "abort", category: cat, reason: `WebSocket message looks like ${cat}`, trigger: word.toLowerCase() };
   }
   return { action: "continue" };

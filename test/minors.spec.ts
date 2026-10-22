@@ -91,3 +91,16 @@ describe("browser", () => {
     } finally { await s.close(); }
   });
 });
+
+describe("WebSocket normalisation (security review)", () => {
+  const cfg = { ...loadConfig(tmp()), productionUrls: [] as string[] };
+  const create = { ...newRunner("a", "a", { kind: "session" }), depth: "create" as const };
+  it("sees protected words through JSON escapes, camelCase and snake_case", () => {
+    for (const m of ['{"event":"send\\u0020invoice"}', '{"action":"sendInvoice"}', '{"action":"send_invoice"}', '{"op":"delete-user"}'])
+      expect(wsDecide({ url: "wss://s.acme.dev/ws", loading: false, message: m }, { runner: create, cfg }).action, m).toBe("abort");
+  });
+  it("applies protected URL patterns when the socket opens", () => {
+    const c = { ...cfg, patterns: { ...cfg.patterns, finance: { ...cfg.patterns.finance, urls: [...cfg.patterns.finance.urls, "/ws/payments"] } } };
+    expect(wsDecide({ url: "wss://s.acme.dev/ws/payments", loading: true }, { runner: create, cfg: c })).toMatchObject({ action: "abort", category: "finance" });
+  });
+});

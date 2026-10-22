@@ -20394,11 +20394,39 @@ function decide(req, ctx) {
   if (runner.depth === "look") return { action: "abort", category: "unknown-write", reason: "look-only runner: this would change data" };
   return { action: "continue" };
 }
+function normaliseMessage(message) {
+  let text = message;
+  try {
+    const parts = [];
+    const walk = (v) => {
+      if (typeof v === "string") parts.push(v);
+      else if (Array.isArray(v)) v.forEach(walk);
+      else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) {
+        parts.push(k);
+        walk(x);
+      }
+    };
+    walk(JSON.parse(message));
+    text = parts.join(" ");
+  } catch {
+  }
+  try {
+    text = decodeURIComponent(text);
+  } catch {
+  }
+  return text.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_\-.:/]+/g, " ");
+}
 function wsDecide(req, ctx) {
   const { runner, cfg } = ctx;
   const httpish = req.url.replace(/^ws/i, "http");
   if (isProduction(httpish, cfg) && !runner.allow.includes("live")) {
     return { action: "abort", category: "live", reason: "production site, live testing not allowed for this runner" };
+  }
+  const path = new URL(httpish).pathname;
+  for (const cat of PATTERN_ORDER) {
+    if (runner.allow.includes(cat)) continue;
+    const g = cfg.patterns[cat].urls.find((x) => globMatch(x, path));
+    if (g) return { action: "abort", category: cat, reason: `WebSocket URL matches protected ${cat} pattern`, trigger: g };
   }
   if (req.message === void 0) return { action: "continue" };
   if (runner.depth === "look") {
@@ -20406,7 +20434,8 @@ function wsDecide(req, ctx) {
   }
   for (const cat of PATTERN_ORDER) {
     if (runner.allow.includes(cat)) continue;
-    const word = cfg.patterns[cat].words.find((w) => wordHit(req.message, w));
+    const text = normaliseMessage(req.message);
+    const word = cfg.patterns[cat].words.find((w) => wordHit(text, w));
     if (word) return { action: "abort", category: cat, reason: `WebSocket message looks like ${cat}`, trigger: word.toLowerCase() };
   }
   return { action: "continue" };
@@ -20643,7 +20672,8 @@ async function openSession(o) {
     }
     const server = ws.connectToServer();
     ws.onMessage((msg) => {
-      const d = wsDecide({ url: ws.url(), loading: state.loading, message: typeof msg === "string" ? msg : "" }, { runner: o.runner, cfg: o.cfg });
+      const text = typeof msg === "string" ? msg : Buffer.from(msg).toString("utf8");
+      const d = wsDecide({ url: ws.url(), loading: state.loading, message: text }, { runner: o.runner, cfg: o.cfg });
       if (d.action === "abort") {
         block({ ...entry, category: d.category, reason: d.reason, ...d.trigger ? { trigger: d.trigger } : {} });
         return;

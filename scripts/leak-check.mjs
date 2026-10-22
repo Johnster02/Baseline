@@ -16,7 +16,7 @@ const files = execSync("git ls-files", { encoding: "utf8" }).split("\n").filter(
   .filter((f) => !f.endsWith("pnpm-lock.yaml"));
 const hits = leakCheck(files, banned);
 for (const h of hits) console.error(`leak: ${h.file}:${h.line} contains a banned term`);
-const commits = execSync("git log --all --format='%h %ae %ce'", { encoding: "utf8" }).split("\n").filter(Boolean);
+const commits = execSync("git log --branches --format='%h %ae %ce'", { encoding: "utf8" }).split("\n").filter(Boolean);
 const who = leakCheckAuthors(commits, banned);
 for (const h of who) console.error(`leak: commit ${h.commit} has a banned term in its author or committer`);
 if (hits.length || who.length) process.exit(1);

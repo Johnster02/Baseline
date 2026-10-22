@@ -157,7 +157,9 @@ export async function openSession(o: OpenOptions): Promise<Session> {
     if (open.action === "abort") { block({ ...entry, category: open.category, reason: open.reason }); ws.close(); return; }
     const server = ws.connectToServer();
     ws.onMessage((msg) => {
-      const d = wsDecide({ url: ws.url(), loading: state.loading, message: typeof msg === "string" ? msg : "" }, { runner: o.runner, cfg: o.cfg });
+      // Binary frames are decoded so they are checked like text.
+      const text = typeof msg === "string" ? msg : Buffer.from(msg as Buffer).toString("utf8");
+      const d = wsDecide({ url: ws.url(), loading: state.loading, message: text }, { runner: o.runner, cfg: o.cfg });
       if (d.action === "abort") { block({ ...entry, category: d.category, reason: d.reason, ...(d.trigger ? { trigger: d.trigger } : {}) }); return; }
       server.send(msg);
     });
