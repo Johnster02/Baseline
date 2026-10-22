@@ -29,6 +29,12 @@ describe("renderSessionReport", () => {
     expect(html.indexOf('data-pick="r-2"')).toBeLessThan(html.indexOf('data-pick="r-1"'));
   });
 
+  it("widens the id column for long explorer ids so they don't wrap", () => {
+    expect(renderSessionReport([record()], "br2049")).not.toContain("--idw:");
+    const html = renderSessionReport([record({ findings: [finding({}), finding({ id: "U-customer-1", verdict: "product" })] })], "br2049");
+    expect(html).toMatch(/class="list wp" style="--w:3;--idw:\d+px"/);
+  });
+
   it("says Complete and never pass/fail wording", () => {
     const html = renderSessionReport([record()], "br2049");
     expect(html).toContain("Complete");

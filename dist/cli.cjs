@@ -22063,11 +22063,11 @@ button:focus-visible,input:focus-visible,summary:focus-visible{outline:1px solid
 
 .list{display:flex;flex-direction:column;border-top:1px solid var(--rule)}
 .f{border-bottom:1px solid var(--rule)}
-.f summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:10px 46px minmax(0,1fr) auto;gap:14px;align-items:center;padding:14px 4px}
+.f summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:10px var(--idw,46px) minmax(0,1fr) auto;gap:14px;align-items:center;padding:14px 4px}
 .f summary::-webkit-details-marker{display:none}
 .f summary:hover .ttl{color:var(--ink)}
 .f .mk{width:10px;height:22px;background:var(--c)}
-.rid{font-family:var(--font-data);font-size:12px;color:var(--ink-3)}
+.rid{font-family:var(--font-data);font-size:12px;color:var(--ink-3);white-space:nowrap}
 .ttl{min-width:0;color:var(--ink-2)}
 .f[open] .ttl{color:var(--ink)}
 .ttl small{display:block;color:var(--ink-3);font-size:12.5px;margin-top:2px}
@@ -22076,7 +22076,7 @@ button:focus-visible,input:focus-visible,summary:focus-visible{outline:1px solid
 .sev{font-family:var(--font-data);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
 .sev.crit{color:var(--ink);background:var(--v-specbuilt);padding:1px 6px}
 .tri{font-family:var(--font-data);font-size:11px;color:var(--phos)}
-@media (max-width:640px){.f summary{grid-template-columns:10px 40px minmax(0,1fr)}.right{grid-column:3/-1;justify-content:flex-start}}
+@media (max-width:640px){.f summary{grid-template-columns:10px var(--idw,40px) minmax(0,1fr)}.right{grid-column:3/-1;justify-content:flex-start}}
 
 .body{padding:4px 4px 20px 74px;display:flex;flex-direction:column;gap:14px}
 @media (max-width:640px){.body{padding-left:4px}}
@@ -22508,6 +22508,10 @@ ${shots && steps ? `<div class="evidence"><div>${shots}</div><div>${steps}</div>
 ${f.refuter?.note ? `<div class="refuter"><b>Refuter</b><span>${esc2(f.refuter.note)}</span></div>` : ""}
 <div class="actions"><span class="chips"></span><button class="btn" type="button" data-copy="${esc2(issueText(f, r))}">Copy as issue</button></div></div></details>`;
 }
+var idWidth = (fs) => {
+  const longest = Math.max(0, ...fs.map((f) => [...f.id].length));
+  return longest > 6 ? `--idw:${Math.min(140, Math.ceil(longest * 7.4))}px` : "";
+};
 function runHTML(r, hidden) {
   const budget = { left: SHOT_BUDGET };
   const attention = r.findings.filter(needsAttention).length;
@@ -22522,7 +22526,7 @@ function runHTML(r, hidden) {
     !r.commit.codeRead ? `<p class="warn">Code was not read for this run: findings compare the spec with the site only.</p>` : "",
     r.commit.mismatch ? `<p class="warn">The site is running a different commit (${esc2(r.commit.deployed)}) from the code that was read (${esc2(r.commit.commitRead)}). Some findings may be version gaps.</p>` : ""
   ].join("");
-  const otherHTML = r.other.length || r.otherHidden ? `<section class="sec wp" style="--w:4"><h2>Other observations \xB7 not related to this change</h2><div class="list">${r.other.map((f, i) => findingHTML(f, r, i, budget)).join("")}</div>${r.otherHidden ? `<p class="more">+${r.otherHidden} more, not listed</p>` : ""}</section>` : "";
+  const otherHTML = r.other.length || r.otherHidden ? `<section class="sec wp" style="--w:4"><h2>Other observations \xB7 not related to this change</h2><div class="list" style="${idWidth(r.other)}">${r.other.map((f, i) => findingHTML(f, r, i, budget)).join("")}</div>${r.otherHidden ? `<p class="more">+${r.otherHidden} more, not listed</p>` : ""}</section>` : "";
   const uniqSkipped = [...new Map(r.skipped.map((s) => [`${s.runner}|${s.category}|${s.method}|${s.path}`, s])).values()];
   const skippedHTML = uniqSkipped.length ? `<section class="sec wp" style="--w:5"><h2>Skipped \xB7 ${uniqSkipped.length}</h2><div class="rows">${uniqSkipped.map((s) => `<div class="row"><span><b>${esc2(s.runner)}</b> <span class="k">${esc2(s.method)} ${esc2(s.host)}${esc2(s.path)}</span></span><span>${esc2(s.reason)}${s.trigger ? ` (\u201C${esc2(s.trigger)}\u201D)` : ""}</span><span class="k">To include it next time: ${esc2(ALLOW_HINT[s.category] ?? "change this runner's permissions")}</span></div>`).join("")}</div></section>` : "";
   const permHTML = r.permissions.length ? `<section class="sec wp" style="--w:6"><h2>Permissions this run had</h2><div class="rows">${r.permissions.map((p) => `<div class="perm"><b>${esc2(p.runner)}</b><ul>${p.can.map((c) => `<li>${esc2(c)}</li>`).join("")}</ul><ul class="no">${p.cannot.map((c) => `<li>not: ${esc2(c)}</li>`).join("")}</ul></div>`).join("")}</div></section>` : "";
@@ -22542,7 +22546,7 @@ ${warn}
   }).join("")}</div></div></div>
 <div class="toolbar wp" style="--w:2"><div class="seg" role="group" aria-label="Filter">${groups.map(([g, l]) => `<button type="button" data-filter="${g}" aria-pressed="${g === "all"}">${l}</button>`).join("")}</div>
 <div class="tools-r"><span class="readout data"><b>${r.findings.length}</b> shown</span><input class="search" type="search" placeholder="Search findings" aria-label="Search findings"></div></div>
-<div class="list wp" style="--w:3">${r.findings.length ? r.findings.map((f, i) => findingHTML(f, r, i, budget)).join("") : `<p class="empty">No findings for this run.</p>`}</div>
+<div class="list wp" style="--w:3;${idWidth(r.findings)}">${r.findings.length ? r.findings.map((f, i) => findingHTML(f, r, i, budget)).join("") : `<p class="empty">No findings for this run.</p>`}</div>
 ${runnersHTML}${leftHTML}${otherHTML}${skippedHTML}${permHTML}${unread}
 </section>`;
 }

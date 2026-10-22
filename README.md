@@ -42,20 +42,22 @@ install. The live progress band needs Claude Code v2.1.287 or later. Publishing 
 claude.ai artifact needs a claude.ai login on Pro, Max, Team or Enterprise; otherwise the report is
 a local HTML file. Tested with Claude Code 2.1.308.
 
-## Use
+## Usage
 
 ```text
-/baseline:run #412
-/baseline:run https://github.com/acme/shop/pull/412
-/baseline:run SHOP-12                       # Jira or Linear
-/baseline:run docs/specs/discounts.md
-/baseline:run docs/specs/                   # a folder of specs
-/baseline:run "Expired discount codes are rejected at checkout"
-/baseline:run #412 docs/specs/discounts.md  # mix them
+/baseline:run #412                          # a PR
+/baseline:run SHOP-12                       # a Jira or Linear ticket
+/baseline:run docs/specs/discounts.md       # a spec file, a folder, or "pasted text"
 ```
 
+Mix them to check a PR against its spec: `/baseline:run #412 docs/specs/discounts.md`.
+
 Each run asks which URL to test (the last one is the default): staging, a preview deploy or
-`http://localhost:3000`. It sizes itself and says so before it starts:
+`http://localhost:3000`. Baseline reads the code that is checked out on your machine, so check out
+the PR's branch first. If setup was given a way to read the site's version, a run warns when the
+site is on a different commit.
+
+Each run sizes itself and says so before it starts:
 
 - **PR run** for one small PR (up to 15 changed files), about 5 minutes: a code reader, one
   explorer (two only when the change looks different for another role), a fast refuter. A PR that
@@ -78,6 +80,10 @@ claude.ai artifact if you chose that in setup, otherwise a local file).
 One page per Claude Code session: run again after a fix and the new run joins the same page.
 Findings are listed worst first, each with **Specced / Built / Observed** side by side, the steps
 to reproduce, screenshots, and the refuter's note. "Copy as issue" turns one into a bug report.
+
+Every finding gets one verdict:
+
+![One finding of each verdict in the report](docs/screenshots/verdicts.png)
 
 | Verdict | Meaning |
 |---|---|
@@ -124,9 +130,15 @@ Baseline drives a real browser through someone's site, so it is careful by defau
 - **Agents never touch the browser directly.** Their scripts talk to a browser held by Baseline
   through a short list of commands (go to, click, fill, read, screenshot). A Bash hook also blocks
   HTTP writes to the site and direct Playwright use while a run is active.
-- **Credentials** are typed into a one-time form in your own browser, so Claude never sees them.
-  They live in a 0600 file in the plugin's data folder, never in your project, logs or reports.
-  Accounts behind SSO or MFA are signed in by hand once and the session is reused.
+- **Test account passwords** are typed into a one-time form in your browser, so Claude never
+  sees them. They're saved on your machine only, in a file only your user can read, outside your
+  project, and never in logs or reports. The file isn't encrypted, so use test accounts, not real
+  ones. Each teammate runs setup with their own. Accounts behind SSO or MFA are signed in by hand
+  once and that login is reused; when a saved login expires, the run says so and you sign in again
+  with setup.
+- **Anything a run creates is tidied up.** Only runners you allow to create things can, and
+  everything they make is named `Baseline <run id> …`. A clean-up agent removes it at the end, and
+  anything it could not remove is listed in the report.
 - **Nothing changes mid-run.** While a run is active, agents can't change permissions, runners or
   production settings, and browser tools other than Baseline's own are switched off.
 
@@ -141,7 +153,7 @@ accounts on a test site. More in [docs/permissions.md](docs/permissions.md).
 | What | Where |
 |---|---|
 | Project settings, runs, reports, site map, notes | `.baseline/` in your project (setup adds it to `.gitignore`) |
-| Credentials, saved sessions, the browser | the plugin's data folder (`~/.claude/plugins/data/…`) |
+| Test account passwords, saved logins, the browser | the plugin's data folder (`~/.claude/plugins/data/…`), on your machine only |
 | Jira and Linear tokens | `/plugin configure baseline`, stored in your system's secure store |
 
 ## Develop

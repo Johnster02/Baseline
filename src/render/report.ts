@@ -114,6 +114,12 @@ ${f.refuter?.note ? `<div class="refuter"><b>Refuter</b><span>${esc(f.refuter.no
 <div class="actions"><span class="chips"></span><button class="btn" type="button" data-copy="${esc(issueText(f, r))}">Copy as issue</button></div></div></details>`;
 }
 
+/** One ID column width per list, wide enough for its longest id (explorer ids like U-customer-1), so rows stay aligned. */
+const idWidth = (fs: Finding[]) => {
+  const longest = Math.max(0, ...fs.map((f) => [...f.id].length));
+  return longest > 6 ? `--idw:${Math.min(140, Math.ceil(longest * 7.4))}px` : "";
+};
+
 function runHTML(r: RunRecord, hidden: boolean): string {
   const budget = { left: SHOT_BUDGET };
   const attention = r.findings.filter(needsAttention).length;
@@ -128,7 +134,7 @@ function runHTML(r: RunRecord, hidden: boolean): string {
     !r.commit.codeRead ? `<p class="warn">Code was not read for this run: findings compare the spec with the site only.</p>` : "",
     r.commit.mismatch ? `<p class="warn">The site is running a different commit (${esc(r.commit.deployed)}) from the code that was read (${esc(r.commit.commitRead)}). Some findings may be version gaps.</p>` : "",
   ].join("");
-  const otherHTML = r.other.length || r.otherHidden ? `<section class="sec wp" style="--w:4"><h2>Other observations · not related to this change</h2><div class="list">${r.other.map((f, i) => findingHTML(f, r, i, budget)).join("")}</div>${r.otherHidden ? `<p class="more">+${r.otherHidden} more, not listed</p>` : ""}</section>` : "";
+  const otherHTML = r.other.length || r.otherHidden ? `<section class="sec wp" style="--w:4"><h2>Other observations · not related to this change</h2><div class="list" style="${idWidth(r.other)}">${r.other.map((f, i) => findingHTML(f, r, i, budget)).join("")}</div>${r.otherHidden ? `<p class="more">+${r.otherHidden} more, not listed</p>` : ""}</section>` : "";
   const uniqSkipped = [...new Map(r.skipped.map((s) => [`${s.runner}|${s.category}|${s.method}|${s.path}`, s])).values()];
   const skippedHTML = uniqSkipped.length ? `<section class="sec wp" style="--w:5"><h2>Skipped · ${uniqSkipped.length}</h2><div class="rows">${uniqSkipped.map((s) =>
     `<div class="row"><span><b>${esc(s.runner)}</b> <span class="k">${esc(s.method)} ${esc(s.host)}${esc(s.path)}</span></span><span>${esc(s.reason)}${s.trigger ? ` (“${esc(s.trigger)}”)` : ""}</span><span class="k">To include it next time: ${esc(ALLOW_HINT[s.category] ?? "change this runner's permissions")}</span></div>`).join("")}</div></section>` : "";
@@ -152,7 +158,7 @@ ${warn}
   }).join("")}</div></div></div>
 <div class="toolbar wp" style="--w:2"><div class="seg" role="group" aria-label="Filter">${groups.map(([g, l]) => `<button type="button" data-filter="${g}" aria-pressed="${g === "all"}">${l}</button>`).join("")}</div>
 <div class="tools-r"><span class="readout data"><b>${r.findings.length}</b> shown</span><input class="search" type="search" placeholder="Search findings" aria-label="Search findings"></div></div>
-<div class="list wp" style="--w:3">${r.findings.length ? r.findings.map((f, i) => findingHTML(f, r, i, budget)).join("") : `<p class="empty">No findings for this run.</p>`}</div>
+<div class="list wp" style="--w:3;${idWidth(r.findings)}">${r.findings.length ? r.findings.map((f, i) => findingHTML(f, r, i, budget)).join("") : `<p class="empty">No findings for this run.</p>`}</div>
 ${runnersHTML}${leftHTML}${otherHTML}${skippedHTML}${permHTML}${unread}
 </section>`;
 }

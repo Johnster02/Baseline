@@ -44,7 +44,21 @@ try {
     await p.screenshot({ path: join(OUT, `report-${skin}.png`), clip: { x: 0, y: 0, width: WIDTH, height: bottom } });
   }
 
-  // 4. The terminal: the live band mid-run, and the end-of-run summary.
+  // 4. One finding of each verdict, collapsed, for the verdict table in the README.
+  const verdicts = join(project, ".baseline", "sessions", "verdicts");
+  writeVerdictRun(verdicts);
+  execFileSync("node", [CLI, "report", verdicts], { cwd: project, stdio: "ignore" });
+  const v = await browser.newPage({ viewport: { width: 1180, height: 1000 }, deviceScaleFactor: SCALE, reducedMotion: "reduce" });
+  await v.goto("file://" + join(verdicts, "report.html"));
+  await v.waitForLoadState("networkidle");
+  await v.evaluate(() => document.fonts.ready);
+  let box = await v.locator("section.run:not([hidden]) .list").boundingBox();
+  // Tall enough that the page's fixed background covers the whole list.
+  await v.setViewportSize({ width: 1180, height: Math.ceil(box.y + box.height + 40) });
+  box = await v.locator("section.run:not([hidden]) .list").boundingBox();
+  await v.screenshot({ path: join(OUT, "verdicts.png"), clip: { x: box.x - 20, y: box.y - 16, width: box.width + 40, height: box.height + 32 } });
+
+  // 5. The terminal: the live band mid-run, and the end-of-run summary.
   const env = { ...process.env, COLORTERM: "truecolor" };
   delete env.NO_COLOR;
   const done = join(session, "runs", "r-20261023-1414");
@@ -119,6 +133,31 @@ function writeSession(evidence) {
   };
   run("r-20261023-1414", "PR #412 · Discount codes", "2026-10-23T14:14:00Z", "2026-10-23T14:18:54Z", findings);
   run("r-20261023-1302", "PR #412 · first pass", "2026-10-23T13:02:00Z", "2026-10-23T13:07:10Z", [...findings.slice(0, 3), ...findings.slice(4, 7)]);
+}
+
+/** One run with a finding for every verdict the report can show. */
+function writeVerdictRun(sessionDir) {
+  const d = join(sessionDir, "runs", "r-20261023-1530");
+  mkdirSync(d, { recursive: true });
+  const seen = (text) => ({ text, steps: ["Open the page", "Try it"] });
+  const f = (id, verdict, severity, title, route, extra) => ({ id, title, verdict, severity, personas: ["customer"], route,
+    specced: { text: "From the spec.", ref: `spec · ${id}` }, ...extra });
+  const findings = [
+    f("R-01", "spec-built", "high", "Expired discount code still takes 10% off", "/cart", { built: { text: "b", ref: "src/cart/discount.ts:88" }, observed: seen("o") }),
+    f("R-02", "built-observed", "medium", "Order email leaves out the discount line", "/orders", { built: { text: "b", ref: "emails/receipt.tsx:41" }, observed: seen("o") }),
+    f("R-03", "not-built", "high", "Gift cards can't be combined with a code", "/cart", { built: { text: "Nothing handles it.", ref: "src/cart/" }, observed: seen("o") }),
+    f("R-04", "guide-spec", "medium", "Help page says codes stack, the spec says one per order", "/help/discounts", { built: { text: "b", ref: "src/cart/discount.ts:40" }, observed: seen("o") }),
+    f("U-customer-1", "product", "medium", "Discount field greys out with no reason given", "/cart", { checklistItem: "U-02", observed: seen("o") }),
+    f("U-customer-2", "unspecced", "low", "Codes also work on the wishlist page", "/wishlist", { observed: seen("o") }),
+    f("R-05", "unverified", "low", "Guests are asked to sign in before using a code", "/cart", { built: { text: "b", ref: "src/cart/routes.ts:23" } }),
+    f("R-06", "skipped", "low", "Receipt email is sent after checkout", "/checkout", { observed: { text: "Sending email is not allowed for this runner.", steps: [] } }),
+    f("R-07", "match", "low", "Valid codes apply at checkout", "/cart", { built: { text: "b", ref: "src/cart/discount.ts" }, observed: seen("o") }),
+  ];
+  writeFileSync(join(d, "run.json"), JSON.stringify({ runId: "r-20261023-1530", url: "https://staging.acme.dev", label: "Every verdict", startedAt: "2026-10-23T15:30:00Z" }));
+  writeFileSync(join(d, "inputs.json"), JSON.stringify({ items: [] }));
+  writeFileSync(join(d, "progress.json"), JSON.stringify({ size: "pr", agents: 3, startedAt: "2026-10-23T15:30:00Z", finishedAt: "2026-10-23T15:35:00Z" }));
+  writeFileSync(join(d, "commit.json"), JSON.stringify({ codeRead: true, commitRead: "a41c9e2", mismatch: false }));
+  writeFileSync(join(d, "findings.json"), JSON.stringify(findings));
 }
 
 /** Explore about three quarters done, timed relative to now so the estimate lands near 72%. */
