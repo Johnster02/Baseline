@@ -1,8 +1,14 @@
 import { readFileSync } from "node:fs";
 import manifest from "../.claude-plugin/plugin.json";
 
-/** Indirection so tests can supply stdin. */
-export const io = { readStdin: (): string => readFileSync(0, "utf8") };
+/** Indirection so tests can supply stdin. `origCwd` is where the command was run from, before the
+ *  CLI moved to the project root, so path arguments resolve the way the caller meant them. */
+let orig: string | undefined;
+export const io = {
+  readStdin: (): string => readFileSync(0, "utf8"),
+  get origCwd(): string { return orig ?? process.cwd(); },
+  set origCwd(v: string) { orig = v; },
+};
 
 export type Handler = (args: string[]) => Promise<number> | number;
 

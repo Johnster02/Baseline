@@ -89,3 +89,23 @@ describe("baseline script (browser in the parent, script talks over IPC)", () =>
     expect(r.status).toBe(2);
   });
 });
+
+describe("run from anywhere inside the project (dogfood)", () => {
+  it("works from inside the run folder with a relative script path", async () => {
+    const p = project();
+    const sub = join(p.runDir, "explore", "customer");
+    mkdirSync(sub, { recursive: true });
+    writeFileSync(join(p.proj, ".baseline", "active-run"), p.runDir);
+    writeFileSync(join(sub, "walk.cjs"), `const B = require("baseline"); (async () => { const s = await B.open(); console.log("RUNNER " + s.runner); await s.close(); })();`);
+    const r = await new Promise<{ stdout: string; stderr: string }>((res) => {
+      const c = spawn("node", [join(ROOT, "dist/cli.cjs"), "script", "customer", "walk.cjs"], { cwd: sub, env: p.env });
+      let stdout = "", stderr = "";
+      c.stdout.on("data", (d) => (stdout += d)); c.stderr.on("data", (d) => (stderr += d));
+      c.on("close", () => res({ stdout, stderr }));
+    });
+    expect(r.stderr).toBe("");
+    expect(r.stdout).toContain("RUNNER customer");
+    const { existsSync } = await import("node:fs");
+    expect(existsSync(join(p.runDir, ".baseline"))).toBe(false);
+  });
+});

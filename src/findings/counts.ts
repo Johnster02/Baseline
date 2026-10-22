@@ -1,5 +1,6 @@
 export type Counts = {
-  checked: number; passed: number; passRate: number;
+  /** Verified checks only (unverified and skipped are not checks). passRate is null when nothing was verified. */
+  checked: number; passed: number; passRate: number | null;
   conflicts: number; product: number; unspecced: number; unverified: number; skipped: number;
 };
 
@@ -10,15 +11,15 @@ import { isConflict } from "./schema";
 
 type BlockedLike = { runner: string; category: string; method: string; path: string };
 
-/** Pass rate = matches over everything checked (skipped items are not checks). Skipped counts unique blocked actions. */
+/** Pass rate = matches over verified checks; unverified and skipped are counted apart. Skipped adds unique blocked actions. */
 export function countRun(fs: Finding[], blocked: BlockedLike[]): Counts {
-  const checked = fs.filter((f) => f.verdict !== "skipped");
+  const checked = fs.filter((f) => f.verdict !== "skipped" && f.verdict !== "unverified");
   const passed = checked.filter((f) => f.verdict === "match").length;
   const uniqueBlocked = new Set(blocked.map((b) => `${b.runner}|${b.category}|${b.method}|${b.path}`)).size;
   return {
     checked: checked.length,
     passed,
-    passRate: checked.length ? Math.round((passed / checked.length) * 100) : 0,
+    passRate: checked.length ? Math.round((passed / checked.length) * 100) : null,
     conflicts: fs.filter((f) => isConflict(f.verdict)).length,
     product: fs.filter((f) => f.verdict === "product").length,
     unspecced: fs.filter((f) => f.verdict === "unspecced").length,

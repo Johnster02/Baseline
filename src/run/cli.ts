@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { register, out, err } from "../cli";
+import { register, out, err, io } from "../cli";
 import { describePermissions, loadConfig } from "../config/store";
 import { activeRunDir } from "../browser/runner-script";
 import { newRun, finishRun } from "./state";
@@ -86,8 +86,8 @@ register("commit", "which commit the code is at and which the site is running: c
   const info = JSON.stringify(await commitInfo(process.cwd(), loadConfig(process.cwd()), undefined, runUrl));
   const outFile = flag(args, "--out");
   if (outFile) {
-    if (!runDir || !resolve(outFile).startsWith(runDir)) { err("--out must be inside the active run folder"); return 2; }
-    writeFileSync(outFile, info);
+    if (!runDir || !resolve(io.origCwd, outFile).startsWith(runDir)) { err("--out must be inside the active run folder"); return 2; }
+    writeFileSync(resolve(io.origCwd, outFile), info);
   }
   out(info);
   return 0;
@@ -97,7 +97,7 @@ register("sitemap", "sitemap show | merge <file.json>", (args) => {
   if (args[0] === "show") { out(JSON.stringify(readSiteMap(process.cwd()), null, 2)); return 0; }
   if (args[0] === "merge" && args[1]) {
     let partial;
-    try { partial = JSON.parse(readFileSync(args[1], "utf8")); } catch { err("sitemap file must be JSON: {routes:[{path,title,personas}], notes:[]}"); return 2; }
+    try { partial = JSON.parse(readFileSync(resolve(io.origCwd, args[1]), "utf8")); } catch { err("sitemap file must be JSON: {routes:[{path,title,personas}], notes:[]}"); return 2; }
     const m = mergeSiteMap(process.cwd(), partial);
     out(`site map: ${m.routes.length} routes`);
     return 0;

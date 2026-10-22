@@ -24,7 +24,11 @@ How you drive the browser:
   `await s.close()`. Targets are `{ role, name }`, `{ text }`, `{ label }`, `{ placeholder }`,
   `{ testId }` or `{ css }`.
 - Use `snapshot()` to read pages. Take a screenshot only as evidence for something you will
-  report. At most 12 screenshots.
+  report, at most 12. `s.shot()` returns a path like `shots/customer-cart-1.jpg`: print it from
+  your script and put it in that item's `observed.shots`. A finding without its screenshot is
+  weaker evidence.
+- Run `baseline` from the project folder or anywhere inside it; script paths can be relative to
+  where you are.
 - Before each step, run `baseline progress agent <runner> "<what you are doing>"` (under 60 characters).
 
 Safety (these are not optional):
@@ -38,8 +42,10 @@ Safety (these are not optional):
 - If `goto` throws SignedOutError, stop and report the runner as signed out. Never sign in again.
 
 What to record, for every requirement your persona can reach:
-- `as-expected`, `differs`, `broken`, `not-reachable` or `skipped` (blocked by permissions), with
-  what you saw in plain sentences and the steps to see it again.
+- `as-expected`, `differs`, `broken`, `not-reachable` or `skipped`, with what you saw in plain
+  sentences and the steps to see it again. Use `skipped` whenever you held back because your
+  runner isn't allowed the action (look-only, email, payments...), and say which permission would
+  allow it.
 - Then up to 10 minutes on the same screens for things the spec does not mention, and for the
   product checklist (a greyed control with no reason, nothing showing it is busy, text that clips,
   a dead end). These get ids `U-<runner>-<n>` and a one-line title.

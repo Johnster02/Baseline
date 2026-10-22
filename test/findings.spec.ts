@@ -66,16 +66,16 @@ describe("filterFindings", () => {
 });
 
 describe("countRun", () => {
-  it("6 match + 2 conflict + 1 product + 1 unverified = 10 checked, 60%", () => {
+  it("6 match + 2 conflict + 1 product + 1 unverified = 9 verified, 67%", () => {
     const fs = [
       ...Array.from({ length: 6 }, () => F({ verdict: "match" })),
       F({ verdict: "spec-built" }), F({ verdict: "built-observed" }), F({ verdict: "product" }), F({ verdict: "unverified" }),
     ];
     const blocked = [{ runner: "c", category: "email", path: "/a", method: "POST" }, { runner: "c", category: "email", path: "/a", method: "POST" }];
-    expect(countRun(fs, blocked as any)).toEqual({ checked: 10, passed: 6, passRate: 60, conflicts: 2, product: 1, unspecced: 0, unverified: 1, skipped: 1 });
+    expect(countRun(fs, blocked as any)).toEqual({ checked: 9, passed: 6, passRate: 67, conflicts: 2, product: 1, unspecced: 0, unverified: 1, skipped: 1 });
   });
-  it("zero checked is 0%", () => {
-    expect(countRun([], []).passRate).toBe(0);
+  it("zero checked has no pass rate", () => {
+    expect(countRun([], []).passRate).toBeNull();
   });
 });
 
@@ -84,5 +84,15 @@ describe("notes", () => {
     const p = mkdtempSync(join(tmpdir(), "n-"));
     addNote(p, "R-3", "admins can't see billing by design");
     expect(listNotes(p)).toEqual([expect.objectContaining({ findingId: "R-3", text: "admins can't see billing by design" })]);
+  });
+});
+
+describe("pass rate over verified checks only (dogfood)", () => {
+  it("unverified and skipped findings don't drag the pass rate down", () => {
+    const fs = [F({ verdict: "match" }), F({ verdict: "product" }), F({ verdict: "unverified" }), F({ verdict: "unverified" }), F({ verdict: "skipped" })];
+    expect(countRun(fs, [])).toMatchObject({ checked: 2, passed: 1, passRate: 50, unverified: 2, skipped: 1 });
+  });
+  it("nothing verified gives a null pass rate, not 0%", () => {
+    expect(countRun([F({ verdict: "unverified" })], []).passRate).toBeNull();
   });
 });

@@ -1,7 +1,7 @@
 import { fork } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { register, err } from "../cli";
+import { register, err, io } from "../cli";
 import { loadConfig } from "../config/store";
 import { dataDir, sessionPath } from "../config/secrets";
 import { openSession } from "./session";
@@ -14,7 +14,7 @@ function pluginRoot(): string {
 }
 
 export function activeRunDir(projectDir: string, flag?: string): string | undefined {
-  if (flag) return resolve(flag);
+  if (flag) return resolve(io.origCwd, flag);
   if (process.env.BASELINE_RUN_DIR) return process.env.BASELINE_RUN_DIR;
   const p = join(projectDir, ".baseline", "active-run");
   return existsSync(p) ? readFileSync(p, "utf8").trim() : undefined;
@@ -49,7 +49,7 @@ register("script", "run an agent's browser script as a runner: script <runner> <
   const run = JSON.parse(readFileSync(join(runDir, "run.json"), "utf8")) as { runId: string; url: string };
 
   let session: Session | undefined;
-  const child = fork(resolve(file), [], {
+  const child = fork(resolve(io.origCwd, file), [], {
     cwd: projectDir,
     stdio: ["inherit", "inherit", "inherit", "ipc"],
     // The script gets only the shim on its module path, and none of Baseline's own settings.

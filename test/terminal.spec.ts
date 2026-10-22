@@ -129,3 +129,13 @@ describe("summary writes stay inside the project", () => {
     expect(existsSync(join(outside, "summary.json"))).toBe(false);
   });
 });
+
+describe("summary with nothing verified (dogfood)", () => {
+  it("says not checked instead of 0%", () => {
+    const r = record();
+    r.counts = { checked: 0, passed: 0, passRate: null, conflicts: 0, product: 0, unspecced: 0, unverified: 5, skipped: 4 };
+    const t = renderSummary(r, "dark", { color: "none", width: 60 }).join("\n");
+    expect(t).not.toContain("0%");
+    expect(t).toMatch(/nothing verified/i);
+  });
+});

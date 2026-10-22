@@ -1,6 +1,6 @@
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
-import { register, out, err } from "../cli";
+import { register, out, err, io } from "../cli";
 import { loadConfig } from "../config/store";
 import { activeRunDir } from "../browser/runner-script";
 import { readProgress } from "../run/progress";
@@ -11,7 +11,7 @@ const flag = (args: string[], name: string) => { const i = args.indexOf(name); r
 const width = () => Math.min(process.stdout.columns || 72, 72);
 
 register("summary", "end-of-run totals: summary <runDir> [--plain] [--link <url>]", (args) => {
-  const runDir = args[0] && !args[0].startsWith("--") ? resolve(args[0]) : activeRunDir(process.cwd());
+  const runDir = args[0] && !args[0].startsWith("--") ? resolve(io.origCwd, args[0]) : activeRunDir(process.cwd());
   if (!runDir) { err("usage: baseline summary <runDir> [--plain] [--link <url>]"); return 2; }
   // Only ever write into this project's own run folders.
   const sessionsRoot = join(process.cwd(), ".baseline", "sessions");

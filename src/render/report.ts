@@ -130,7 +130,7 @@ function runHTML(r: RunRecord, hidden: boolean): string {
   return `<section class="run" data-run="${esc(r.runId)}"${hidden ? " hidden" : ""}>
 <header class="case wp" style="--w:0"><div><h1>${esc(r.label)}</h1><div class="tele"><span>run <b>${esc(r.runId)}</b></span><span>${r.size} · <b>${r.agents} agents</b></span><span>${r.durationMin}m</span><span>${esc(r.url)}${r.commit.commitRead ? ` @ <b>${esc(r.commit.commitRead)}</b>` : ""}</span></div></div><span class="result">Complete</span></header>
 ${warn}
-<div class="summary wp" style="--w:1"><div class="block"><div class="count"><b>${attention}</b><span>need a look · ${r.counts.passRate}% pass · ${r.counts.checked} checked</span></div>
+<div class="summary wp" style="--w:1"><div class="block"><div class="count"><b>${attention}</b><span>need a look · ${r.counts.passRate === null ? "nothing verified yet" : `${r.counts.passRate}% pass · ${r.counts.checked} verified`}${r.counts.unverified ? ` · ${r.counts.unverified} unverified` : ""}</span></div>
 <div class="tally">${r.findings.map((f, i) => `<i class="${f.verdict === "match" ? "ok" : ""}" data-group="${group(f.verdict)}" style="--c:var(${VERDICT_VAR[f.verdict]});--i:${i}"></i>`).join("")}</div>
 <div class="legend">${legend}</div></div>
 <div class="block"><div class="block-h"><span class="lbl">People</span></div><div class="people">${personas.map((p) => {
@@ -150,7 +150,7 @@ export function renderSessionReport(runs: RunRecord[], theme: ThemeName): string
   const sorted = [...runs].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   const cls = theme === "br2049" ? "" : `plain ${theme}`;
   const rail = sorted.length > 1 ? `<div><div class="block-h"><span class="lbl">Runs this session</span><span class="lbl">${sorted.length}</span></div><div class="feats">${sorted.map((r, i) =>
-    `<button class="feat" type="button" data-pick="${esc(r.runId)}" aria-current="${i === 0}"><span class="row"><span class="nm">${esc(r.label)}</span></span><span class="row"><span class="map">${esc(r.runId)}</span><span class="st">${r.counts.passRate}% pass</span></span></button>`).join("")}</div></div>` : "";
+    `<button class="feat" type="button" data-pick="${esc(r.runId)}" aria-current="${i === 0}"><span class="row"><span class="nm">${esc(r.label)}</span></span><span class="row"><span class="map">${esc(r.runId)}</span><span class="st">${r.counts.passRate === null ? "not verified" : r.counts.passRate + "% pass"}</span></span></button>`).join("")}</div></div>` : "";
   return `<!doctype html>
 <html lang="en" class="${cls}" data-theme="${theme}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Baseline report</title>

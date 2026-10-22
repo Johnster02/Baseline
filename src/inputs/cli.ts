@@ -12,16 +12,16 @@ register("inputs", "fetch what a run checks against: inputs --run <dir> [--as ji
   const runIdx = args.indexOf("--run");
   const asIdx = args.indexOf("--as");
   if (runIdx < 0 || !args[runIdx + 1]) { err("usage: baseline inputs --run <dir> [--as jira|linear] <input...>"); return 2; }
-  const runDir = resolve(args[runIdx + 1]!);
+  const runDir = resolve(io.origCwd, args[runIdx + 1]!);
   const as = asIdx >= 0 ? (args[asIdx + 1] as InputKind) : undefined;
   const skip = new Set([runIdx, runIdx + 1, ...(asIdx >= 0 ? [asIdx, asIdx + 1] : [])]);
   const raw = args.filter((_, i) => !skip.has(i));
   const trackers = loadTrackers();
-  const res = resolveInputs(raw, { trackers: { jira: !!trackers.jira, linear: !!trackers.linear }, cwd: process.cwd() });
+  const res = resolveInputs(raw, { trackers: { jira: !!trackers.jira, linear: !!trackers.linear }, cwd: io.origCwd });
   let refs: InputRef[];
   if ("ambiguous" in res) {
     if (!as || !res.options.includes(as)) { out(JSON.stringify(res)); return 4; }
-    refs = resolveInputs(raw.map((a) => (a === res.ambiguous ? "\u0000" : a)), { trackers: { jira: false, linear: false }, cwd: process.cwd() }) as InputRef[];
+    refs = resolveInputs(raw.map((a) => (a === res.ambiguous ? "\u0000" : a)), { trackers: { jira: false, linear: false }, cwd: io.origCwd }) as InputRef[];
     refs = refs.map((r) => (r.ref === "\u0000" ? { kind: as, ref: res.ambiguous } : r));
   } else refs = res;
   const items = [];

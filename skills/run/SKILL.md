@@ -101,8 +101,12 @@ When all are back, mark `read-code` and `explore` done.
 | code `matches`, site `differs` or `broken` | `built-observed` |
 | spec, code and site agree, the guide says otherwise | `guide-spec` |
 | an explorer `U-` item no requirement covers | `unspecced` (or `product` if it fails a checklist item) |
-| code `matches` but the site never showed it (not reachable, skipped, no runner) | `unverified` |
+| an explorer result `skipped` (a permission stopped it, or the explorer held back on purpose) | `skipped`, with `observed.text` naming the permission that would allow it |
+| code `matches` but the site never showed it (not reachable, no runner for that persona) | `unverified` |
 | everything agrees, seen on the site | `match` |
+
+Copy each explorer item's `observed.shots` across as-is. If an explorer left them out, look in
+`<runDir>/shots.json` for that runner's captions and attach the matching files.
 
 Severity: `critical` for money, data loss, or someone seeing or changing what they should not;
 `high` for a core flow that is broken; otherwise `medium` or `low`. Mark `scope: unrelated` for

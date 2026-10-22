@@ -137,6 +137,7 @@ function renderSummary(r, theme2, o) {
   const c = painter(theme2, o.color);
   const br = theme2 === "br2049";
   const rule = c("accentDim", "\u2500".repeat(Math.max(10, Math.min(o.width, 48))));
+  const verified = r.counts.passRate !== null && r.counts.passRate !== void 0 && Number(r.counts.checked) > 0;
   const k = Object.fromEntries(Object.entries(r.counts).map(([key, v]) => [key, num(v)]));
   const [on, off] = bar(k.passRate, 10);
   const d = num(r.durationMin);
@@ -145,8 +146,8 @@ function renderSummary(r, theme2, o) {
   const lines = [
     header(theme2, c, `${clean(r.label)} \xB7 ${clean(r.size)} \xB7 ${dur}`),
     rule,
-    `${c("ink", (br ? "PASS RATE" : "Pass rate").padEnd(11))} ${c("accent", on)}${c("accentDim", off)} ${c("ink", `${k.passRate}%`)}`,
-    `${c("ink3", "checked".padEnd(11))} ${c("ink", String(k.checked).padEnd(4))} ${c("ink3", "passed")} ${c("match", String(k.passed))}`,
+    verified ? `${c("ink", (br ? "PASS RATE" : "Pass rate").padEnd(11))} ${c("accent", on)}${c("accentDim", off)} ${c("ink", `${k.passRate}%`)}` : `${c("ink", (br ? "PASS RATE" : "Pass rate").padEnd(11))} ${c("ink3", "nothing verified on the site")}`,
+    `${c("ink3", "verified".padEnd(11))} ${c("ink", String(k.checked).padEnd(4))} ${c("ink3", "passed")} ${c("match", String(k.passed))}`,
     "",
     row("conflicts", "conflict", k.conflicts),
     row("product", "product", k.product),
