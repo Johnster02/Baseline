@@ -27,9 +27,11 @@ async function refresh($: any) {
   theme = cfg?.theme ?? "br2049";
   const active = await readText($, root + "/active-run");
   const last = await readText($, root + "/last-run");
-  const runDir = active || last;
+  // Only follow pointers into this project's own run folders.
+  const inside = (p?: string) => (p && p.startsWith(root + "/sessions/") && !p.includes("/../") ? p : undefined);
+  const runDir = inside(active) || inside(last);
   const progress = runDir ? await readJson<Progress>($, runDir + "/progress.json") : undefined;
-  const summary = !active && last ? await readJson<RunSummary>($, last + "/summary.json") : undefined;
+  const summary = !inside(active) && inside(last) ? await readJson<RunSummary>($, last + "/summary.json") : undefined;
   state = { progress, summary, now: Date.now() };
   // Redraw when something changed, and every 10s while a run is live so the clock moves.
   const key = JSON.stringify([progress, summary, theme, Math.floor(Date.now() / 10000)]);

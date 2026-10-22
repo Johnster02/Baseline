@@ -55,3 +55,13 @@ describe("finished progress without a summary", () => {
     expect(frame({ progress: progress({ finishedAt: "2026-10-22T09:40:00Z" }), now }, "dark", 80, 20)).toEqual([]);
   });
 });
+
+describe("hostile run files", () => {
+  it("segments never carry control characters and numbers are coerced", () => {
+    const p = progress({ agents: "3\x1b[2J" as any, phases: [{ name: "explore", status: "active", pct: "62\x1b]0;x\x07" as any }] as any });
+    p.counts = { ...p.counts, conflicts: "\x1b[31m9" as any };
+    const segs = frame({ progress: p, now }, "dark", 80, 20).flat();
+    for (const s of segs) expect(s.text).not.toMatch(/[\x00-\x1f\x7f-\x9f]/);
+    expect(toSegments("a\x07b\x1bc")).toEqual([{ text: "abc" }]);
+  });
+});

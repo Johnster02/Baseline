@@ -18,7 +18,8 @@ export function toSegments(line: string): Segment[] {
     const m = part.match(/^\x1b\[38;2;(\d+);(\d+);(\d+)m$/);
     if (m) { color = "#" + [m[1], m[2], m[3]].map((n) => Number(n).toString(16).padStart(2, "0")).join(""); continue; }
     if (part.startsWith("\x1b[")) { color = undefined; continue; }
-    if (part) out.push(color ? { text: part, color } : { text: part });
+    const text = part.replace(/[\x00-\x1f\x7f-\x9f]/g, "");
+    if (text) out.push(color ? { text, color } : { text });
   }
   return out;
 }

@@ -13,6 +13,7 @@ export function colorMode(env: NodeJS.ProcessEnv = process.env): ColorMode {
 
 const ANSI = /\x1b\[[0-9;]*m/g;
 /** Run data comes from agents: drop C0/C1 control characters (ESC included) before painting it. */
+const num = (n: unknown) => (Number.isFinite(Number(n)) ? Number(n) : 0);
 const clean = (s: unknown) => String(s ?? "")
   .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)?/g, "") // OSC sequences (titles, links)
   .replace(/(\x1b\[|\x9b)[0-9;?]*[ -\/]*[@-~]/g, "") // CSI sequences
@@ -72,19 +73,20 @@ export function renderProgress(p: Progress, theme: ThemeName, o: TermOpts): stri
   const br = theme === "br2049";
   const rule = c("accentDim", "─".repeat(Math.max(10, Math.min(o.width, 48))));
   const glyph = { done: br ? "■" : "✓", active: br ? "▶" : "●", pending: br ? "□" : "○", skipped: br ? "·" : "–" };
-  const lines = [header(theme, c, `${clean(p.label)} · ${clean(p.size)} run · ${p.agents} agents`), rule];
+  const lines = [header(theme, c, `${clean(p.label)} · ${clean(p.size)} run · ${num(p.agents)} agents`), rule];
   for (const ph of p.phases) {
     const name = (br ? PHASE_NAME[ph.name]! : PHASE_NAME[ph.name]![0]!.toUpperCase() + PHASE_NAME[ph.name]!.slice(1)).padEnd(10);
     if (ph.status === "done") lines.push(`${c(br ? "accent" : "match", glyph.done)} ${name}  ${c("accent", "done")}   ${c("ink3", clean(ph.note))}`);
     else if (ph.status === "active") {
-      const [on, off] = bar(ph.pct ?? 0, 16);
-      lines.push(`${c("dust", glyph.active)} ${c("ink", name)}  ${c("accent", on)}${c("accentDim", off)} ${c("ink", `${ph.pct ?? 0}%`)}${ph.note ? " " + c("ink3", clean(ph.note)) : ""}`);
+      const pct = Math.round(num(ph.pct));
+      const [on, off] = bar(pct, 16);
+      lines.push(`${c("dust", glyph.active)} ${c("ink", name)}  ${c("accent", on)}${c("accentDim", off)} ${c("ink", `${pct}%`)}${ph.note ? " " + c("ink3", clean(ph.note)) : ""}`);
       for (const a of p.active) lines.push(`    ${c("accent", "›")} ${clean(a.persona).padEnd(10)} ${c("ink3", clean(a.doing))}`);
     } else if (ph.status === "skipped") lines.push(`${c("ink3", glyph.skipped)} ${c("ink3", name)}  ${c("ink3", "skipped")}`);
     else lines.push(`${c("accentDim", glyph.pending)} ${c("ink3", name)}`);
   }
   const k = p.counts;
-  lines.push(rule, `${c("ink3", "elapsed")} ${c("ink", elapsed(p.startedAt, p.finishedAt ? Date.parse(p.finishedAt) : Date.now()))}  ${c("ink3", "found so far")} ${c("conflict", String(k.conflicts))} ${c("product", String(k.product))} ${c("unverified", String(k.unverified))} ${c("match", String(k.passed))}`);
+  lines.push(rule, `${c("ink3", "elapsed")} ${c("ink", elapsed(p.startedAt, p.finishedAt ? Date.parse(p.finishedAt) : Date.now()))}  ${c("ink3", "found so far")} ${c("conflict", String(num(k.conflicts)))} ${c("product", String(num(k.product)))} ${c("unverified", String(num(k.unverified)))} ${c("match", String(num(k.passed)))}`);
   return lines.map((l) => fit(l, o.width));
 }
 
@@ -95,9 +97,10 @@ export function renderSummary(r: SummaryInput, theme: ThemeName, o: TermOpts): s
   const c = painter(theme, o.color);
   const br = theme === "br2049";
   const rule = c("accentDim", "─".repeat(Math.max(10, Math.min(o.width, 48))));
-  const k = r.counts;
+  const k = Object.fromEntries(Object.entries(r.counts).map(([key, v]) => [key, num(v)])) as typeof r.counts;
   const [on, off] = bar(k.passRate, 10);
-  const dur = `${Math.floor(r.durationMin)}m ${String(Math.round((r.durationMin % 1) * 60)).padStart(2, "0")}s`;
+  const d = num(r.durationMin);
+  const dur = `${Math.floor(d)}m ${String(Math.round((d % 1) * 60)).padStart(2, "0")}s`;
   const row = (label: string, token: string, n: number) => `${c(token, label.padEnd(13))} ${c("ink", String(n))}`;
   const lines = [
     header(theme, c, `${clean(r.label)} · ${clean(r.size)} · ${dur}`), rule,

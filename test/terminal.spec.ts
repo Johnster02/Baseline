@@ -109,3 +109,23 @@ describe("control characters from run data", () => {
     expect(t).toContain("opening /cart");
   });
 });
+
+describe("summary writes stay inside the project", () => {
+  it("refuses a run folder outside .baseline/sessions", async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, existsSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { vi } = await import("vitest");
+    const { main } = await import("../src/cli");
+    await import("../src/commands");
+    const proj = mkdtempSync(join(tmpdir(), "p-"));
+    const outside = mkdtempSync(join(tmpdir(), "elsewhere-"));
+    writeFileSync(join(outside, "run.json"), JSON.stringify({ runId: "r-1", url: "http://x", label: "x", startedAt: "" }));
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    vi.spyOn(process, "cwd").mockReturnValue(proj);
+    expect(await main(["summary", outside])).toBe(2);
+    vi.restoreAllMocks();
+    expect(existsSync(join(outside, "summary.json"))).toBe(false);
+  });
+});
