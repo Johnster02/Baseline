@@ -13,6 +13,11 @@ pnpm check
 `dist/` and `mod/` match the source, and the mod drawing tests (`claude plugin test`, which runs
 `mod-tests/*.test.ts`). Run `pnpm build` after changing anything in `src/` and commit the built files.
 
+`pnpm screenshots` retakes the README images in `docs/screenshots/` from a made-up sample run
+(`scripts/screenshots.mjs`). Run it after changing how the report or the terminal output looks.
+It needs Playwright's Chromium (`pnpm exec playwright install chromium`) and a network connection
+for the report's fonts.
+
 ## Ground rules
 
 - **Safety first.** Changes to `src/browser/`, `src/config/` or `src/hooks/` need a test that

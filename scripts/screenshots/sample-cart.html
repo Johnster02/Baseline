@@ -1,0 +1,30 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+*{box-sizing:border-box;margin:0}body{font:15px/1.5 -apple-system,"Helvetica Neue",Arial,sans-serif;background:#f6f5f2;color:#1d1d1f}
+nav{display:flex;align-items:center;gap:28px;padding:18px 40px;background:#fff;border-bottom:1px solid #e6e3dc}
+nav b{font-size:18px;letter-spacing:-.02em;margin-right:auto}nav span{color:#6b6b70}
+main{display:grid;grid-template-columns:1.6fr 1fr;gap:28px;padding:22px 40px;max-width:1120px}
+h1{font-size:24px;letter-spacing:-.02em;margin-bottom:12px}
+.card{background:#fff;border:1px solid #e6e3dc;border-radius:12px;padding:22px}
+.item{display:flex;gap:16px;align-items:center;padding:10px 0;border-bottom:1px solid #f0eee9}.item:last-child{border:0}
+.th{width:64px;height:64px;border-radius:8px;background:linear-gradient(135deg,#d9cbb4,#b9a68a)}.th.b{background:linear-gradient(135deg,#9fb7c9,#6f8ea6)}
+.item div{flex:1}.item small{color:#6b6b70;display:block}.item em{font-style:normal;font-weight:600}
+label{display:block;font-size:13px;color:#6b6b70;margin-bottom:6px}
+.code{display:flex;gap:8px}.code input{flex:1;padding:10px 12px;border:1px solid #d6d2c9;border-radius:8px;font:inherit;background:#fff}
+.code button{padding:10px 16px;border:0;border-radius:8px;background:#1d1d1f;color:#fff;font:inherit;font-weight:600}
+.ok{margin-top:10px;padding:9px 12px;border-radius:8px;background:#e8f4ea;color:#21633a;font-size:14px}
+.row{display:flex;justify-content:space-between;padding:6px 0}.row.d{color:#21633a}.row.t{border-top:1px solid #eee;margin-top:8px;padding-top:12px;font-weight:700;font-size:18px}
+.pay{margin-top:16px;width:100%;padding:13px;border:0;border-radius:10px;background:#2f5bd3;color:#fff;font:inherit;font-weight:600;font-size:16px}
+</style></head><body>
+<nav><b>Acme shop</b><span>Shop</span><span>Orders</span><span>Cart (2)</span></nav>
+<main><section><h1>Your cart</h1><div class="card">
+<div class="item"><span class="th"></span><div>Stoneware mug<small>Sand · 350 ml</small></div><em>$18.00</em></div>
+<div class="item"><span class="th b"></span><div>Pour-over set<small>Slate</small></div><em>$42.00</em></div>
+</div></section>
+<aside><h1>&nbsp;</h1><div class="card">
+<label>Discount code</label><div class="code"><input value="SPRING24"><button>Apply</button></div>
+<div class="ok">SPRING24 applied: 10% off</div>
+<div style="margin-top:12px"><div class="row"><span>Subtotal</span><span>$60.00</span></div>
+<div class="row d"><span>Discount (SPRING24)</span><span>−$6.00</span></div>
+<div class="row"><span>Shipping</span><span>Free</span></div>
+<div class="row t"><span>Total</span><span>$54.00</span></div></div>
+<button class="pay">Checkout</button></div></aside></main></body></html>
