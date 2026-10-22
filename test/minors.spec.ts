@@ -104,3 +104,13 @@ describe("WebSocket normalisation (security review)", () => {
     expect(wsDecide({ url: "wss://s.acme.dev/ws/payments", loading: true }, { runner: create, cfg: c })).toMatchObject({ action: "abort", category: "finance" });
   });
 });
+
+describe("protected words normalised the same way as messages", () => {
+  const base = loadConfig(tmp());
+  const cfg = { ...base, patterns: { ...base.patterns, finance: { ...base.patterns.finance, words: [...base.patterns.finance.words, "top-up", "buyCredits"] } } };
+  const create = { ...newRunner("a", "a", { kind: "session" }), depth: "create" as const };
+  it("matches hyphenated and camelCase words, raw or normalised, with any spacing", () => {
+    for (const m of ['{"op":"top-up"}', '{"op":"topUp"}', '{"op":"top   up"}', '{"op":"buy_credits"}', "action=top%2Dup&x=%ZZ"])
+      expect(wsDecide({ url: "wss://s.acme.dev/ws", loading: false, message: m }, { runner: create, cfg }).action, m).toBe("abort");
+  });
+});

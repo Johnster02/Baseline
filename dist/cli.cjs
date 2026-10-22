@@ -20410,11 +20410,14 @@ function normaliseMessage(message) {
     text = parts.join(" ");
   } catch {
   }
-  try {
-    text = decodeURIComponent(text);
-  } catch {
-  }
-  return text.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_\-.:/]+/g, " ");
+  text = text.replace(/(%[0-9a-f]{2})+/gi, (m) => {
+    try {
+      return decodeURIComponent(m);
+    } catch {
+      return m;
+    }
+  });
+  return text.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_\-.:/=&?]+/g, " ").replace(/\s+/g, " ").trim();
 }
 function wsDecide(req, ctx) {
   const { runner, cfg } = ctx;
@@ -20435,7 +20438,7 @@ function wsDecide(req, ctx) {
   for (const cat of PATTERN_ORDER) {
     if (runner.allow.includes(cat)) continue;
     const text = normaliseMessage(req.message);
-    const word = cfg.patterns[cat].words.find((w) => wordHit(text, w));
+    const word = cfg.patterns[cat].words.find((w) => wordHit(text, normaliseMessage(w)) || wordHit(req.message, w));
     if (word) return { action: "abort", category: cat, reason: `WebSocket message looks like ${cat}`, trigger: word.toLowerCase() };
   }
   return { action: "continue" };

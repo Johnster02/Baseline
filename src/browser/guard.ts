@@ -124,8 +124,9 @@ export function normaliseMessage(message: string): string {
     walk(JSON.parse(message));
     text = parts.join(" ");
   } catch { /* not JSON: use as is */ }
-  try { text = decodeURIComponent(text); } catch { /* keep */ }
-  return text.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_\-.:/]+/g, " ");
+  // Percent-escapes token by token, so one bad escape doesn't leave the rest encoded.
+  text = text.replace(/(%[0-9a-f]{2})+/gi, (m) => { try { return decodeURIComponent(m); } catch { return m; } });
+  return text.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_\-.:/=&?]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
 /**
@@ -150,8 +151,9 @@ export function wsDecide(req: { url: string; loading: boolean; message?: string 
   }
   for (const cat of PATTERN_ORDER) {
     if (runner.allow.includes(cat)) continue;
+    // Words and message go through the same normalisation; the raw message is checked too.
     const text = normaliseMessage(req.message);
-    const word = cfg.patterns[cat].words.find((w) => wordHit(text, w));
+    const word = cfg.patterns[cat].words.find((w) => wordHit(text, normaliseMessage(w)) || wordHit(req.message!, w));
     if (word) return { action: "abort", category: cat, reason: `WebSocket message looks like ${cat}`, trigger: word.toLowerCase() };
   }
   return { action: "continue" };
