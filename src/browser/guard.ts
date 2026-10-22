@@ -159,6 +159,8 @@ export function wsDecide(req: { url: string; loading: boolean; message?: string 
     if (runner.allow.includes(cat)) continue;
     // Words and message go through the same normalisation; the raw message is checked too.
     const text = normaliseMessage(req.message);
+    // Escapes left after decoding mean we can't read it: fail closed.
+    if (/%[0-9a-f]{2}/i.test(text)) return { action: "abort", category: "unknown-write", reason: "WebSocket message could not be decoded to check it" };
     const word = cfg.patterns[cat].words.find((w) => wordHit(text, normaliseMessage(w)) || wordHit(req.message!, w));
     if (word) return { action: "abort", category: cat, reason: `WebSocket message looks like ${cat}`, trigger: word.toLowerCase() };
   }

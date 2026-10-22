@@ -20452,6 +20452,7 @@ function wsDecide(req, ctx) {
   for (const cat of PATTERN_ORDER) {
     if (runner.allow.includes(cat)) continue;
     const text = normaliseMessage(req.message);
+    if (/%[0-9a-f]{2}/i.test(text)) return { action: "abort", category: "unknown-write", reason: "WebSocket message could not be decoded to check it" };
     const word = cfg.patterns[cat].words.find((w) => wordHit(text, normaliseMessage(w)) || wordHit(req.message, w));
     if (word) return { action: "abort", category: cat, reason: `WebSocket message looks like ${cat}`, trigger: word.toLowerCase() };
   }
@@ -20919,13 +20920,14 @@ register("script", "run an agent's browser script as a runner: script <runner> <
   const permFlag = major >= 22 ? "--permission" : "--experimental-permission";
   const real = (p) => {
     try {
-      return (0, import_node_fs7.realpathSync)(p);
+      return import_node_fs7.realpathSync.native(p);
     } catch {
       return p;
     }
   };
-  const data = real(dataDir());
-  if (data.startsWith(real(scriptPath)) || real(scriptPath).startsWith(data + import_node_path6.sep)) {
+  const fold = (p) => process.platform === "darwin" || process.platform === "win32" ? p.toLowerCase() : p;
+  const data = fold(real(dataDir())), script = fold(real(scriptPath));
+  if (data.startsWith(script) || script.startsWith(data + import_node_path6.sep)) {
     err("refusing: scripts may not live in Baseline's data folder");
     return 2;
   }

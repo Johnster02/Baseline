@@ -60,9 +60,11 @@ register("script", "run an agent's browser script as a runner: script <runner> <
   // in the data folder are out of reach.
   const major = Number(process.versions.node.split(".")[0]);
   const permFlag = major >= 22 ? "--permission" : "--experimental-permission";
-  const real = (p: string) => { try { return realpathSync(p); } catch { return p; } };
-  const data = real(dataDir());
-  if (data.startsWith(real(scriptPath)) || real(scriptPath).startsWith(data + sep)) { err("refusing: scripts may not live in Baseline's data folder"); return 2; }
+  const real = (p: string) => { try { return realpathSync.native(p); } catch { return p; } };
+  // macOS and Windows paths ignore case, so compare without it there.
+  const fold = (p: string) => (process.platform === "darwin" || process.platform === "win32" ? p.toLowerCase() : p);
+  const data = fold(real(dataDir())), script = fold(real(scriptPath));
+  if (data.startsWith(script) || script.startsWith(data + sep)) { err("refusing: scripts may not live in Baseline's data folder"); return 2; }
   const execArgv = [permFlag, `--require=${real(join(dataDir(), "shim", "preload.cjs"))}`, `--allow-fs-read=${real(join(dataDir(), "shim"))}`, `--allow-fs-read=${real(runDir)}`, `--allow-fs-read=${real(scriptPath)}`, `--allow-fs-read=${real(shim)}`,
     `--allow-fs-read=${real(join(pluginRoot(), "dist"))}`, `--allow-fs-write=${real(runDir)}`];
   const child = fork(real(scriptPath), [], {

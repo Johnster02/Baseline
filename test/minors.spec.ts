@@ -132,3 +132,12 @@ describe("deep percent encoding", () => {
     expect(wsDecide({ url: "wss://s.acme.dev/ws", loading: false, message: m }, { runner: create, cfg: loadConfig(tmp()) }).action).toBe("abort");
   });
 });
+
+describe("fail closed on undecodable escapes", () => {
+  it("a message that still has escapes after decoding is blocked for a create runner", () => {
+    let m = "send invoice";
+    for (let i = 0; i < 25; i++) m = encodeURIComponent(m);
+    const create = { ...newRunner("a", "a", { kind: "session" }), depth: "create" as const };
+    expect(wsDecide({ url: "wss://s.acme.dev/ws", loading: false, message: m }, { runner: create, cfg: loadConfig(tmp()) })).toMatchObject({ action: "abort", category: "unknown-write" });
+  });
+});
