@@ -20271,22 +20271,22 @@ async function isSignedOut(page, runner) {
   if (runner.auth.kind === "form" && path === new URL(runner.auth.loginUrl, page.url()).pathname) return true;
   return await page.locator(PASSWORD).first().isVisible().catch(() => false) === true;
 }
-function saveState(file3, state) {
-  (0, import_node_fs4.mkdirSync)((0, import_node_path3.dirname)(file3), { recursive: true, mode: 448 });
-  (0, import_node_fs4.chmodSync)((0, import_node_path3.dirname)(file3), 448);
-  (0, import_node_fs4.writeFileSync)(file3, JSON.stringify(state), { mode: 384 });
-  (0, import_node_fs4.chmodSync)(file3, 384);
+function saveState(file5, state) {
+  (0, import_node_fs4.mkdirSync)((0, import_node_path3.dirname)(file5), { recursive: true, mode: 448 });
+  (0, import_node_fs4.chmodSync)((0, import_node_path3.dirname)(file5), 448);
+  (0, import_node_fs4.writeFileSync)(file5, JSON.stringify(state), { mode: 384 });
+  (0, import_node_fs4.chmodSync)(file5, 384);
 }
 async function signIn(runner, cfg, ctx) {
   const target = checkTarget(ctx.baseUrl, cfg, ctx.live ?? runner.allow.includes("live"));
   if (!target.ok) return { key: runner.key, ok: false, error: `refusing to sign in: ${ctx.baseUrl} is ${target.reason === "production" ? "marked as production" : "not a valid URL"}` };
-  const file3 = sessionPath(ctx.data, ctx.projectDir, runner.key);
+  const file5 = sessionPath(ctx.data, ctx.projectDir, runner.key);
   const { chromium } = loadPlaywright();
   const browser = await chromium.launch({ headless: true });
   try {
     if (runner.auth.kind === "session") {
-      if (!(0, import_node_fs4.existsSync)(file3)) return { key: runner.key, ok: false, error: "No saved session. Sign in by hand once: baseline signin " + runner.key + " --manual" };
-      const context2 = await browser.newContext({ baseURL: ctx.baseUrl, storageState: file3 });
+      if (!(0, import_node_fs4.existsSync)(file5)) return { key: runner.key, ok: false, error: "No saved session. Sign in by hand once: baseline signin " + runner.key + " --manual" };
+      const context2 = await browser.newContext({ baseURL: ctx.baseUrl, storageState: file5 });
       const page2 = await context2.newPage();
       await page2.goto(ctx.baseUrl, { waitUntil: "load" });
       if (await isSignedOut(page2, runner)) return { key: runner.key, ok: false, error: "Saved session has expired. Sign in by hand again: baseline signin " + runner.key + " --manual" };
@@ -20314,7 +20314,7 @@ async function signIn(runner, cfg, ctx) {
     await page.waitForLoadState("networkidle", { timeout: 5e3 }).catch(() => {
     });
     if (await isSignedOut(page, runner)) return { key: runner.key, ok: false, error: "Sign-in did not succeed: still on the sign-in page. Check the saved details in setup." };
-    saveState(file3, await context.storageState());
+    saveState(file5, await context.storageState());
     return { key: runner.key, ok: true, landed: new URL(page.url()).pathname };
   } catch (e) {
     return { key: runner.key, ok: false, error: `Sign-in failed: ${e.name || "error"}` };
@@ -20325,7 +20325,7 @@ async function signIn(runner, cfg, ctx) {
 async function captureSession(runner, cfg, ctx) {
   const target = checkTarget(ctx.baseUrl, cfg, ctx.live ?? runner.allow.includes("live"));
   if (!target.ok) return { key: runner.key, ok: false, error: "refusing: that URL is marked as production or is invalid" };
-  const file3 = sessionPath(ctx.data, ctx.projectDir, runner.key);
+  const file5 = sessionPath(ctx.data, ctx.projectDir, runner.key);
   const { chromium } = loadPlaywright();
   const browser = await chromium.launch({ headless: false });
   const context = await browser.newContext({ baseURL: ctx.baseUrl });
@@ -20334,7 +20334,7 @@ async function captureSession(runner, cfg, ctx) {
   let saved = false;
   const timer = setInterval(async () => {
     try {
-      saveState(file3, await context.storageState());
+      saveState(file5, await context.storageState());
       saved = true;
     } catch {
     }
@@ -20549,10 +20549,10 @@ async function openSession(o) {
     },
     async shot(name, caption) {
       const safe = name.replace(/[^a-z0-9-]+/gi, "-").slice(0, 60) || "shot";
-      const file3 = (0, import_node_path4.join)(o.runDir, "shots", `${o.runner.key}-${safe}-${++shots}.png`);
-      await page.screenshot({ path: file3, fullPage: false });
-      appendJson((0, import_node_path4.join)(o.runDir, "shots.json"), { runner: o.runner.key, name: safe, path: file3, caption, at: (/* @__PURE__ */ new Date()).toISOString() });
-      return file3;
+      const file5 = (0, import_node_path4.join)(o.runDir, "shots", `${o.runner.key}-${safe}-${++shots}.png`);
+      await page.screenshot({ path: file5, fullPage: false });
+      appendJson((0, import_node_path4.join)(o.runDir, "shots.json"), { runner: o.runner.key, name: safe, path: file5, caption, at: (/* @__PURE__ */ new Date()).toISOString() });
+      return file5;
     },
     created(kind, label, url2) {
       if (url2) {
@@ -20605,8 +20605,8 @@ var isCommand = (m) => typeof m === "string" && COMMANDS.includes(m);
 function pluginRoot() {
   return typeof __dirname !== "undefined" ? (0, import_node_path5.resolve)(__dirname, "..") : process.cwd();
 }
-function activeRunDir(projectDir, flag) {
-  if (flag) return (0, import_node_path5.resolve)(flag);
+function activeRunDir(projectDir, flag2) {
+  if (flag2) return (0, import_node_path5.resolve)(flag2);
   if (process.env.BASELINE_RUN_DIR) return process.env.BASELINE_RUN_DIR;
   const p = (0, import_node_path5.join)(projectDir, ".baseline", "active-run");
   return (0, import_node_fs6.existsSync)(p) ? (0, import_node_fs6.readFileSync)(p, "utf8").trim() : void 0;
@@ -20625,11 +20625,11 @@ function parseScriptArgs(args) {
   return { runnerKey: rest[0], file: rest[1], runFlag };
 }
 register("script", "run an agent's browser script as a runner: script <runner> <file.cjs> [--run <dir>]", async (args) => {
-  const { runnerKey, file: file3, runFlag } = parseScriptArgs(args);
+  const { runnerKey, file: file5, runFlag } = parseScriptArgs(args);
   const projectDir = process.cwd();
   const cfg = loadConfig(projectDir);
   const runner = cfg.runners.find((r) => r.key === runnerKey);
-  if (!runner || !file3) {
+  if (!runner || !file5) {
     err(`usage: baseline script <runner> <file.cjs> [--run <dir>]. Runners: ${cfg.runners.map((r) => r.key).join(", ") || "none"}`);
     return 2;
   }
@@ -20640,7 +20640,7 @@ register("script", "run an agent's browser script as a runner: script <runner> <
   }
   const run = JSON.parse((0, import_node_fs6.readFileSync)((0, import_node_path5.join)(runDir, "run.json"), "utf8"));
   let session;
-  const child = (0, import_node_child_process.fork)((0, import_node_path5.resolve)(file3), [], {
+  const child = (0, import_node_child_process.fork)((0, import_node_path5.resolve)(file5), [], {
     cwd: projectDir,
     stdio: ["inherit", "inherit", "inherit", "ipc"],
     // The script gets only the shim on its module path, and none of Baseline's own settings.
@@ -20914,6 +20914,242 @@ register("hook", "internal: hook handlers (store-options)", (args) => {
     return 0;
   }
   err("unknown hook");
+  return 2;
+});
+
+// src/run/cli.ts
+var import_node_fs14 = require("node:fs");
+var import_node_path13 = require("node:path");
+
+// src/run/state.ts
+var import_node_fs11 = require("node:fs");
+var import_node_path10 = require("node:path");
+var pad = (n) => String(n).padStart(2, "0");
+function newRun(projectDir, sessionId, meta3) {
+  const d = /* @__PURE__ */ new Date();
+  const base = `r-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`;
+  const root = (0, import_node_path10.join)(projectDir, ".baseline");
+  let runId = base;
+  const sessionKey = sessionId && /^[A-Za-z0-9_-]+$/.test(sessionId) ? sessionId : void 0;
+  let sessionDir = (0, import_node_path10.join)(root, "sessions", sessionKey ?? runId);
+  for (let i = 2; (0, import_node_fs11.existsSync)((0, import_node_path10.join)(sessionDir, "runs", runId)) || !sessionKey && (0, import_node_fs11.existsSync)(sessionDir); i++) {
+    runId = `${base}-${i}`;
+    if (!sessionKey) sessionDir = (0, import_node_path10.join)(root, "sessions", runId);
+  }
+  const runDir = (0, import_node_path10.join)(sessionDir, "runs", runId);
+  (0, import_node_fs11.mkdirSync)(runDir, { recursive: true });
+  (0, import_node_fs11.writeFileSync)((0, import_node_path10.join)(runDir, "run.json"), JSON.stringify({ runId, url: meta3.url, label: meta3.label, startedAt: d.toISOString() }, null, 2));
+  (0, import_node_fs11.writeFileSync)((0, import_node_path10.join)(root, "active-run"), runDir);
+  return { runId, runDir, sessionDir };
+}
+function finishRun(projectDir) {
+  (0, import_node_fs11.rmSync)((0, import_node_path10.join)(projectDir, ".baseline", "active-run"), { force: true });
+}
+
+// src/run/progress.ts
+var import_node_fs12 = require("node:fs");
+var import_node_path11 = require("node:path");
+
+// src/findings/counts.ts
+var emptyCounts = () => ({ checked: 0, passed: 0, passRate: 0, conflicts: 0, product: 0, unspecced: 0, unverified: 0, skipped: 0 });
+
+// src/run/progress.ts
+var PHASES = ["gather", "read-code", "explore", "verdicts", "refute", "clean-up"];
+var file3 = (runDir) => (0, import_node_path11.join)(runDir, "progress.json");
+function readProgress(runDir) {
+  try {
+    return JSON.parse((0, import_node_fs12.readFileSync)(file3(runDir), "utf8"));
+  } catch {
+    return void 0;
+  }
+}
+function updateProgress(runDir, patch) {
+  const p = readProgress(runDir) ?? {
+    runId: "",
+    label: "",
+    size: "quick",
+    agents: 0,
+    startedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    phases: PHASES.map((name) => ({ name, status: "pending" })),
+    active: [],
+    counts: emptyCounts()
+  };
+  const { phase, agent, agentDone, ...rest } = patch;
+  Object.assign(p, rest);
+  if (phase) p.phases = p.phases.map((x) => x.name === phase.name ? { ...phase } : x);
+  if (agent) p.active = [...p.active.filter((a) => a.persona !== agent.persona), agent];
+  if (agentDone) p.active = p.active.filter((a) => a.persona !== agentDone);
+  const tmp = `${file3(runDir)}.${process.pid}.tmp`;
+  (0, import_node_fs12.writeFileSync)(tmp, JSON.stringify(p, null, 2));
+  (0, import_node_fs12.renameSync)(tmp, file3(runDir));
+  return p;
+}
+
+// src/run/sizing.ts
+function sizeRun(inputs, changedFileCount, personas, codeRead) {
+  const full = inputs.some((i) => i.kind === "folder" || i.guide || i.words > 2e3) || changedFileCount > 15 || personas.length > 2;
+  const size = full ? "full" : "quick";
+  const plan = ["gatherer"];
+  if (codeRead) plan.push("code-reader");
+  const explorers = personas.slice(0, full ? 4 : 2);
+  for (const p of explorers) plan.push(`explorer:${p}`);
+  if (full && inputs.some((i) => i.guide)) plan.push("guide-reader");
+  plan.push("refuter");
+  if (full) plan.push("cleaner");
+  const agents = plan.filter((p) => p !== "gatherer" && p !== "cleaner").length;
+  return { size, agents, plan };
+}
+
+// src/run/commit.ts
+var import_node_child_process3 = require("node:child_process");
+var import_node_util2 = require("node:util");
+async function commitInfo(projectDir, cfg, probe) {
+  let commitRead;
+  try {
+    commitRead = (await (0, import_node_util2.promisify)(import_node_child_process3.execFile)("git", ["rev-parse", "--short=7", "HEAD"], { cwd: projectDir })).stdout.trim();
+  } catch {
+    commitRead = void 0;
+  }
+  if (!commitRead) return { codeRead: false, mismatch: false };
+  let deployed;
+  if (cfg.versionProbe) {
+    try {
+      const body = probe ? await probe(cfg.versionProbe.url) : await (await fetch(cfg.versionProbe.url)).text();
+      deployed = body.match(new RegExp(cfg.versionProbe.pattern))?.[1];
+    } catch {
+      deployed = void 0;
+    }
+  }
+  const mismatch = !!deployed && !deployed.startsWith(commitRead) && !commitRead.startsWith(deployed);
+  return { codeRead: true, commitRead, ...deployed ? { deployed } : {}, mismatch };
+}
+
+// src/run/sitemap.ts
+var import_node_fs13 = require("node:fs");
+var import_node_path12 = require("node:path");
+var file4 = (p) => (0, import_node_path12.join)(p, ".baseline", "sitemap.json");
+function readSiteMap(projectDir) {
+  try {
+    return JSON.parse((0, import_node_fs13.readFileSync)(file4(projectDir), "utf8"));
+  } catch {
+    return { routes: [], notes: [] };
+  }
+}
+function mergeSiteMap(projectDir, partial2) {
+  const m = readSiteMap(projectDir);
+  for (const r of partial2.routes ?? []) {
+    const hit = m.routes.find((x) => x.path === r.path);
+    if (hit) {
+      hit.title = r.title || hit.title;
+      hit.personas = [.../* @__PURE__ */ new Set([...hit.personas, ...r.personas])];
+    } else m.routes.push({ path: r.path, title: r.title, personas: [...new Set(r.personas)] });
+  }
+  m.notes = [.../* @__PURE__ */ new Set([...m.notes, ...partial2.notes ?? []])];
+  (0, import_node_fs13.mkdirSync)((0, import_node_path12.join)(projectDir, ".baseline"), { recursive: true });
+  (0, import_node_fs13.writeFileSync)(file4(projectDir), JSON.stringify(m, null, 2));
+  return m;
+}
+
+// src/run/cli.ts
+var flag = (args, name) => {
+  const i = args.indexOf(name);
+  return i >= 0 ? args[i + 1] : void 0;
+};
+var STATUSES = ["pending", "active", "done", "skipped"];
+function needRun(args) {
+  const d = activeRunDir(process.cwd(), flag(args, "--run"));
+  if (!d) err("no active run. Start one with: baseline run new --url <url> --label <label>");
+  return d;
+}
+register("run", "run new --url <u> --label <l> [--session <id>] | run finish", (args) => {
+  if (args[0] === "new") {
+    const url2 = flag(args, "--url"), label = flag(args, "--label");
+    if (!url2 || !label) {
+      err("usage: baseline run new --url <url> --label <label> [--session <id>]");
+      return 2;
+    }
+    out(JSON.stringify(newRun(process.cwd(), flag(args, "--session"), { url: url2, label })));
+    return 0;
+  }
+  if (args[0] === "finish") {
+    finishRun(process.cwd());
+    out("run finished");
+    return 0;
+  }
+  err("usage: baseline run new|finish");
+  return 2;
+});
+register("progress", "progress start <quick|full> <agents> | phase <name> <status> [pct] [note] | agent <persona> <doing> | agent-done <persona> | done", (args) => {
+  const runDir = needRun(args);
+  if (!runDir) return 2;
+  const [sub, a, b, c, ...rest] = args.filter((x, i, all) => x !== "--run" && all[i - 1] !== "--run");
+  const run = JSON.parse((0, import_node_fs14.readFileSync)((0, import_node_path13.join)(runDir, "run.json"), "utf8"));
+  switch (sub) {
+    case "start":
+      if (a !== "quick" && a !== "full") {
+        err("size must be quick or full");
+        return 2;
+      }
+      updateProgress(runDir, { runId: run.runId, label: run.label, size: a, agents: Number(b) || 0, startedAt: (/* @__PURE__ */ new Date()).toISOString() });
+      return 0;
+    case "phase":
+      if (!PHASES.includes(a) || !STATUSES.includes(b)) {
+        err(`phase must be one of ${PHASES.join(", ")}; status one of ${STATUSES.join(", ")}`);
+        return 2;
+      }
+      updateProgress(runDir, { phase: { name: a, status: b, ...c !== void 0 && c !== "" ? { pct: Math.max(0, Math.min(100, Number(c))) } : {}, ...rest.length ? { note: rest.join(" ") } : {} } });
+      return 0;
+    case "agent":
+      if (!a || !b) {
+        err("usage: baseline progress agent <persona> <what it is doing>");
+        return 2;
+      }
+      updateProgress(runDir, { agent: { persona: a, doing: [b, c, ...rest].filter(Boolean).join(" ").slice(0, 80) } });
+      return 0;
+    case "agent-done":
+      updateProgress(runDir, { agentDone: a });
+      return 0;
+    case "done":
+      updateProgress(runDir, { finishedAt: (/* @__PURE__ */ new Date()).toISOString(), ...readProgress(runDir) ? {} : { runId: run.runId, label: run.label } });
+      return 0;
+    default:
+      err("usage: baseline progress start|phase|agent|agent-done|done");
+      return 2;
+  }
+});
+register("size", "size the active run from its inputs.json: size --personas a,b [--guide]", async (args) => {
+  const runDir = needRun(args);
+  if (!runDir) return 2;
+  const inputs = JSON.parse((0, import_node_fs14.readFileSync)((0, import_node_path13.join)(runDir, "inputs.json"), "utf8"));
+  const personas = (flag(args, "--personas") ?? "").split(",").filter(Boolean);
+  const changed = inputs.items.reduce((n, i) => n + (i.changedFiles?.length ?? 0), 0);
+  const sized = inputs.items.map((i) => ({ kind: i.ref.kind, words: (i.body ?? "").split(/\s+/).filter(Boolean).length, guide: args.includes("--guide") }));
+  const info = await commitInfo(process.cwd(), loadConfig(process.cwd()));
+  out(JSON.stringify({ ...sizeRun(sized, changed, personas, info.codeRead), changedFiles: changed }));
+  return 0;
+});
+register("commit", "which commit the code is at and which the site is running", async () => {
+  out(JSON.stringify(await commitInfo(process.cwd(), loadConfig(process.cwd()))));
+  return 0;
+});
+register("sitemap", "sitemap show | merge <file.json>", (args) => {
+  if (args[0] === "show") {
+    out(JSON.stringify(readSiteMap(process.cwd()), null, 2));
+    return 0;
+  }
+  if (args[0] === "merge" && args[1]) {
+    let partial2;
+    try {
+      partial2 = JSON.parse((0, import_node_fs14.readFileSync)(args[1], "utf8"));
+    } catch {
+      err("sitemap file must be JSON: {routes:[{path,title,personas}], notes:[]}");
+      return 2;
+    }
+    const m = mergeSiteMap(process.cwd(), partial2);
+    out(`site map: ${m.routes.length} routes`);
+    return 0;
+  }
+  err("usage: baseline sitemap show|merge <file>");
   return 2;
 });
 
