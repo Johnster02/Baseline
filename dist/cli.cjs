@@ -21416,6 +21416,27 @@ function countRun(fs, blocked) {
   };
 }
 
+// src/run/estimate.ts
+var EXPECTED_S = {
+  gather: { pr: 45, quick: 90, full: 150 },
+  "read-code": { pr: 120, quick: 180, full: 360 },
+  explore: { pr: 180, quick: 360, full: 720 },
+  verdicts: { pr: 45, quick: 120, full: 240 },
+  refute: { pr: 60, quick: 150, full: 300 },
+  "clean-up": { pr: 45, quick: 90, full: 150 }
+};
+var CAP = 95;
+function estimatePct(ph, size, now) {
+  const base = Math.max(0, Math.min(100, Number(ph.pct) || 0));
+  if (ph.status !== "active" || base >= CAP) return base;
+  const from = Date.parse(ph.pctAt ?? ph.since ?? "");
+  if (!Number.isFinite(from)) return base;
+  const total = (EXPECTED_S[ph.name]?.[size === "full" || size === "pr" ? size : "quick"] ?? 120) * 1e3;
+  const left = Math.max(15e3, total * (1 - base / 100));
+  const t = Math.max(0, now - from) / left;
+  return base + (CAP - base) * (1 - Math.exp(-1.5 * t));
+}
+
 // src/run/progress.ts
 var PHASES = ["gather", "read-code", "explore", "verdicts", "refute", "clean-up"];
 var file3 = (runDir) => (0, import_node_path14.join)(runDir, "progress.json");
@@ -21439,7 +21460,7 @@ function updateProgress(runDir, patch) {
   };
   const { phase, agent, agentDone, ...rest } = patch;
   Object.assign(p, rest);
-  if (phase) p.phases = p.phases.map((x) => x.name === phase.name ? { ...phase } : x);
+  if (phase) p.phases = p.phases.map((x) => x.name === phase.name ? nextPhase(x, phase, p.size) : x);
   if (agent) p.active = [...p.active.filter((a) => a.persona !== agent.persona), agent];
   if (agentDone) p.active = p.active.filter((a) => a.persona !== agentDone);
   const tmp = `${file3(runDir)}.${process.pid}.tmp`;
@@ -21447,20 +21468,44 @@ function updateProgress(runDir, patch) {
   (0, import_node_fs15.renameSync)(tmp, file3(runDir));
   return p;
 }
+function nextPhase(prev, next, size) {
+  if (next.status !== "active") return { name: next.name, status: next.status, ...next.note ? { note: next.note } : {} };
+  const nowMs = Date.now();
+  const now = new Date(nowMs).toISOString();
+  const wasActive = prev.status === "active";
+  const out2 = { name: next.name, status: "active", since: wasActive && prev.since ? prev.since : now };
+  const shown = wasActive ? estimatePct(prev, size, nowMs) : 0;
+  if (next.pct !== void 0) {
+    out2.pct = Math.max(next.pct, shown);
+    out2.pctAt = now;
+  } else if (wasActive && prev.pct !== void 0) {
+    out2.pct = prev.pct;
+    if (prev.pctAt) out2.pctAt = prev.pctAt;
+  }
+  const note = next.note ?? (wasActive ? prev.note : void 0);
+  if (note) out2.note = note;
+  return out2;
+}
 
 // src/run/sizing.ts
-function sizeRun(inputs, changedFileCount, personas, codeRead) {
+var SIZES = ["pr", "quick", "full"];
+var UI_FILE = /\.(tsx|jsx|vue|svelte|astro|html?|css|scss|sass|less|styl|erb|haml|hbs|ejs|twig|liquid|mdx|njk|pug)$/i;
+var UI_DIR = /(^|\/)(components?|pages|app|views|templates|screens|ui|layouts?|routes|public|static|styles|assets|locales|i18n|translations|emails?)\//i;
+var NOT_SHIPPED = /(^|\/)(__tests__|tests?|spec|e2e|cypress|playwright|stories|__mocks__|fixtures)\/|\.(test|spec|stories)\.[jt]sx?$|\.md$/i;
+var touchesUi = (paths) => paths.some((p) => !NOT_SHIPPED.test(p) && (UI_FILE.test(p) || UI_DIR.test(p)));
+function sizeRun(inputs, changedFileCount, personas, codeRead, changedPaths = []) {
   const full = inputs.some((i) => i.kind === "folder" || i.guide || i.words > 2e3) || changedFileCount > 15 || personas.length > 2;
-  const size = full ? "full" : "quick";
+  const pr = !full && inputs.some((i) => i.kind === "github-pr") && inputs.length <= 3;
+  const size = full ? "full" : pr ? "pr" : "quick";
+  const codeOnly = pr && codeRead && changedPaths.length > 0 && !touchesUi(changedPaths);
   const plan = ["gatherer"];
   if (codeRead) plan.push("code-reader");
-  const explorers = personas.slice(0, full ? 4 : 2);
-  for (const p of explorers) plan.push(`explorer:${p}`);
+  if (!codeOnly) for (const p of personas.slice(0, full ? 4 : 2)) plan.push(`explorer:${p}`);
   if (full && inputs.some((i) => i.guide)) plan.push("guide-reader");
   plan.push("refuter");
   if (full) plan.push("cleaner");
   const agents = plan.filter((p) => p !== "gatherer" && p !== "cleaner").length;
-  return { size, agents, plan };
+  return { size, agents, plan, codeOnly };
 }
 
 // src/run/commit.ts
@@ -21560,15 +21605,15 @@ register("run", "run new --url <u> --label <l> [--session <id>] | run finish", (
   err("usage: baseline run new|finish");
   return 2;
 });
-register("progress", "progress start <quick|full> <agents> | phase <name> <status> [pct] [note] | agent <persona> <doing> | agent-done <persona> | done", (args) => {
+register("progress", "progress start <pr|quick|full> <agents> | phase <name> <status> [pct] [note] | agent <persona> <doing> | agent-done <persona> | done", (args) => {
   const runDir = needRun(args);
   if (!runDir) return 2;
   const [sub, a, b, c, ...rest] = args.filter((x, i, all) => x !== "--run" && all[i - 1] !== "--run");
   const run = JSON.parse((0, import_node_fs17.readFileSync)((0, import_node_path16.join)(runDir, "run.json"), "utf8"));
   switch (sub) {
     case "start":
-      if (a !== "quick" && a !== "full") {
-        err("size must be quick or full");
+      if (!SIZES.includes(a)) {
+        err(`size must be one of ${SIZES.join(", ")}`);
         return 2;
       }
       updateProgress(runDir, { runId: run.runId, label: run.label, size: a, agents: Number(b) || 0, startedAt: (/* @__PURE__ */ new Date()).toISOString() });
@@ -21603,10 +21648,11 @@ register("size", "size the active run from its inputs.json: size --personas a,b 
   if (!runDir) return 2;
   const inputs = JSON.parse((0, import_node_fs17.readFileSync)((0, import_node_path16.join)(runDir, "inputs.json"), "utf8"));
   const personas = (flag(args, "--personas") ?? "").split(",").filter(Boolean);
-  const changed = inputs.items.reduce((n, i) => n + (i.changedFiles?.length ?? 0), 0);
+  const paths = inputs.items.flatMap((i) => i.changedFiles ?? []);
+  const changed = paths.length;
   const sized = inputs.items.map((i) => ({ kind: i.ref.kind, words: (i.body ?? "").split(/\s+/).filter(Boolean).length, guide: args.includes("--guide") }));
   const info = await commitInfo(process.cwd(), loadConfig(process.cwd()));
-  out(JSON.stringify({ ...sizeRun(sized, changed, personas, info.codeRead), changedFiles: changed }));
+  out(JSON.stringify({ ...sizeRun(sized, changed, personas, info.codeRead, paths), changedFiles: changed }));
   return 0;
 });
 register("commit", "which commit the code is at and which the site is running: commit [--out <file>]", async (args) => {
@@ -21894,7 +21940,7 @@ $$(".deck").forEach(d => d.classList.add("on"));
 sweep();
 })();`;
 
-// raw:/Users/johnchaplin/Documents/Baseline/src/report/style.css
+// raw:/Users/johnchaplin/learn/Baseline/src/report/style.css
 var style_default = `/* Baseline report. Ported from the author's private hub: a worn terminal (BR2049), plus plain Light and a navy Dark. */
 :root{
   color-scheme:dark;
@@ -22608,7 +22654,7 @@ function renderProgress(p, theme, o) {
     const name = (br ? PHASE_NAME[ph.name] : PHASE_NAME[ph.name][0].toUpperCase() + PHASE_NAME[ph.name].slice(1)).padEnd(10);
     if (ph.status === "done") lines.push(`${c(br ? "accent" : "match", glyph.done)} ${name}  ${c("accent", "done")}   ${c("ink3", clean(ph.note))}`);
     else if (ph.status === "active") {
-      const pct = Math.round(num(ph.pct));
+      const pct = Math.round(estimatePct(ph, p.size, o.now ?? Date.now()));
       const [on, off] = bar(pct, 16);
       lines.push(`${c("dust", glyph.active)} ${c("ink", name)}  ${c("accent", on)}${c("accentDim", off)} ${c("ink", `${pct}%`)}${ph.note ? " " + c("ink3", clean(ph.note)) : ""}`);
       for (const a of p.active) lines.push(`    ${c("accent", "\u203A")} ${clean(a.persona).padEnd(10)} ${c("ink3", clean(a.doing))}`);

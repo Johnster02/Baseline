@@ -6,7 +6,8 @@ import { activeRunDir } from "../browser/runner-script";
 import { newRun, finishRun } from "./state";
 import { PHASES, updateProgress, readProgress } from "./progress";
 import type { Phase } from "./progress";
-import { sizeRun } from "./sizing";
+import { sizeRun, SIZES } from "./sizing";
+import type { RunSize } from "./sizing";
 import { commitInfo } from "./commit";
 import { mergeSiteMap, readSiteMap } from "./sitemap";
 
@@ -37,15 +38,15 @@ register("run", "run new --url <u> --label <l> [--session <id>] | run finish", (
   return 2;
 });
 
-register("progress", "progress start <quick|full> <agents> | phase <name> <status> [pct] [note] | agent <persona> <doing> | agent-done <persona> | done", (args) => {
+register("progress", "progress start <pr|quick|full> <agents> | phase <name> <status> [pct] [note] | agent <persona> <doing> | agent-done <persona> | done", (args) => {
   const runDir = needRun(args);
   if (!runDir) return 2;
   const [sub, a, b, c, ...rest] = args.filter((x, i, all) => x !== "--run" && all[i - 1] !== "--run");
   const run = JSON.parse(readFileSync(join(runDir, "run.json"), "utf8"));
   switch (sub) {
     case "start":
-      if (a !== "quick" && a !== "full") { err("size must be quick or full"); return 2; }
-      updateProgress(runDir, { runId: run.runId, label: run.label, size: a, agents: Number(b) || 0, startedAt: new Date().toISOString() });
+      if (!SIZES.includes(a as RunSize)) { err(`size must be one of ${SIZES.join(", ")}`); return 2; }
+      updateProgress(runDir, { runId: run.runId, label: run.label, size: a as RunSize, agents: Number(b) || 0, startedAt: new Date().toISOString() });
       return 0;
     case "phase":
       if (!PHASES.includes(a as Phase) || !STATUSES.includes(b as (typeof STATUSES)[number])) {
@@ -75,10 +76,11 @@ register("size", "size the active run from its inputs.json: size --personas a,b 
   if (!runDir) return 2;
   const inputs = JSON.parse(readFileSync(join(runDir, "inputs.json"), "utf8")) as { items: { ref: { kind: string }; body?: string; changedFiles?: string[] }[] };
   const personas = (flag(args, "--personas") ?? "").split(",").filter(Boolean);
-  const changed = inputs.items.reduce((n, i) => n + (i.changedFiles?.length ?? 0), 0);
+  const paths = inputs.items.flatMap((i) => i.changedFiles ?? []);
+  const changed = paths.length;
   const sized = inputs.items.map((i) => ({ kind: i.ref.kind, words: (i.body ?? "").split(/\s+/).filter(Boolean).length, guide: args.includes("--guide") }));
   const info = await commitInfo(process.cwd(), loadConfig(process.cwd()));
-  out(JSON.stringify({ ...sizeRun(sized, changed, personas, info.codeRead), changedFiles: changed }));
+  out(JSON.stringify({ ...sizeRun(sized, changed, personas, info.codeRead, paths), changedFiles: changed }));
   return 0;
 });
 

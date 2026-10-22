@@ -2,9 +2,10 @@ import type { ThemeName } from "../config/schema";
 import type { Progress } from "../run/progress";
 import type { RunRecord } from "./report";
 import { THEMES } from "./tokens";
+import { estimatePct } from "../run/estimate";
 
 export type ColorMode = "truecolor" | "256" | "none";
-export type TermOpts = { color: ColorMode; width: number; link?: string; localPath?: string };
+export type TermOpts = { color: ColorMode; width: number; link?: string; localPath?: string; now?: number };
 
 export function colorMode(env: NodeJS.ProcessEnv = process.env): ColorMode {
   if (env.NO_COLOR) return "none";
@@ -78,7 +79,7 @@ export function renderProgress(p: Progress, theme: ThemeName, o: TermOpts): stri
     const name = (br ? PHASE_NAME[ph.name]! : PHASE_NAME[ph.name]![0]!.toUpperCase() + PHASE_NAME[ph.name]!.slice(1)).padEnd(10);
     if (ph.status === "done") lines.push(`${c(br ? "accent" : "match", glyph.done)} ${name}  ${c("accent", "done")}   ${c("ink3", clean(ph.note))}`);
     else if (ph.status === "active") {
-      const pct = Math.round(num(ph.pct));
+      const pct = Math.round(estimatePct(ph, p.size, o.now ?? Date.now()));
       const [on, off] = bar(pct, 16);
       lines.push(`${c("dust", glyph.active)} ${c("ink", name)}  ${c("accent", on)}${c("accentDim", off)} ${c("ink", `${pct}%`)}${ph.note ? " " + c("ink3", clean(ph.note)) : ""}`);
       for (const a of p.active) lines.push(`    ${c("accent", "›")} ${clean(a.persona).padEnd(10)} ${c("ink3", clean(a.doing))}`);

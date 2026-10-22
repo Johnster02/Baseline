@@ -4,6 +4,7 @@ import type { ThemeName } from "../config/schema";
 import type { InputRef } from "../inputs/resolve";
 import type { BlockedEntry } from "../browser/session";
 import type { CommitInfo } from "../run/commit";
+import type { RunSize } from "../run/sizing";
 import type { Counts } from "../findings/counts";
 import { countRun } from "../findings/counts";
 import { filterFindings } from "../findings/filter";
@@ -14,7 +15,7 @@ import { APP_JS } from "../report/app";
 import CSS from "../report/style.css?raw";
 
 export type RunRecord = {
-  runId: string; label: string; inputs: InputRef[]; url: string; size: "quick" | "full"; agents: number;
+  runId: string; label: string; inputs: InputRef[]; url: string; size: RunSize; agents: number;
   startedAt: string; durationMin: number; commit: CommitInfo;
   permissions: { runner: string; can: string[]; cannot: string[] }[];
   findings: Finding[]; other: Finding[]; otherHidden: number; skipped: BlockedEntry[]; counts: Counts;
@@ -44,7 +45,7 @@ function readJson<T>(p: string, fallback: T): T {
 export function buildRunRecord(runDir: string): RunRecord {
   const run = readJson<{ runId: string; url: string; label: string; startedAt: string; permissions?: RunRecord["permissions"] }>(join(runDir, "run.json"), { runId: "", url: "", label: "", startedAt: "" });
   const inputs = readJson<{ items: { ref: InputRef }[]; unreadLinks?: string[] }>(join(runDir, "inputs.json"), { items: [] });
-  const progress = readJson<{ size?: "quick" | "full"; agents?: number; startedAt?: string; finishedAt?: string }>(join(runDir, "progress.json"), {});
+  const progress = readJson<{ size?: RunSize; agents?: number; startedAt?: string; finishedAt?: string }>(join(runDir, "progress.json"), {});
   const commit = readJson<CommitInfo>(join(runDir, "commit.json"), { codeRead: false, mismatch: false });
   const raw = readJson<unknown[]>(join(runDir, "findings.json"), []);
   const parsed = raw.map((r) => findingSchema.safeParse(r)).filter((r) => r.success).map((r) => r.data!);

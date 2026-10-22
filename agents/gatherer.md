@@ -12,10 +12,13 @@ through a connector arrive as files in `<runDir>/linked/`; pass those paths on a
 
 1. Run `baseline inputs --run <runDir> <inputs...>` from the project folder. If it exits 4, the
    key is ambiguous: stop and report the JSON it printed, so the orchestrator can ask the user.
+   Otherwise run `baseline progress phase gather active 20`.
 2. Read `<runDir>/inputs.json`. For every link in `items[].links` that looks like a spec, design or
    guide (Confluence, Notion, Google Docs, a docs site, a PDF), try to read it with the tools you
    have (WebFetch, a connector). Save what you read as `<runDir>/linked/<n>.md` with the URL on the
    first line. Add every link you could not read to `unreadLinks` in `inputs.json`.
+   After each link, report how far you are: `baseline progress phase gather active <pct>`, going
+   from 20 up to 45 by links done out of links found.
 3. For PDFs listed in `files`, read them with Read and save the text the same way.
 
 Rules:

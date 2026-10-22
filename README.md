@@ -52,19 +52,22 @@ a local HTML file. Tested with Claude Code 2.1.308.
 Each run asks which URL to test (the last one is the default): staging, a preview deploy or
 `http://localhost:3000`. It sizes itself and says so before it starts:
 
-- **Quick run** for a single bug or PR, about 10 minutes: a code reader on the changed files, one or
-  two explorers, a refuter.
+- **PR run** for one small PR (up to 15 changed files), about 5 minutes: a code reader, one
+  explorer (two only when the change looks different for another role), a fast refuter. A PR that
+  changes nothing a user can see is checked from the code alone.
+- **Quick run** for a single bug, ticket or short spec, about 10 minutes: a code reader on the
+  changed files, one or two explorers, a refuter.
 - **Full run** for a feature with a spec or guide, 30 minutes or more: code reader, an explorer per
   persona, a guide reader, product checks, a refuter and clean-up.
 
-Add `--quick` or `--full` to choose. `--live` is needed to test a URL you marked as production.
+Add `--pr`, `--quick` or `--full` to choose. `--live` is needed to test a URL you marked as production.
 
 While it runs, a band above the prompt shows each phase and what every agent is doing. When it
 ends you get totals only: pass rate, counts, `Complete`, and a link to the report (a private
 claude.ai artifact if you chose that in setup, otherwise a local file).
 
 ```text
-BASELINE // PR #412 · quick · 9m 12s
+BASELINE // PR #412 · pr · 4m 52s
 ────────────────────────────────
 PASS RATE   ██████░░░░ 60%
 checked     10   passed 6

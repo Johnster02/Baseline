@@ -62,6 +62,27 @@ var THEMES = {
   }
 };
 
+// src/run/estimate.ts
+var EXPECTED_S = {
+  gather: { pr: 45, quick: 90, full: 150 },
+  "read-code": { pr: 120, quick: 180, full: 360 },
+  explore: { pr: 180, quick: 360, full: 720 },
+  verdicts: { pr: 45, quick: 120, full: 240 },
+  refute: { pr: 60, quick: 150, full: 300 },
+  "clean-up": { pr: 45, quick: 90, full: 150 }
+};
+var CAP = 95;
+function estimatePct(ph, size, now) {
+  const base = Math.max(0, Math.min(100, Number(ph.pct) || 0));
+  if (ph.status !== "active" || base >= CAP) return base;
+  const from = Date.parse(ph.pctAt ?? ph.since ?? "");
+  if (!Number.isFinite(from)) return base;
+  const total = (EXPECTED_S[ph.name]?.[size === "full" || size === "pr" ? size : "quick"] ?? 120) * 1e3;
+  const left = Math.max(15e3, total * (1 - base / 100));
+  const t = Math.max(0, now - from) / left;
+  return base + (CAP - base) * (1 - Math.exp(-1.5 * t));
+}
+
 // src/render/terminal.ts
 var ANSI = /\x1b\[[0-9;]*m/g;
 var num = (n) => Number.isFinite(Number(n)) ? Number(n) : 0;
@@ -122,7 +143,7 @@ function renderProgress(p, theme2, o) {
     const name = (br ? PHASE_NAME[ph.name] : PHASE_NAME[ph.name][0].toUpperCase() + PHASE_NAME[ph.name].slice(1)).padEnd(10);
     if (ph.status === "done") lines.push(`${c(br ? "accent" : "match", glyph.done)} ${name}  ${c("accent", "done")}   ${c("ink3", clean(ph.note))}`);
     else if (ph.status === "active") {
-      const pct = Math.round(num(ph.pct));
+      const pct = Math.round(estimatePct(ph, p.size, o.now ?? Date.now()));
       const [on, off] = bar(pct, 16);
       lines.push(`${c("dust", glyph.active)} ${c("ink", name)}  ${c("accent", on)}${c("accentDim", off)} ${c("ink", `${pct}%`)}${ph.note ? " " + c("ink3", clean(ph.note)) : ""}`);
       for (const a of p.active) lines.push(`    ${c("accent", "\u203A")} ${clean(a.persona).padEnd(10)} ${c("ink3", clean(a.doing))}`);
@@ -193,7 +214,7 @@ function fitRows(lines, maxRows, isKey) {
   return lines.filter((_, i) => keep.has(i));
 }
 function frame(s, theme2, width, maxRows) {
-  const opts = { color: "truecolor", width };
+  const opts = { color: "truecolor", width, now: s.now };
   let lines = [];
   const live = s.progress && !s.progress.finishedAt;
   if (live) {
@@ -240,7 +261,8 @@ async function refresh($) {
   const progress = runDir ? await readJson($, runDir + "/progress.json") : void 0;
   const summary = !inside(active) && inside(last) ? await readJson($, last + "/summary.json") : void 0;
   state = { progress, summary, now: Date.now() };
-  const key = JSON.stringify([progress, summary, theme, Math.floor(Date.now() / 1e4)]);
+  const live = progress && !progress.finishedAt;
+  const key = JSON.stringify([progress, summary, theme, Math.floor(Date.now() / (live ? 2e3 : 1e4))]);
   if (key !== lastKey) {
     lastKey = key;
     $.ui.invalidate("ui.render");

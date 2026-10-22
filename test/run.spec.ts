@@ -48,17 +48,38 @@ describe("progress", () => {
     updateProgress(d, { agent: { persona: "customer", doing: "opening /cart" } });
     for (let i = 0; i < 50; i++) { updateProgress(d, { phase: { name: "explore", status: "active", pct: i } }); expect(() => readProgress(d)).not.toThrow(); }
     const p = readProgress(d)!;
-    expect(p.phases.find((x) => x.name === "explore")).toMatchObject({ status: "active", pct: 49 });
+    // A lower reported pct never pulls the bar back below 62.
+    expect(p.phases.find((x) => x.name === "explore")!.pct).toBeGreaterThanOrEqual(62);
+    expect(p.phases.find((x) => x.name === "explore")!.since).toBeTruthy();
     expect(p.phases.map((x) => x.name)).toEqual(["gather", "read-code", "explore", "verdicts", "refute", "clean-up"]);
     expect(p.active).toEqual([{ persona: "customer", doing: "opening /cart" }]);
   });
 });
 
 describe("sizeRun", () => {
-  it("one PR, 3 files, one persona is quick with at most 3 agents", () => {
-    const r = sizeRun([{ kind: "github-pr", words: 200 }], 3, ["customer"], true);
-    expect(r.size).toBe("quick");
+  it("one PR, 3 files, one persona is a PR run with at most 3 agents", () => {
+    const r = sizeRun([{ kind: "github-pr", words: 200 }], 3, ["customer"], true, ["src/cart/Cart.tsx"]);
+    expect(r.size).toBe("pr");
     expect(r.agents).toBeLessThanOrEqual(3);
+    expect(r.codeOnly).toBe(false);
+  });
+  it("a single ticket without a PR is quick", () => {
+    expect(sizeRun([{ kind: "jira", words: 300 }], 0, ["customer"], true).size).toBe("quick");
+  });
+  it("a PR touching no UI files is code-only, with no explorers", () => {
+    const r = sizeRun([{ kind: "github-pr", words: 100 }], 2, ["customer"], true, ["server/jobs/sync.ts", "server/jobs/sync.test.ts"]);
+    expect(r.codeOnly).toBe(true);
+    expect(r.plan.some((p) => p.startsWith("explorer:"))).toBe(false);
+  });
+  it("a PR touching only tests inside a UI folder is still code-only", () => {
+    expect(sizeRun([{ kind: "github-pr", words: 100 }], 1, ["customer"], true, ["src/components/__tests__/Cart.test.tsx"]).codeOnly).toBe(true);
+  });
+  it("a PR touching a page or stylesheet is not code-only", () => {
+    expect(sizeRun([{ kind: "github-pr", words: 100 }], 2, ["customer"], true, ["server/api.ts", "app/cart/page.ts"]).codeOnly).toBe(false);
+    expect(sizeRun([{ kind: "github-pr", words: 100 }], 1, ["customer"], true, ["src/theme.css"]).codeOnly).toBe(false);
+  });
+  it("PR runs send at most 2 explorers", () => {
+    expect(sizeRun([{ kind: "github-pr", words: 100 }], 2, ["a", "b"], true, ["x.tsx"]).plan.filter((p) => p.startsWith("explorer:")).length).toBe(2);
   });
   it("a spec folder makes it full", () => {
     expect(sizeRun([{ kind: "folder", words: 0 }], 0, ["customer", "admin"], true).size).toBe("full");

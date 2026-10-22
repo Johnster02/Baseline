@@ -33,8 +33,9 @@ async function refresh($: any) {
   const progress = runDir ? await readJson<Progress>($, runDir + "/progress.json") : undefined;
   const summary = !inside(active) && inside(last) ? await readJson<RunSummary>($, last + "/summary.json") : undefined;
   state = { progress, summary, now: Date.now() };
-  // Redraw when something changed, and every 10s while a run is live so the clock moves.
-  const key = JSON.stringify([progress, summary, theme, Math.floor(Date.now() / 10000)]);
+  // Redraw when something changed, and every 2s while a run is live so the clock and bars move.
+  const live = progress && !progress.finishedAt;
+  const key = JSON.stringify([progress, summary, theme, Math.floor(Date.now() / (live ? 2000 : 10000))]);
   if (key !== lastKey) { lastKey = key; $.ui.invalidate("ui.render"); }
 }
 

@@ -34,7 +34,7 @@ function fitRows(lines: string[], maxRows: number, isKey: (l: string, i: number)
 }
 
 export function frame(s: FrameState, theme: ThemeName, width: number, maxRows: number): Segment[][] {
-  const opts = { color: "truecolor" as const, width };
+  const opts = { color: "truecolor" as const, width, now: s.now };
   let lines: string[] = [];
   const live = s.progress && !s.progress.finishedAt;
   if (live) {

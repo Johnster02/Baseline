@@ -42,7 +42,7 @@ describe("run cli", () => {
     writeFileSync(join(runDir, "inputs.json"), JSON.stringify({ items: [{ ref: { kind: "github-pr" }, body: "short", changedFiles: ["a.ts"] }] }));
     out = "";
     expect(await main(["size", "--personas", "customer"])).toBe(0);
-    expect(JSON.parse(out)).toMatchObject({ size: "quick" });
+    expect(JSON.parse(out)).toMatchObject({ size: "pr", codeOnly: false });
   });
 
   it("sitemap merge reads a file", async () => {

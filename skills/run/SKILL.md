@@ -1,7 +1,7 @@
 ---
 name: run
 description: Run a Baseline acceptance check. Point it at a PR, issue, Jira or Linear ticket, spec, guide, file, folder or pasted text, and a URL. It reads the code if there is any, walks the site as your test accounts, and reports where the spec, the code and the site disagree, plus product-sense problems. Every finding is advisory.
-argument-hint: <PR | issue | ticket | file | folder | "text"> [--live] [--quick | --full]
+argument-hint: <PR | issue | ticket | file | folder | "text"> [--live] [--pr | --quick | --full]
 allowed-tools: Bash(baseline:*) Bash(git diff:*) Bash(git log:*) Bash(git show:*) Read Write(.baseline/**) Glob Grep
 ---
 
@@ -44,31 +44,51 @@ messages short: the band above the prompt shows progress, and the report holds t
    (add `--live` only if the user passed `--live`). Keep `runDir` and `sessionDir` from its JSON.
    On a live run, name any runner that is not allowed `live` in `baseline config describe`: the
    guard will block everything it does, so leave it out and say so in one line.
-5. Sign in: `baseline signin --all --url <url>` (add `--live` if the user passed `--live`). A
+5. Sign in: start `baseline signin --all --url <url>` (add `--live` if the user passed `--live`)
+   with Bash `run_in_background`, so it signs in while step 1 gathers. It only touches the
+   runners' saved sessions, which nothing in step 1 reads. Check its result before step 2: a
    runner that fails is left out of the run; say which, and why, in one line. If none sign in,
-   close the run (rule 7) and stop.
+   close the run (rule 7) and stop, unless the run is code-only (step 1.5), which needs no browser.
 
 ## 1. Gather and plan
 
-1. `baseline progress phase gather active`
+1. `baseline progress phase gather active`. Every active phase's bar moves on its own by
+   estimated time; the `<pct>` milestones below jump it forward to the real position.
 2. Jira or Linear tickets: if this session has a Jira or Linear connector, fetch each ticket
    yourself with it and save it as `<runDir>/linked/ticket-<KEY>.md` (title on the first line,
    then the description). Pass those files to the gatherer in place of the keys. Without a
    connector, pass the keys and the CLI uses the token from `/plugin configure baseline`.
    Then dispatch the **gatherer** agent with the run folder and the inputs. If it reports an ambiguous
    key, ask the user Jira or Linear with AskUserQuestion, then have it rerun
-   `baseline inputs --run <runDir> --as <kind> ...`.
+   `baseline inputs --run <runDir> --as <kind> ...`. When it returns:
+   `baseline progress phase gather active 50`.
 3. Read `<runDir>/inputs.json` and `<runDir>/linked/`. Write `<runDir>/requirements.json`:
    `[{ "id": "R-01", "text": "one testable statement", "source": "where it came from", "personas": ["..."] }]`.
    Requirements come only from what the inputs say. A bug report becomes "the bug no longer
-   happens" plus the expected behaviour it describes.
+   happens" plus the expected behaviour it describes. Then `baseline progress phase gather active 70`.
 4. `baseline commit --out <runDir>/commit.json`. If `codeRead` is false, there is no code reader this
    run. If `mismatch` is true, tell the user in one line that the site runs a different commit.
-5. Pick the personas each requirement affects from the runners. Then
-   `baseline size --personas <comma list>` (add `--guide` if a guide is among the inputs). Respect
-   `--quick` or `--full` if the user gave one. Say in one line: "Quick run, N agents" or
+   Then `baseline progress phase gather active 85`.
+5. Pick the personas each requirement affects from the runners. Send a persona only when the
+   change can look or behave differently for it. Check, in this order:
+   - the inputs name that persona or role ("admins can...", "customers see...");
+   - the changed code checks roles or permissions (`role`, `isAdmin`, `permission`, `can(`,
+     `policy`, guards, feature flags by plan or org): look with `git diff` or Grep on the changed
+     files only;
+   - the change sits on a screen or route only that persona reaches.
+   One persona is the default. Add a second only when one of these checks says the other persona
+   sees something different. If the code checks roles but you can't tell which way, send both:
+   a missed role is worse than a slower run. Note why in the persona list you keep.
+   Then `baseline size --personas <comma list>` (add `--guide` if a guide is among the inputs).
+   Respect `--pr`, `--quick` or `--full` if the user gave one.
+   **Code-only:** if `codeOnly` is true, also read the requirements: if none of them describe
+   something a user would see or do on the site (a refactor, a test, a backend job, a fix whose
+   only effect is in logs or data shape), the run is code-only: no explorers, `explore` is
+   `skipped`, and every requirement the code matches ends `unverified`. If any requirement is
+   visible on the site, or you are unsure, explore as normal.
+   Say in one line: "PR run, N agents" (add "code only" when it is), "Quick run, N agents" or
    "Full run, N agents", then carry on without waiting.
-6. `baseline progress start <quick|full> <agents>` and `baseline progress phase gather done`.
+6. `baseline progress start <pr|quick|full> <agents>` and `baseline progress phase gather done`.
 
 ## 2. Read code and explore (agents in parallel, one message)
 
@@ -77,18 +97,21 @@ messages short: the band above the prompt shows progress, and the report holds t
 
 - **code-reader** (if `codeRead`): the run folder, the changed files (`changedFiles` in
   `inputs.json`, or `git diff --name-only` against the base branch).
-- **explorer**, one per runner in the size plan (max 2 quick, 4 full): its runner key, persona,
-  depth and the `can` / `cannot` lists from `baseline config describe`, the run folder, the run
-  id, and the product checklist at `${CLAUDE_PLUGIN_ROOT}/checklists/product.md` plus any
-  `checklistExtra` from the config.
+- **explorer**, one per runner in the size plan (max 2 pr and quick, 4 full, none code-only): its
+  runner key, persona, depth and the `can` / `cannot` lists from `baseline config describe`, the
+  run folder, the run id, the run size, and the product checklist at
+  `${CLAUDE_PLUGIN_ROOT}/checklists/product.md` plus any `checklistExtra` from the config.
 - **guide-reader** (full runs with a guide).
 
-As each agent returns, update the phase percentage (`baseline progress phase explore active <pct>`).
+The code-reader reports its own `read-code` percentage as it works. As each explorer returns,
+update the explore percentage (`baseline progress phase explore active <pct>`, explorers back
+out of explorers sent).
 When all are back, mark `read-code` and `explore` done.
 
 ## 3. Verdicts
 
-`baseline progress phase verdicts active`. Join requirements, `code.json`, every
+`baseline progress phase verdicts active`. Once every result is read, before writing the file,
+`baseline progress phase verdicts active 50`. Join requirements, `code.json`, every
 `explore-<runner>.json` and `guide.json` by id into `<runDir>/findings.draft.json`, in this shape:
 
 ```json
@@ -120,7 +143,9 @@ anything outside the screens and requirements this change is about.
 
 ## 4. Refute
 
-`baseline progress phase refute active`. Dispatch the **refuter** with the run folder. Then apply
+`baseline progress phase refute active`. Dispatch the **refuter** with the run folder and the run
+size. On a PR run, dispatch it with `model: "sonnet"`. If every finding is a `match`, skip the
+refuter and mark `refute skipped`: there is nothing to disprove. Then apply
 `refuted.json`: set each finding's `refuter` to `{ "kept", "note" }`, apply any corrected `scope`
 or `verdict`, and write the result to `<runDir>/findings.json`. Do not filter here:
 `baseline report` drops what the refuter did not keep, caps unrelated findings and merges duplicates.

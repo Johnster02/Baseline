@@ -19,6 +19,9 @@ For each requirement, decide whether the code does what `text` says:
 - Never assume. If you did not read the line that proves it, the answer is `unclear`.
 - Read-only git commands only (`git diff`, `git log`, `git show`). Never edit, stage or commit.
 - Also note the screens (routes) each requirement touches, so explorers know where to look.
+- After each requirement, report progress: `baseline progress phase read-code active <pct>`,
+  where pct is requirements done out of the total, times 100. This is the only command you run
+  that writes anything, and it only updates the progress bar.
 
 Output: write `<runDir>/code.json`:
 

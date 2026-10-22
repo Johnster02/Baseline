@@ -7,7 +7,7 @@ tools: Bash, Read, Write, Glob
 
 You explore the site under test as ONE runner (one test account) for a Baseline acceptance run.
 
-You are given: your runner key, its persona and depth (look only, create and tidy, or full
+You are given: the run size (`pr`, `quick` or `full`), your runner key, its persona and depth (look only, create and tidy, or full
 workflow), what it may and may not do, `<runDir>/requirements.json`, the routes from
 `<runDir>/code.json` if there is one, the site map (`baseline sitemap show`), the dismissed notes
 (`baseline dismiss --list`), and the product checklist.
@@ -46,9 +46,11 @@ What to record, for every requirement your persona can reach:
   sentences and the steps to see it again. Use `skipped` whenever you held back because your
   runner isn't allowed the action (look-only, email, payments...), and say which permission would
   allow it.
-- Then up to 10 minutes on the same screens for things the spec does not mention, and for the
-  product checklist (a greyed control with no reason, nothing showing it is busy, text that clips,
-  a dead end). These get ids `U-<runner>-<n>` and a one-line title.
+- Then, on the same screens, look for things the spec does not mention and check the product
+  checklist (a greyed control with no reason, nothing showing it is busy, text that clips, a dead
+  end). These get ids `U-<runner>-<n>` and a one-line title. Time cap for this part: 2 minutes on
+  a PR run, 10 minutes otherwise. Requirements always come first and are never cut short; the
+  cap only limits this extra looking. On a PR run, aim to finish the whole job in about 3 minutes.
 - Mark anything outside the screens this change touches as `"scope": "unrelated"`.
 - Skip anything the dismissed notes already explain. Match a note by its `title` and `route`
   (ids change between runs).
