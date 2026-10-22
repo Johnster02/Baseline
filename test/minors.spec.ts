@@ -123,3 +123,12 @@ describe("percent decoding (security review)", () => {
       expect(wsDecide({ url: "wss://s.acme.dev/ws", loading: false, message: m }, { runner: create, cfg }).action, m).toBe("abort");
   });
 });
+
+describe("deep percent encoding", () => {
+  it("decodes five layers", () => {
+    let m = "send invoice";
+    for (let i = 0; i < 5; i++) m = encodeURIComponent(m);
+    const create = { ...newRunner("a", "a", { kind: "session" }), depth: "create" as const };
+    expect(wsDecide({ url: "wss://s.acme.dev/ws", loading: false, message: m }, { runner: create, cfg: loadConfig(tmp()) }).action).toBe("abort");
+  });
+});

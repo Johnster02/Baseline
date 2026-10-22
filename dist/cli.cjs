@@ -19932,8 +19932,8 @@ function ensureGitignored(projectDir) {
   const p = (0, import_node_path2.join)(projectDir, ".gitignore");
   const text = (0, import_node_fs3.existsSync)(p) ? (0, import_node_fs3.readFileSync)(p, "utf8") : "";
   if (/^\.baseline\/?$/m.test(text)) return;
-  const sep4 = text === "" || text.endsWith("\n") ? "" : "\n";
-  (0, import_node_fs3.writeFileSync)(p, text + sep4 + ".baseline/\n");
+  const sep5 = text === "" || text.endsWith("\n") ? "" : "\n";
+  (0, import_node_fs3.writeFileSync)(p, text + sep5 + ".baseline/\n");
 }
 function hostKey(url2) {
   try {
@@ -20426,8 +20426,10 @@ function normaliseMessage(message) {
   } catch {
   }
   const dec = new TextDecoder("utf-8", { fatal: false });
-  for (let i = 0; i < 3 && /%[0-9a-f]{2}/i.test(text); i++) {
-    text = text.replace(/(%[0-9a-f]{2})+/gi, (m) => dec.decode(Uint8Array.from(m.match(/%([0-9a-f]{2})/gi).map((h) => parseInt(h.slice(1), 16)))));
+  for (let i = 0; i < 20 && /%[0-9a-f]{2}/i.test(text); i++) {
+    const next = text.replace(/(%[0-9a-f]{2})+/gi, (m) => dec.decode(Uint8Array.from(m.match(/%([0-9a-f]{2})/gi).map((h) => parseInt(h.slice(1), 16)))));
+    if (next === text) break;
+    text = next;
   }
   return text.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_\-.:/=&?]+/g, " ").replace(/\s+/g, " ").trim();
 }
@@ -20922,12 +20924,17 @@ register("script", "run an agent's browser script as a runner: script <runner> <
       return p;
     }
   };
+  const data = real(dataDir());
+  if (data.startsWith(real(scriptPath)) || real(scriptPath).startsWith(data + import_node_path6.sep)) {
+    err("refusing: scripts may not live in Baseline's data folder");
+    return 2;
+  }
   const execArgv = [
     permFlag,
     `--require=${real((0, import_node_path6.join)(dataDir(), "shim", "preload.cjs"))}`,
     `--allow-fs-read=${real((0, import_node_path6.join)(dataDir(), "shim"))}`,
     `--allow-fs-read=${real(runDir)}`,
-    `--allow-fs-read=${real((0, import_node_path6.dirname)(scriptPath))}`,
+    `--allow-fs-read=${real(scriptPath)}`,
     `--allow-fs-read=${real(shim)}`,
     `--allow-fs-read=${real((0, import_node_path6.join)(pluginRoot(), "dist"))}`,
     `--allow-fs-write=${real(runDir)}`

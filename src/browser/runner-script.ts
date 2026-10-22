@@ -1,6 +1,6 @@
 import { fork } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { register, err, io } from "../cli";
 import { loadConfig } from "../config/store";
 import { dataDir, sessionPath } from "../config/secrets";
@@ -61,7 +61,9 @@ register("script", "run an agent's browser script as a runner: script <runner> <
   const major = Number(process.versions.node.split(".")[0]);
   const permFlag = major >= 22 ? "--permission" : "--experimental-permission";
   const real = (p: string) => { try { return realpathSync(p); } catch { return p; } };
-  const execArgv = [permFlag, `--require=${real(join(dataDir(), "shim", "preload.cjs"))}`, `--allow-fs-read=${real(join(dataDir(), "shim"))}`, `--allow-fs-read=${real(runDir)}`, `--allow-fs-read=${real(dirname(scriptPath))}`, `--allow-fs-read=${real(shim)}`,
+  const data = real(dataDir());
+  if (data.startsWith(real(scriptPath)) || real(scriptPath).startsWith(data + sep)) { err("refusing: scripts may not live in Baseline's data folder"); return 2; }
+  const execArgv = [permFlag, `--require=${real(join(dataDir(), "shim", "preload.cjs"))}`, `--allow-fs-read=${real(join(dataDir(), "shim"))}`, `--allow-fs-read=${real(runDir)}`, `--allow-fs-read=${real(scriptPath)}`, `--allow-fs-read=${real(shim)}`,
     `--allow-fs-read=${real(join(pluginRoot(), "dist"))}`, `--allow-fs-write=${real(runDir)}`];
   const child = fork(real(scriptPath), [], {
     cwd: runDir,
