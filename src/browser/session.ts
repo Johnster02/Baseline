@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { Browser, BrowserContext, Page } from "playwright";
 import type { ProjectConfig, Runner } from "../config/schema";
 import { decide, redactUrl } from "./guard";
+import { isSignedOut, SignedOutError } from "./signin";
 
 export type BlockedEntry = {
   at: string; runner: string; method: string; host: string; path: string;
@@ -113,6 +114,8 @@ export async function openSession(o: OpenOptions): Promise<Session> {
       } finally {
         state.loading = false;
       }
+      // Never let an agent sign in again on its own: a signed-out runner stops here.
+      if (await isSignedOut(page, o.runner)) throw new SignedOutError(o.runner.key, new URL(page.url()).pathname);
     },
     async shot(name: string, caption: string) {
       const safe = name.replace(/[^a-z0-9-]+/gi, "-").slice(0, 60) || "shot";

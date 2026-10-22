@@ -19903,6 +19903,24 @@ function redactUrl(raw) {
   return u.pathname + (qs.length ? "?" + qs.join("&") : "");
 }
 
+// src/browser/signin.ts
+var SignedOutError = class extends Error {
+  constructor(runner, at) {
+    super(`${runner} is signed out (landed on ${at}). Its saved session has expired; re-run setup to sign in again.`);
+    this.runner = runner;
+    this.at = at;
+    this.name = "SignedOutError";
+  }
+  runner;
+  at;
+};
+var PASSWORD = 'input[type="password"]';
+async function isSignedOut(page, runner) {
+  const path = new URL(page.url()).pathname;
+  if (runner.auth.kind === "form" && path === new URL(runner.auth.loginUrl, page.url()).pathname) return true;
+  return await page.locator(PASSWORD).first().isVisible().catch(() => false) === true;
+}
+
 // src/browser/session.ts
 function loadPlaywright() {
   const bases = [(0, import_node_path3.join)(process.cwd(), "noop.js")];
@@ -19999,6 +20017,7 @@ async function openSession(o) {
       } finally {
         state.loading = false;
       }
+      if (await isSignedOut(page, o.runner)) throw new SignedOutError(o.runner.key, new URL(page.url()).pathname);
     },
     async shot(name, caption) {
       const safe = name.replace(/[^a-z0-9-]+/gi, "-").slice(0, 60) || "shot";

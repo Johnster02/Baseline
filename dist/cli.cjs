@@ -19997,6 +19997,9 @@ function removeSecret(data, projectDir, runnerKey) {
   }
   (0, import_node_fs3.rmSync)(sessionPath(data, projectDir, runnerKey), { force: true });
 }
+function getSecret(data, projectDir, runnerKey) {
+  return readAll(data, projectDir)[runnerKey];
+}
 function sessionPath(data, projectDir, runnerKey) {
   return (0, import_node_path2.join)(data, "sessions", projectHash(projectDir), `${runnerKey}.json`);
 }
@@ -20194,6 +20197,136 @@ register("script", "run an agent's browser script as a runner: script <runner> <
     env: { ...process.env, NODE_PATH: nodePath, BASELINE_RUN_DIR: runDir, BASELINE_RUNNER: runnerKey, BASELINE_PROJECT_DIR: projectDir, BASELINE_DATA: dataDir() }
   });
   return r.status ?? 1;
+});
+
+// src/browser/signin.ts
+var import_node_fs5 = require("node:fs");
+var import_node_path5 = require("node:path");
+
+// src/browser/session.ts
+var import_node_module = require("node:module");
+var import_node_path4 = require("node:path");
+function loadPlaywright() {
+  const bases = [(0, import_node_path4.join)(process.cwd(), "noop.js")];
+  if (typeof __filename !== "undefined") bases.push(__filename);
+  let last;
+  for (const b of bases) {
+    try {
+      return (0, import_node_module.createRequire)(b)("playwright");
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw new Error("Playwright is not installed. Run /baseline:setup first. (" + String(last?.message || last) + ")");
+}
+
+// src/browser/signin.ts
+var PASSWORD = 'input[type="password"]';
+var USERNAME = 'input[type="email"], input[autocomplete="username"], input[name*="user" i], input[name*="email" i], input[name*="login" i], input[type="text"]';
+async function isSignedOut(page, runner) {
+  const path = new URL(page.url()).pathname;
+  if (runner.auth.kind === "form" && path === new URL(runner.auth.loginUrl, page.url()).pathname) return true;
+  return await page.locator(PASSWORD).first().isVisible().catch(() => false) === true;
+}
+function saveState(file2, state) {
+  (0, import_node_fs5.mkdirSync)((0, import_node_path5.dirname)(file2), { recursive: true, mode: 448 });
+  (0, import_node_fs5.chmodSync)((0, import_node_path5.dirname)(file2), 448);
+  (0, import_node_fs5.writeFileSync)(file2, JSON.stringify(state), { mode: 384 });
+  (0, import_node_fs5.chmodSync)(file2, 384);
+}
+async function signIn(runner, cfg, ctx) {
+  const target = checkTarget(ctx.baseUrl, cfg, ctx.live ?? runner.allow.includes("live"));
+  if (!target.ok) return { key: runner.key, ok: false, error: `refusing to sign in: ${ctx.baseUrl} is ${target.reason === "production" ? "marked as production" : "not a valid URL"}` };
+  const file2 = sessionPath(ctx.data, ctx.projectDir, runner.key);
+  const { chromium } = loadPlaywright();
+  const browser = await chromium.launch({ headless: true });
+  try {
+    if (runner.auth.kind === "session") {
+      if (!(0, import_node_fs5.existsSync)(file2)) return { key: runner.key, ok: false, error: "No saved session. Sign in by hand once: baseline signin " + runner.key + " --manual" };
+      const context2 = await browser.newContext({ baseURL: ctx.baseUrl, storageState: file2 });
+      const page2 = await context2.newPage();
+      await page2.goto(ctx.baseUrl, { waitUntil: "load" });
+      if (await isSignedOut(page2, runner)) return { key: runner.key, ok: false, error: "Saved session has expired. Sign in by hand again: baseline signin " + runner.key + " --manual" };
+      return { key: runner.key, ok: true, landed: new URL(page2.url()).pathname };
+    }
+    const creds = getSecret(ctx.data, ctx.projectDir, runner.key);
+    if (!creds) return { key: runner.key, ok: false, error: "No sign-in details saved for this runner. Re-run setup." };
+    const context = await browser.newContext({ baseURL: ctx.baseUrl });
+    context.setDefaultTimeout(15e3);
+    const page = await context.newPage();
+    const loginUrl = new URL(runner.auth.loginUrl, ctx.baseUrl);
+    if (loginUrl.host !== new URL(ctx.baseUrl).host) return { key: runner.key, ok: false, error: "The login URL is on a different site from the test URL. Refusing to type credentials there." };
+    await page.goto(loginUrl.toString(), { waitUntil: "load" });
+    const user = page.locator(USERNAME).first();
+    await user.fill(creds.username);
+    const pw = page.locator(PASSWORD).first();
+    if (!await pw.isVisible().catch(() => false)) {
+      await user.press("Enter");
+      await pw.waitFor({ state: "visible", timeout: 1e4 }).catch(() => {
+      });
+    }
+    if (new URL(page.url()).host !== loginUrl.host) return { key: runner.key, ok: false, error: "Sign-in left the site before the password step. Use a manual sign-in for this runner." };
+    await pw.fill(creds.password);
+    await Promise.all([page.waitForLoadState("load"), pw.press("Enter")]);
+    await page.waitForLoadState("networkidle", { timeout: 5e3 }).catch(() => {
+    });
+    if (await isSignedOut(page, runner)) return { key: runner.key, ok: false, error: "Sign-in did not succeed: still on the sign-in page. Check the saved details in setup." };
+    saveState(file2, await context.storageState());
+    return { key: runner.key, ok: true, landed: new URL(page.url()).pathname };
+  } catch (e) {
+    return { key: runner.key, ok: false, error: `Sign-in failed: ${e.name || "error"}` };
+  } finally {
+    await browser.close();
+  }
+}
+async function captureSession(runner, cfg, ctx) {
+  const target = checkTarget(ctx.baseUrl, cfg, ctx.live ?? runner.allow.includes("live"));
+  if (!target.ok) return { key: runner.key, ok: false, error: "refusing: that URL is marked as production or is invalid" };
+  const file2 = sessionPath(ctx.data, ctx.projectDir, runner.key);
+  const { chromium } = loadPlaywright();
+  const browser = await chromium.launch({ headless: false });
+  const context = await browser.newContext({ baseURL: ctx.baseUrl });
+  const page = await context.newPage();
+  await page.goto(runner.auth.kind === "form" ? new URL(runner.auth.loginUrl, ctx.baseUrl).toString() : ctx.baseUrl);
+  let saved = false;
+  const timer = setInterval(async () => {
+    try {
+      saveState(file2, await context.storageState());
+      saved = true;
+    } catch {
+    }
+  }, 2e3);
+  await new Promise((res) => {
+    page.on("close", () => res());
+    browser.on("disconnected", () => res());
+  });
+  clearInterval(timer);
+  await browser.close().catch(() => {
+  });
+  return saved ? { key: runner.key, ok: true } : { key: runner.key, ok: false, error: "The window closed before a session was saved." };
+}
+
+// src/browser/signin-cli.ts
+register("signin", "sign runners in: signin <runner>|--all [--url <url>] [--manual] [--live]", async (args) => {
+  const projectDir = process.cwd();
+  const cfg = loadConfig(projectDir);
+  const urlIdx = args.indexOf("--url");
+  const baseUrl = urlIdx >= 0 ? args[urlIdx + 1] : cfg.lastUrl;
+  if (!baseUrl) {
+    err("no URL: pass --url <url>");
+    return 2;
+  }
+  const name = args.find((a, i) => !a.startsWith("--") && i !== urlIdx + 1);
+  const runners = args.includes("--all") ? cfg.runners : cfg.runners.filter((r) => r.key === name);
+  if (!runners.length) {
+    err(`no runner "${name ?? ""}"`);
+    return 2;
+  }
+  const ctx = { projectDir, data: dataDir(), baseUrl, live: args.includes("--live") };
+  const results = [];
+  for (const r of runners) results.push(args.includes("--manual") ? await captureSession(r, cfg, ctx) : await signIn(r, cfg, ctx));
+  out(JSON.stringify(results));
+  return results.every((r) => r.ok) ? 0 : 1;
 });
 
 // src/entry.ts
