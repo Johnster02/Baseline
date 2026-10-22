@@ -125,3 +125,31 @@ describe("baseline report cli", () => {
     expect(readFileSync(join(sess, "report.html"), "utf8")).toContain("PR #1");
   });
 });
+
+describe("escaping run metadata (security review)", () => {
+  it("escapes size and agents from progress.json", () => {
+    const html = renderSessionReport([record({ size: '<img src=x onerror=alert(1)>' as any, agents: '<b>9</b>' as any })], "br2049");
+    expect(html).not.toContain("<img src=x");
+    expect(html).not.toContain("<b>9</b> agents");
+  });
+});
+
+describe("report --open", () => {
+  it("opens the written report in the browser", async () => {
+    const { main, io } = await import("../src/cli");
+    await import("../src/commands");
+    const { vi } = await import("vitest");
+    const proj = mkdtempSync(join(tmpdir(), "p-"));
+    const sess = join(proj, ".baseline", "sessions", "s");
+    mkdirSync(join(sess, "runs", "r-1"), { recursive: true });
+    writeFileSync(join(sess, "runs", "r-1", "run.json"), JSON.stringify({ runId: "r-1", url: "http://x", label: "x", startedAt: "2026-10-22T09:00:00Z" }));
+    const opened: string[] = [];
+    const spy = vi.spyOn(io, "openFile").mockImplementation((p: string) => { opened.push(p); });
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    vi.spyOn(process, "cwd").mockReturnValue(proj);
+    expect(await main(["report", sess, "--open"])).toBe(0);
+    vi.restoreAllMocks();
+    expect(opened).toEqual([join(sess, "report.html")]);
+    void spy;
+  });
+});

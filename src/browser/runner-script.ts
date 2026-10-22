@@ -1,5 +1,5 @@
 import { fork } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { register, err, io } from "../cli";
 import { loadConfig } from "../config/store";
@@ -25,6 +25,10 @@ function shimDir(root: string): string {
   const dir = join(dataDir(), "shim", "node_modules", "baseline");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "index.js"), `module.exports = require(${JSON.stringify(join(root, "dist", "client.cjs"))});\n`);
+  // Preloaded into each script: require("baseline") resolves straight to the client, without
+  // walking parent folders (which the sandbox does not let it read).
+  writeFileSync(join(dataDir(), "shim", "preload.cjs"), `const M = require("module"); const t = ${JSON.stringify(join(root, "dist", "client.cjs"))};
+const r = M._resolveFilename; M._resolveFilename = function (req, ...a) { return req === "baseline" ? t : r.call(this, req, ...a); };\n`);
   return dirname(dir);
 }
 
@@ -49,11 +53,22 @@ register("script", "run an agent's browser script as a runner: script <runner> <
   const run = JSON.parse(readFileSync(join(runDir, "run.json"), "utf8")) as { runId: string; url: string };
 
   let session: Session | undefined;
-  const child = fork(resolve(io.origCwd, file), [], {
-    cwd: projectDir,
+  const scriptPath = resolve(io.origCwd, file);
+  const shim = shimDir(pluginRoot());
+  // Node's permission model: the script may read its run folder, the shim and Baseline's client,
+  // write only into its run folder, and start no other programs. Saved sessions and credentials
+  // in the data folder are out of reach.
+  const major = Number(process.versions.node.split(".")[0]);
+  const permFlag = major >= 22 ? "--permission" : "--experimental-permission";
+  const real = (p: string) => { try { return realpathSync(p); } catch { return p; } };
+  const execArgv = [permFlag, `--require=${real(join(dataDir(), "shim", "preload.cjs"))}`, `--allow-fs-read=${real(join(dataDir(), "shim"))}`, `--allow-fs-read=${real(runDir)}`, `--allow-fs-read=${real(dirname(scriptPath))}`, `--allow-fs-read=${real(shim)}`,
+    `--allow-fs-read=${real(join(pluginRoot(), "dist"))}`, `--allow-fs-write=${real(runDir)}`];
+  const child = fork(real(scriptPath), [], {
+    cwd: runDir,
+    execArgv,
     stdio: ["inherit", "inherit", "inherit", "ipc"],
     // The script gets only the shim on its module path, and none of Baseline's own settings.
-    env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", NODE_PATH: shimDir(pluginRoot()) },
+    env: { PATH: process.env.PATH ?? "", HOME: runDir, NODE_PATH: shim },
   });
 
   let chain: Promise<unknown> = Promise.resolve();

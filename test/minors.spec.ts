@@ -114,3 +114,12 @@ describe("protected words normalised the same way as messages", () => {
       expect(wsDecide({ url: "wss://s.acme.dev/ws", loading: false, message: m }, { runner: create, cfg }).action, m).toBe("abort");
   });
 });
+
+describe("percent decoding (security review)", () => {
+  const cfg = loadConfig(tmp());
+  const create = { ...newRunner("a", "a", { kind: "session" }), depth: "create" as const };
+  it("decodes around bad bytes and through double encoding", () => {
+    for (const m of ["%FF%73end%20invoice", "send%2520invoice"])
+      expect(wsDecide({ url: "wss://s.acme.dev/ws", loading: false, message: m }, { runner: create, cfg }).action, m).toBe("abort");
+  });
+});

@@ -124,8 +124,12 @@ export function normaliseMessage(message: string): string {
     walk(JSON.parse(message));
     text = parts.join(" ");
   } catch { /* not JSON: use as is */ }
-  // Percent-escapes token by token, so one bad escape doesn't leave the rest encoded.
-  text = text.replace(/(%[0-9a-f]{2})+/gi, (m) => { try { return decodeURIComponent(m); } catch { return m; } });
+  // Percent-escapes decoded leniently (bad bytes become U+FFFD, the rest still decode), repeated
+  // so double encoding can't hide a word.
+  const dec = new TextDecoder("utf-8", { fatal: false });
+  for (let i = 0; i < 3 && /%[0-9a-f]{2}/i.test(text); i++) {
+    text = text.replace(/(%[0-9a-f]{2})+/gi, (m) => dec.decode(Uint8Array.from(m.match(/%([0-9a-f]{2})/gi)!.map((h) => parseInt(h.slice(1), 16)))));
+  }
   return text.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_\-.:/=&?]+/g, " ").replace(/\s+/g, " ").trim();
 }
 

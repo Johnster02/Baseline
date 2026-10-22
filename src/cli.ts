@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import manifest from "../.claude-plugin/plugin.json";
 
@@ -6,6 +7,11 @@ import manifest from "../.claude-plugin/plugin.json";
 let orig: string | undefined;
 export const io = {
   readStdin: (): string => readFileSync(0, "utf8"),
+  /** Open a local file in the default browser. */
+  openFile(path: string): void {
+    const [cmd, args] = process.platform === "darwin" ? ["open", [path]] : process.platform === "win32" ? ["cmd", ["/c", "start", "", path]] : ["xdg-open", [path]];
+    try { spawn(cmd as string, args as string[], { stdio: "ignore", detached: true }).unref(); } catch { /* the path is printed anyway */ }
+  },
   get origCwd(): string { return orig ?? process.cwd(); },
   set origCwd(v: string) { orig = v; },
 };

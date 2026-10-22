@@ -137,3 +137,16 @@ describe("safety review fixes (task 2)", () => {
     try { getSecret(data, proj, "a"); } catch (e) { expect(String(e)).not.toContain("hunter2"); }
   });
 });
+
+describe("gitignore respects an existing ignore", () => {
+  it("leaves .gitignore alone when git already ignores .baseline/", async () => {
+    const { execFileSync } = await import("node:child_process");
+    const d = tmp();
+    execFileSync("git", ["init", "-q"], { cwd: d });
+    const { mkdirSync, appendFileSync, existsSync } = await import("node:fs");
+    mkdirSync(join(d, ".git", "info"), { recursive: true });
+    appendFileSync(join(d, ".git", "info", "exclude"), ".baseline/\n");
+    ensureGitignored(d);
+    expect(existsSync(join(d, ".gitignore"))).toBe(false);
+  });
+});

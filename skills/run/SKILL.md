@@ -132,7 +132,9 @@ If `<runDir>/created.json` has entries: `baseline progress phase clean-up active
 
 ## 6. Report
 
-1. `baseline progress done`, then `baseline report <sessionDir>`. It prints the report path.
+1. `baseline progress done`, then `baseline report <sessionDir> --open`. It writes the report,
+   opens it in the user's browser, and prints its path. The local page is the report: it works
+   offline, with every filter, theme and screenshot.
 2. Publishing: if `publish` is true in `baseline config show` and the Artifact tool is
    available, publish the report as a private artifact. On a `--live` run, ask first with
    AskUserQuestion, because the report holds data from the live site. If

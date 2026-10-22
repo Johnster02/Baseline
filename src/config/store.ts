@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CATEGORIES, CATEGORY_LABEL, projectConfigSchema, runnerSchema } from "./schema";
@@ -24,6 +25,11 @@ export function newRunner(key: string, persona: string, auth: Runner["auth"]): R
 }
 
 export function ensureGitignored(projectDir: string): void {
+  // Already ignored (a global ignore, .git/info/exclude, a parent .gitignore): leave tracked files alone.
+  try {
+    execFileSync("git", ["check-ignore", "-q", ".baseline/"], { cwd: projectDir, stdio: "ignore" });
+    return;
+  } catch { /* not ignored, or not a git repo */ }
   const p = join(projectDir, ".gitignore");
   const text = existsSync(p) ? readFileSync(p, "utf8") : "";
   if (/^\.baseline\/?$/m.test(text)) return;

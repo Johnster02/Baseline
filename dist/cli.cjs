@@ -7,6 +7,7 @@ var __export = (target, all) => {
 };
 
 // src/cli.ts
+var import_node_child_process = require("node:child_process");
 var import_node_fs = require("node:fs");
 
 // .claude-plugin/plugin.json
@@ -60,6 +61,14 @@ var plugin_default = {
 var orig;
 var io = {
   readStdin: () => (0, import_node_fs.readFileSync)(0, "utf8"),
+  /** Open a local file in the default browser. */
+  openFile(path) {
+    const [cmd, args] = process.platform === "darwin" ? ["open", [path]] : process.platform === "win32" ? ["cmd", ["/c", "start", "", path]] : ["xdg-open", [path]];
+    try {
+      (0, import_node_child_process.spawn)(cmd, args, { stdio: "ignore", detached: true }).unref();
+    } catch {
+    }
+  },
   get origCwd() {
     return orig ?? process.cwd();
   },
@@ -19895,6 +19904,7 @@ var CATEGORY_LABEL = {
 };
 
 // src/config/store.ts
+var import_node_child_process2 = require("node:child_process");
 var import_node_fs3 = require("node:fs");
 var import_node_path2 = require("node:path");
 var configDir = (projectDir) => (0, import_node_path2.join)(projectDir, ".baseline");
@@ -19914,6 +19924,11 @@ function newRunner(key, persona, auth2) {
   return runnerSchema.parse({ key, persona, auth: auth2 });
 }
 function ensureGitignored(projectDir) {
+  try {
+    (0, import_node_child_process2.execFileSync)("git", ["check-ignore", "-q", ".baseline/"], { cwd: projectDir, stdio: "ignore" });
+    return;
+  } catch {
+  }
   const p = (0, import_node_path2.join)(projectDir, ".gitignore");
   const text = (0, import_node_fs3.existsSync)(p) ? (0, import_node_fs3.readFileSync)(p, "utf8") : "";
   if (/^\.baseline\/?$/m.test(text)) return;
@@ -20051,7 +20066,7 @@ function sessionPath(data, projectDir, runnerKey) {
 }
 
 // src/config/secret-form.ts
-var import_node_child_process = require("node:child_process");
+var import_node_child_process3 = require("node:child_process");
 var import_node_crypto2 = require("node:crypto");
 var import_node_http = require("node:http");
 var PAGE = (runner) => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Baseline sign-in details</title>
@@ -20063,7 +20078,7 @@ function defaultOpen(url2) {
   const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
   const args = process.platform === "win32" ? ["/c", "start", "", url2] : [url2];
   try {
-    (0, import_node_child_process.spawn)(cmd, args, { stdio: "ignore", detached: true }).unref();
+    (0, import_node_child_process3.spawn)(cmd, args, { stdio: "ignore", detached: true }).unref();
   } catch {
   }
 }
@@ -20298,7 +20313,7 @@ register("target-check", "check a URL is safe to test: target-check <url> [--liv
 });
 
 // src/browser/runner-script.ts
-var import_node_child_process2 = require("node:child_process");
+var import_node_child_process4 = require("node:child_process");
 var import_node_fs7 = require("node:fs");
 var import_node_path6 = require("node:path");
 
@@ -20410,13 +20425,10 @@ function normaliseMessage(message) {
     text = parts.join(" ");
   } catch {
   }
-  text = text.replace(/(%[0-9a-f]{2})+/gi, (m) => {
-    try {
-      return decodeURIComponent(m);
-    } catch {
-      return m;
-    }
-  });
+  const dec = new TextDecoder("utf-8", { fatal: false });
+  for (let i = 0; i < 3 && /%[0-9a-f]{2}/i.test(text); i++) {
+    text = text.replace(/(%[0-9a-f]{2})+/gi, (m) => dec.decode(Uint8Array.from(m.match(/%([0-9a-f]{2})/gi).map((h) => parseInt(h.slice(1), 16)))));
+  }
   return text.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_\-.:/=&?]+/g, " ").replace(/\s+/g, " ").trim();
 }
 function wsDecide(req, ctx) {
@@ -20757,18 +20769,25 @@ async function openSession(o) {
       await settle2();
     },
     async fill(t, value) {
-      await loc(t).fill(value);
+      const l = loc(t);
+      await noteTarget(l);
+      await l.fill(value);
     },
     async press(key, t) {
       if (t) {
         const l = loc(t);
         await noteTarget(l);
         await l.press(key);
-      } else await page.keyboard.press(key);
+      } else {
+        await noteTarget(page.locator(":focus"));
+        await page.keyboard.press(key);
+      }
       await settle2();
     },
     async select(t, value) {
-      await loc(t).selectOption(value);
+      const l = loc(t);
+      await noteTarget(l);
+      await l.selectOption(value);
     },
     async check(t) {
       const l = loc(t);
@@ -20865,6 +20884,9 @@ function shimDir(root2) {
   (0, import_node_fs7.mkdirSync)(dir, { recursive: true });
   (0, import_node_fs7.writeFileSync)((0, import_node_path6.join)(dir, "index.js"), `module.exports = require(${JSON.stringify((0, import_node_path6.join)(root2, "dist", "client.cjs"))});
 `);
+  (0, import_node_fs7.writeFileSync)((0, import_node_path6.join)(dataDir(), "shim", "preload.cjs"), `const M = require("module"); const t = ${JSON.stringify((0, import_node_path6.join)(root2, "dist", "client.cjs"))};
+const r = M._resolveFilename; M._resolveFilename = function (req, ...a) { return req === "baseline" ? t : r.call(this, req, ...a); };
+`);
   return (0, import_node_path6.dirname)(dir);
 }
 function parseScriptArgs(args) {
@@ -20889,11 +20911,33 @@ register("script", "run an agent's browser script as a runner: script <runner> <
   }
   const run = JSON.parse((0, import_node_fs7.readFileSync)((0, import_node_path6.join)(runDir, "run.json"), "utf8"));
   let session;
-  const child = (0, import_node_child_process2.fork)((0, import_node_path6.resolve)(io.origCwd, file6), [], {
-    cwd: projectDir,
+  const scriptPath = (0, import_node_path6.resolve)(io.origCwd, file6);
+  const shim = shimDir(pluginRoot());
+  const major = Number(process.versions.node.split(".")[0]);
+  const permFlag = major >= 22 ? "--permission" : "--experimental-permission";
+  const real = (p) => {
+    try {
+      return (0, import_node_fs7.realpathSync)(p);
+    } catch {
+      return p;
+    }
+  };
+  const execArgv = [
+    permFlag,
+    `--require=${real((0, import_node_path6.join)(dataDir(), "shim", "preload.cjs"))}`,
+    `--allow-fs-read=${real((0, import_node_path6.join)(dataDir(), "shim"))}`,
+    `--allow-fs-read=${real(runDir)}`,
+    `--allow-fs-read=${real((0, import_node_path6.dirname)(scriptPath))}`,
+    `--allow-fs-read=${real(shim)}`,
+    `--allow-fs-read=${real((0, import_node_path6.join)(pluginRoot(), "dist"))}`,
+    `--allow-fs-write=${real(runDir)}`
+  ];
+  const child = (0, import_node_child_process4.fork)(real(scriptPath), [], {
+    cwd: runDir,
+    execArgv,
     stdio: ["inherit", "inherit", "inherit", "ipc"],
     // The script gets only the shim on its module path, and none of Baseline's own settings.
-    env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", NODE_PATH: shimDir(pluginRoot()) }
+    env: { PATH: process.env.PATH ?? "", HOME: runDir, NODE_PATH: shim }
   });
   let chain = Promise.resolve();
   child.on("message", (m) => {
@@ -21096,7 +21140,7 @@ function resolveInputs(args, ctx) {
 }
 
 // src/inputs/fetch.ts
-var import_node_child_process3 = require("node:child_process");
+var import_node_child_process5 = require("node:child_process");
 var import_node_fs11 = require("node:fs");
 var import_node_path10 = require("node:path");
 var import_node_util = require("node:util");
@@ -21127,7 +21171,7 @@ function adfToText(node2) {
 
 // src/inputs/fetch.ts
 var SPEC_EXT = /* @__PURE__ */ new Set([".md", ".markdown", ".txt", ".html", ".htm", ".pdf", ".rst", ".adoc"]);
-var defaultExec = async (cmd, args) => (await (0, import_node_util.promisify)(import_node_child_process3.execFile)(cmd, args, { maxBuffer: 20 * 1024 * 1024 })).stdout;
+var defaultExec = async (cmd, args) => (await (0, import_node_util.promisify)(import_node_child_process5.execFile)(cmd, args, { maxBuffer: 20 * 1024 * 1024 })).stdout;
 function extractLinks(body, exclude) {
   const found = body.match(/https?:\/\/[^\s)>\]"'`]+/g) ?? [];
   return [...new Set(found.map((l) => l.replace(/[.,;:]+$/, "")))].filter((l) => l !== exclude);
@@ -21404,7 +21448,7 @@ function sizeRun(inputs, changedFileCount, personas, codeRead) {
 }
 
 // src/run/commit.ts
-var import_node_child_process4 = require("node:child_process");
+var import_node_child_process6 = require("node:child_process");
 var import_node_util2 = require("node:util");
 function probeAllowed(probeUrl, runUrl) {
   try {
@@ -21418,7 +21462,7 @@ function probeAllowed(probeUrl, runUrl) {
 async function commitInfo(projectDir, cfg, probe, runUrl) {
   let commitRead;
   try {
-    commitRead = (await (0, import_node_util2.promisify)(import_node_child_process4.execFile)("git", ["rev-parse", "--short=7", "HEAD"], { cwd: projectDir })).stdout.trim();
+    commitRead = (await (0, import_node_util2.promisify)(import_node_child_process6.execFile)("git", ["rev-parse", "--short=7", "HEAD"], { cwd: projectDir })).stdout.trim();
   } catch {
     commitRead = void 0;
   }
@@ -22424,7 +22468,7 @@ function runHTML(r, hidden) {
   const leftHTML = (r.leftBehind ?? []).length ? `<section class="sec wp" style="--w:6"><h2>Left behind \xB7 ${r.leftBehind.length}</h2><div class="rows">${r.leftBehind.map((x) => `<div class="row"><span><b>${esc2(x.label)}</b></span><span>${esc2(x.note)}</span><span class="k">Remove it by hand on the site.</span></div>`).join("")}</div></section>` : "";
   const unread = r.unreadLinks.length ? `<section class="sec wp" style="--w:7"><h2>Links that could not be read</h2><div class="rows">${r.unreadLinks.map((l) => `<div class="row"><span class="k">${esc2(l)}</span></div>`).join("")}</div></section>` : "";
   return `<section class="run" data-run="${esc2(r.runId)}"${hidden ? " hidden" : ""}>
-<header class="case wp" style="--w:0"><div><h1>${esc2(r.label)}</h1><div class="tele"><span>run <b>${esc2(r.runId)}</b></span><span>${r.size} \xB7 <b>${r.agents} agents</b></span><span>${r.durationMin}m</span><span>${esc2(r.url)}${r.commit.commitRead ? ` @ <b>${esc2(r.commit.commitRead)}</b>` : ""}</span></div></div><span class="result">Complete</span></header>
+<header class="case wp" style="--w:0"><div><h1>${esc2(r.label)}</h1><div class="tele"><span>run <b>${esc2(r.runId)}</b></span><span>${esc2(r.size)} \xB7 <b>${esc2(Number(r.agents) || 0)} agents</b></span><span>${r.durationMin}m</span><span>${esc2(r.url)}${r.commit.commitRead ? ` @ <b>${esc2(r.commit.commitRead)}</b>` : ""}</span></div></div><span class="result">Complete</span></header>
 ${warn}
 <div class="summary wp" style="--w:1"><div class="block"><div class="count"><b>${attention}</b><span>need a look \xB7 ${r.counts.passRate === null ? "nothing verified yet" : `${r.counts.passRate}% pass \xB7 ${r.counts.checked} verified`}${r.counts.unverified ? ` \xB7 ${r.counts.unverified} unverified` : ""}</span></div>
 <div class="tally">${r.findings.map((f, i) => `<i class="${f.verdict === "match" ? "ok" : ""}" data-group="${group(f.verdict)}" style="--c:var(${VERDICT_VAR[f.verdict]});--i:${i}"></i>`).join("")}</div>
@@ -22462,9 +22506,9 @@ ${rail}</aside>
 }
 
 // src/render/cli.ts
-register("report", "write the session's report.html: report <sessionDir>", (args) => {
+register("report", "write the session's report.html: report <sessionDir> [--open]", (args) => {
   if (!args[0]) {
-    err("usage: baseline report <sessionDir>");
+    err("usage: baseline report <sessionDir> [--open]");
     return 2;
   }
   const sessionDir = (0, import_node_path20.resolve)(io.origCwd, args[0]);
@@ -22475,6 +22519,7 @@ register("report", "write the session's report.html: report <sessionDir>", (args
   }
   const file6 = (0, import_node_path20.join)(sessionDir, "report.html");
   (0, import_node_fs21.writeFileSync)(file6, renderSessionReport(runs, loadConfig(process.cwd()).theme));
+  if (args.includes("--open")) io.openFile(file6);
   out(file6);
   return 0;
 });
@@ -22637,7 +22682,7 @@ register("view", "the active run's progress as text: view [--plain]", (args) => 
 });
 
 // src/setup/install.ts
-var import_node_child_process5 = require("node:child_process");
+var import_node_child_process7 = require("node:child_process");
 var import_node_fs23 = require("node:fs");
 var import_node_path22 = require("node:path");
 var PLAYWRIGHT_VERSION = "1.64.1";
@@ -22645,12 +22690,12 @@ register("install-browser", "install Playwright and Chromium into the plugin's d
   const dir = dataDir();
   (0, import_node_fs23.mkdirSync)(dir, { recursive: true });
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-  const a = (0, import_node_child_process5.spawnSync)(npm, ["install", "--prefix", dir, "--ignore-scripts", "--no-audit", "--no-fund", `playwright@${PLAYWRIGHT_VERSION}`], { stdio: "inherit", cwd: dir });
+  const a = (0, import_node_child_process7.spawnSync)(npm, ["install", "--prefix", dir, "--ignore-scripts", "--no-audit", "--no-fund", `playwright@${PLAYWRIGHT_VERSION}`], { stdio: "inherit", cwd: dir });
   if (a.status !== 0) {
     err("could not install Playwright with npm");
     return 1;
   }
-  const b = (0, import_node_child_process5.spawnSync)(process.execPath, [(0, import_node_path22.join)(dir, "node_modules", "playwright", "cli.js"), "install", "chromium"], {
+  const b = (0, import_node_child_process7.spawnSync)(process.execPath, [(0, import_node_path22.join)(dir, "node_modules", "playwright", "cli.js"), "install", "chromium"], {
     stdio: "inherit",
     cwd: dir,
     env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: (0, import_node_path22.join)(dir, "browsers") }

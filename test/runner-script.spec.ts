@@ -109,3 +109,16 @@ describe("run from anywhere inside the project (dogfood)", () => {
     expect(existsSync(join(p.runDir, ".baseline"))).toBe(false);
   });
 });
+
+describe("agent scripts are sandboxed (security review)", () => {
+  it("cannot read the saved session file or start another process", async () => {
+    const p = project();
+    const secretFile = join(p.env.BASELINE_DATA as string, "sessions");
+    const r = await runScript(p, `const fs = require("fs");
+      let read = "no"; try { fs.readdirSync(${JSON.stringify(secretFile)}); read = "yes"; } catch (e) {}
+      let spawned = "no"; try { require("child_process").execSync("echo hi"); spawned = "yes"; } catch (e) {}
+      const s = await B.open(); await s.goto("/cart"); const t = await s.title(); await s.close();
+      console.log("READ " + read + " SPAWN " + spawned + " TITLE " + t);`);
+    expect(r.stdout).toContain("READ no SPAWN no TITLE Cart");
+  });
+});

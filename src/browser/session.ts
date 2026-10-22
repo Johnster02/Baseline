@@ -231,9 +231,13 @@ export async function openSession(o: OpenOptions): Promise<Session> {
       await afterNav();
     },
     async click(t) { const l = loc(t); await noteTarget(l); await l.click(); await settle(); },
-    async fill(t, value) { await loc(t).fill(value); },
-    async press(key, t) { if (t) { const l = loc(t); await noteTarget(l); await l.press(key); } else await page.keyboard.press(key); await settle(); },
-    async select(t, value) { await loc(t).selectOption(value); },
+    async fill(t, value) { const l = loc(t); await noteTarget(l); await l.fill(value); },
+    async press(key, t) {
+      if (t) { const l = loc(t); await noteTarget(l); await l.press(key); }
+      else { await noteTarget(page.locator(":focus")); await page.keyboard.press(key); }
+      await settle();
+    },
+    async select(t, value) { const l = loc(t); await noteTarget(l); await l.selectOption(value); },
     async check(t) { const l = loc(t); await noteTarget(l); await l.check(); },
     async hover(t) { await loc(t).hover(); },
     async back() { await page.goBack(); },
