@@ -1,2 +1,161 @@
 # Baseline
- Acceptance testing for any web app, from right inside your Claude Code. Point it at a PR, ticket or spec and a URL. It reads the code or guide, walks the site as your test users, and reports where spec, code and site disagree as well as any product flows or user journeys that would fail QA..
+
+[![CI](https://img.shields.io/github/actions/workflow/status/Johnster02/Baseline/ci.yml?branch=main&label=ci)](https://github.com/Johnster02/Baseline/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Johnster02/Baseline?include_prereleases)](https://github.com/Johnster02/Baseline/releases)
+[![License: MIT](https://img.shields.io/github/license/Johnster02/Baseline)](LICENSE)
+[![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-d97757)](https://code.claude.com/docs/en/plugins)
+[![Node](https://img.shields.io/badge/node-%3E%3D20-339933)](package.json)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](CONTRIBUTING.md)
+
+Acceptance testing for any web app, from inside Claude Code. Point it at a PR, ticket or spec and a
+URL. It reads the code, walks the site as your test users, and reports where **the spec, the code
+and the site** disagree, plus anything that works but would fail a QA engineer's eye.
+
+![The Baseline report in its default BR2049 theme](docs/screenshots/report-br2049.png)
+
+Built for QA engineers, and for developers who want the easy QA issues caught before their change
+reaches QA. Every finding is advisory: Baseline never passes or fails a change. You decide.
+
+## Install
+
+```text
+/plugin marketplace add Johnster02/Baseline
+/plugin install baseline@baseline
+```
+
+Then, in the project you want to test:
+
+```text
+/baseline:setup
+```
+
+Setup installs a browser once (Playwright and Chromium, into the plugin's own data folder), then
+asks for your test accounts and what each may do. You can re-run it any time.
+
+**Requirements:** Claude Code (logged in), Node 20 or later, and npm for the one-time browser
+install. The live progress band needs Claude Code v2.1.287 or later. Publishing the report as a
+claude.ai artifact needs a claude.ai login on Pro, Max, Team or Enterprise; otherwise the report is
+a local HTML file. Tested with Claude Code 2.1.308.
+
+## Use
+
+```text
+/baseline:run #412
+/baseline:run https://github.com/acme/shop/pull/412
+/baseline:run SHOP-12                       # Jira or Linear
+/baseline:run docs/specs/discounts.md
+/baseline:run docs/specs/                   # a folder of specs
+/baseline:run "Expired discount codes are rejected at checkout"
+/baseline:run #412 docs/specs/discounts.md  # mix them
+```
+
+Each run asks which URL to test (the last one is the default): staging, a preview deploy or
+`http://localhost:3000`. It sizes itself and says so before it starts:
+
+- **Quick run** for a single bug or PR, about 10 minutes: a code reader on the changed files, one or
+  two explorers, a refuter.
+- **Full run** for a feature with a spec or guide, 30 minutes or more: code reader, an explorer per
+  persona, a guide reader, product checks, a refuter and clean-up.
+
+Add `--quick` or `--full` to choose. `--live` is needed to test a URL you marked as production.
+
+While it runs, a band above the prompt shows each phase and what every agent is doing. When it
+ends you get totals only: pass rate, counts, `Complete`, and a link to the report.
+
+```text
+BASELINE // PR #412 · quick · 9m 12s
+────────────────────────────────
+PASS RATE   ██████░░░░ 60%
+checked     10   passed 6
+conflicts     2
+product       1
+unverified    1
+skipped       1
+result      COMPLETE
+────────────────────────────────
+report  https://claude.ai/artifact/…
+```
+
+### The report
+
+One page per Claude Code session: run again after a fix and the new run joins the same page.
+Findings are listed worst first, each with **Specced / Built / Observed** side by side, the steps
+to reproduce, screenshots, and the refuter's note. "Copy as issue" turns one into a bug report.
+
+| Verdict | Meaning |
+|---|---|
+| spec ≠ built | the code does something other than the spec |
+| built ≠ observed | the code looks right but the site does something else |
+| not built | nothing implements it |
+| guide ≠ spec | the user guide promises something different |
+| unspecced | the site does something the spec never mentions |
+| product | works, but fails the [product checklist](checklists/product.md) |
+| unverified | the code says yes, but the site never showed it |
+| skipped | a permission stopped the check (see below) |
+| match | spec, code and site agree |
+
+Code is optional but recommended. Run inside the product's repository and you get all three
+columns. Without the code, Baseline compares the spec with the site and says so.
+
+**Low noise by design.** A finding must tie to the change or its screens, survive a refuter that
+tries to disprove it, and carry evidence. Unrelated observations are collapsed and capped at five.
+Duplicates across personas are merged. If something is deliberate, `/baseline:dismiss R-03 "why"`
+and later runs leave it alone.
+
+### Themes
+
+BR2049 (default), Light, and a navy Dark, for both the report and the band:
+`/baseline:theme dark`.
+
+| Light | Dark |
+|---|---|
+| ![Light theme](docs/screenshots/report-light.png) | ![Dark theme](docs/screenshots/report-dark.png) |
+
+## Safety
+
+Baseline drives a real browser through someone's site, so it is careful by default.
+
+- **Look only is the default** for every test account. A look-only runner can browse and read, and
+  the browser layer blocks any request that would change data.
+- **Protected areas are off unless you allow them**, per runner: live sites and real users, sending
+  email, sign-in and accounts, deleting projects or users, payments and finance. Setup lets you
+  name them on your site (URL patterns, button words) on top of the built-in ones.
+- **Agents never assume.** Anything that looks protected is skipped and listed in the report with
+  the permission that would allow it. At the end of a run you can choose to allow those for next
+  time. Permissions only ever change with your answer in the terminal.
+- **Production URLs are refused** unless you ask for a live run.
+- **Agents never touch the browser directly.** Their scripts talk to a browser held by Baseline
+  through a short list of commands (go to, click, fill, read, screenshot). A Bash hook also blocks
+  HTTP writes to the site and direct Playwright use while a run is active.
+- **Credentials** live in a 0600 file in the plugin's data folder, never in your project, logs or
+  reports. Accounts behind SSO or MFA are signed in by hand once and the session is reused.
+
+**The honest limit:** blocking every write for look-only runners is enforced in code. Spotting a
+protected action on a site Baseline has never seen (that a button sends an email, say) is best
+effort, from the patterns you give it plus agents told to skip anything doubtful. The guard is
+built to stop accidents by a well-meaning agent, not a deliberately hostile script. Use test
+accounts on a test site. More in [docs/permissions.md](docs/permissions.md).
+
+## Where things go
+
+| What | Where |
+|---|---|
+| Project settings, runs, reports, site map, notes | `.baseline/` in your project (setup adds it to `.gitignore`) |
+| Credentials, saved sessions, the browser | the plugin's data folder (`~/.claude/plugins/data/…`) |
+| Jira and Linear tokens | `/plugin configure baseline`, stored in your system's secure store |
+
+## Develop
+
+```bash
+pnpm install
+pnpm check          # types, unit tests, dist up to date, mod tests
+pnpm fixture        # the "Acme shop" test site
+claude --plugin-dir .
+```
+
+`dist/` and `mod/` are built and committed, so installing the plugin needs no build step. See
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Licence
+
+[MIT](LICENSE)
