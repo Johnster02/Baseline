@@ -66,13 +66,13 @@ describe("filterFindings", () => {
 });
 
 describe("countRun", () => {
-  it("6 match + 2 conflict + 1 product + 1 unverified = 9 verified, 67%", () => {
+  it("6 match + 2 conflict + 1 product + 1 unverified = 8 checked, 75%", () => {
     const fs = [
       ...Array.from({ length: 6 }, () => F({ verdict: "match" })),
       F({ verdict: "spec-built" }), F({ verdict: "built-observed" }), F({ verdict: "product" }), F({ verdict: "unverified" }),
     ];
     const blocked = [{ runner: "c", category: "email", path: "/a", method: "POST" }, { runner: "c", category: "email", path: "/a", method: "POST" }];
-    expect(countRun(fs, blocked as any)).toEqual({ checked: 9, passed: 6, passRate: 67, conflicts: 2, product: 1, unspecced: 0, unverified: 1, skipped: 1 });
+    expect(countRun(fs, blocked as any)).toEqual({ checked: 8, passed: 6, passRate: 75, conflicts: 2, product: 1, unspecced: 0, unverified: 1, skipped: 1 });
   });
   it("zero checked has no pass rate", () => {
     expect(countRun([], []).passRate).toBeNull();
@@ -90,9 +90,17 @@ describe("notes", () => {
 describe("pass rate over verified checks only (dogfood)", () => {
   it("unverified and skipped findings don't drag the pass rate down", () => {
     const fs = [F({ verdict: "match" }), F({ verdict: "product" }), F({ verdict: "unverified" }), F({ verdict: "unverified" }), F({ verdict: "skipped" })];
-    expect(countRun(fs, [])).toMatchObject({ checked: 2, passed: 1, passRate: 50, unverified: 2, skipped: 1 });
+    expect(countRun(fs, [])).toMatchObject({ checked: 1, passed: 1, passRate: 100, product: 1, unverified: 2, skipped: 1 });
   });
   it("nothing verified gives a null pass rate, not 0%", () => {
     expect(countRun([F({ verdict: "unverified" })], []).passRate).toBeNull();
+  });
+});
+
+describe("pass rate covers requirement checks only (dogfood 2)", () => {
+  it("unspecced and product observations are not failed checks", () => {
+    const fs = [F({ verdict: "match" }), F({ verdict: "unspecced" }), F({ verdict: "product" })];
+    expect(countRun(fs, [])).toMatchObject({ checked: 1, passed: 1, passRate: 100, unspecced: 1, product: 1 });
+    expect(countRun([F({ verdict: "unspecced" })], []).passRate).toBeNull();
   });
 });

@@ -99,7 +99,7 @@ describe("buildRunRecord", () => {
     writeFileSync(join(runDir, "commit.json"), JSON.stringify({ codeRead: false, mismatch: false }));
     const r = buildRunRecord(runDir);
     expect(r.findings.map((f) => f.id)).toEqual(["R-2", "R-1"]);
-    expect(r.counts).toMatchObject({ checked: 2, passed: 1, passRate: 50 });
+    expect(r.counts).toMatchObject({ checked: 1, passed: 1, passRate: 100, product: 1 });
     expect(r.durationMin).toBe(9);
     expect(r.unreadLinks).toEqual(["https://wiki/x"]);
     expect(Buffer.from(r.shots["shots/customer-a-1.jpg"]!, "base64").toString()).toBe("JPEGDATA");

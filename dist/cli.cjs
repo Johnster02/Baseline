@@ -21216,7 +21216,7 @@ var severityRank = (s) => SEVERITIES.indexOf(s);
 // src/findings/counts.ts
 var emptyCounts = () => ({ checked: 0, passed: 0, passRate: 0, conflicts: 0, product: 0, unspecced: 0, unverified: 0, skipped: 0 });
 function countRun(fs, blocked) {
-  const checked = fs.filter((f) => f.verdict !== "skipped" && f.verdict !== "unverified");
+  const checked = fs.filter((f) => f.verdict === "match" || isConflict(f.verdict));
   const passed = checked.filter((f) => f.verdict === "match").length;
   const uniqueBlocked = new Set(blocked.map((b) => `${b.runner}|${b.category}|${b.method}|${b.path}`)).size;
   return {

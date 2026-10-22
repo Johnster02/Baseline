@@ -11,9 +11,12 @@ import { isConflict } from "./schema";
 
 type BlockedLike = { runner: string; category: string; method: string; path: string };
 
-/** Pass rate = matches over verified checks; unverified and skipped are counted apart. Skipped adds unique blocked actions. */
+/**
+ * Pass rate = requirements seen to match, over requirements checked on the site (match or a
+ * conflict). Product and unspecced observations, unverified and skipped are counted apart.
+ */
 export function countRun(fs: Finding[], blocked: BlockedLike[]): Counts {
-  const checked = fs.filter((f) => f.verdict !== "skipped" && f.verdict !== "unverified");
+  const checked = fs.filter((f) => f.verdict === "match" || isConflict(f.verdict));
   const passed = checked.filter((f) => f.verdict === "match").length;
   const uniqueBlocked = new Set(blocked.map((b) => `${b.runner}|${b.category}|${b.method}|${b.path}`)).size;
   return {
