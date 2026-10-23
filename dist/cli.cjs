@@ -20984,6 +20984,7 @@ async function openSession(o) {
         { runner: o.runner, cfg: o.cfg, learned, baseHost, createdPaths }
       );
       const u = new URL(r.url());
+      if (method !== "GET" && method !== "HEAD" && !loading && clickText && u.host === baseHost) for (const c of clicks) c.judged = true;
       const entry = { method, host: u.host, path: redactUrl(r.url()) };
       if (d.action === "abort") {
         block({ ...entry, category: d.category, reason: d.reason, ...d.trigger ? { trigger: d.trigger } : {} });
@@ -21078,7 +21079,7 @@ async function openSession(o) {
   page = await context.newPage();
   page.on("framenavigated", (f) => {
     if (f !== page.mainFrame()) return;
-    clicks.length = 0;
+    for (let i = clicks.length - 1; i >= 0; i--) if (clicks[i].judged) clicks.splice(i, 1);
     try {
       if (new URL(f.url()).host === baseHost) owned.landed(f.url(), Date.now(), state.agentNav);
     } catch {

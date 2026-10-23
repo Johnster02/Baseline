@@ -96,7 +96,8 @@ export async function openSession(o: OpenOptions): Promise<Session> {
   // Learned per runner, never shared: one account's page loads don't unlock another's writes.
   const loadPath = join(o.runDir, "logs", `load-requests-${o.runner.key}.json`);
   const learned = new Set<string>(readJson<string[]>(loadPath, []));
-  const clicks: { text: string; at: number }[] = [];
+  /** judged: a write this click could have caused has already been checked against its words. */
+  const clicks: { text: string; at: number; judged?: boolean }[] = [];
   const state = { loading: false, agentNav: false };
   const network: { at: string; method: string; host: string; path: string; type: string; outcome: string }[] = [];
   // What this run created, shared by every runner in the run (see owned.ts).
@@ -141,6 +142,8 @@ export async function openSession(o: OpenOptions): Promise<Session> {
         { runner: o.runner, cfg: o.cfg, learned, baseHost, createdPaths },
       );
       const u = new URL(r.url());
+      // This click's words have now judged a write on the site (allowed or blocked).
+      if (method !== "GET" && method !== "HEAD" && !loading && clickText && u.host === baseHost) for (const c of clicks) c.judged = true;
       const entry = { method, host: u.host, path: redactUrl(r.url()) };
       if (d.action === "abort") {
         block({ ...entry, category: d.category, reason: d.reason, ...(d.trigger ? { trigger: d.trigger } : {}) });
@@ -221,9 +224,10 @@ export async function openSession(o: OpenOptions): Promise<Session> {
   // Where the browser lands right after a write: a new id there is a record this run created.
   page.on("framenavigated", (f) => {
     if (f !== page.mainFrame()) return;
-    // A click's intent ends once the page has moved on: requests after this (a list refreshing
-    // after a redirect) are the new page's own, not the click's.
-    clicks.length = 0;
+    // A click whose write has already been judged ends when the page moves on: requests after
+    // that (a list refreshing after a redirect) are the new page's own. A click whose write hasn't
+    // gone out yet stays live, so a page that changes route before sending is still judged.
+    for (let i = clicks.length - 1; i >= 0; i--) if (clicks[i]!.judged) clicks.splice(i, 1);
     try { if (new URL(f.url()).host === baseHost) owned.landed(f.url(), Date.now(), state.agentNav); } catch { /* ignore */ }
   });
   const deny = async () => { throw new Error("Baseline: direct API requests are not allowed. Drive the page instead."); };
