@@ -13,7 +13,7 @@ const EXPECTED_S: Record<string, { pr: number; quick: number; full: number }> = 
 /** The estimate never claims a phase is finished; only marking it done does. */
 const CAP = 95;
 
-export type EstimateInput = { name: string; status: string; pct?: number; since?: string; pctAt?: string };
+export type EstimateInput = { name: string; status: string; pct?: number | undefined; since?: string | undefined; pctAt?: string | undefined };
 
 export function estimatePct(ph: EstimateInput, size: string, now: number): number {
   const base = Math.max(0, Math.min(100, Number(ph.pct) || 0));

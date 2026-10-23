@@ -1,6 +1,8 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { dataDir } from "../config/secrets";
+import { dataDir } from "../core/paths";
+import { readJsonFile } from "../core/json";
+import { trackersSchema } from "./fetch";
 import type { Trackers } from "./fetch";
 
 const file = () => join(dataDir(), "trackers.json");
@@ -20,8 +22,7 @@ export function storeTrackersFromEnv(env: NodeJS.ProcessEnv): void {
 }
 
 export function loadTrackers(): Trackers {
-  let t: Trackers = {};
-  if (existsSync(file())) { try { t = JSON.parse(readFileSync(file(), "utf8")); } catch { t = {}; } }
+  const t: Trackers = readJsonFile(file(), (v) => trackersSchema.parse(v), {});
   const e = process.env;
   if (e.BASELINE_JIRA_BASE_URL && e.BASELINE_JIRA_TOKEN) t.jira = { baseUrl: e.BASELINE_JIRA_BASE_URL, email: e.BASELINE_JIRA_EMAIL || "", token: e.BASELINE_JIRA_TOKEN };
   if (e.BASELINE_LINEAR_API_KEY) t.linear = { apiKey: e.BASELINE_LINEAR_API_KEY };

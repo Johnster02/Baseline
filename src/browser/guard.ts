@@ -1,9 +1,12 @@
-import type { Category, ProjectConfig, Runner, PatternCategory } from "../config/schema";
-import { isProduction } from "../config/store";
-
 import { createHash } from "node:crypto";
+import type { Category, ProjectConfig, Runner, PatternCategory } from "../config/schema";
+import { isProduction } from "../config/target";
 
-export type GuardRequest = { method: string; url: string; loading: boolean; clickText?: string; body?: string; document?: boolean };
+export type GuardRequest = {
+  method: string; url: string; loading: boolean; clickText?: string | undefined; body?: string | undefined; document?: boolean | undefined;
+  /** A control was just clicked but had no words at all (an unlabelled icon): nothing to judge it by. */
+  clickWordless?: boolean | undefined;
+};
 export type GuardContext = { runner: Runner; cfg: ProjectConfig; learned: Set<string>; baseHost?: string; createdPaths?: string[] };
 export type Decision =
   | { action: "continue"; learn?: string }
@@ -26,8 +29,8 @@ export function globMatch(pattern: string, rawPath: string): boolean {
   const path = normalizePath(rawPath);
   let re = "";
   for (let i = 0; i < pattern.length; i++) {
-    const c = pattern[i]!;
-    if (c === "*" && pattern[i + 1] === "*") { re += ".*"; i++; }
+    const c = pattern.charAt(i);
+    if (c === "*" && pattern.charAt(i + 1) === "*") { re += ".*"; i++; }
     else if (c === "*") re += "[^/]*";
     else re += c.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
   }
@@ -39,8 +42,6 @@ function wordHit(text: string, word: string): boolean {
   return new RegExp(`(^|[^a-z0-9])${w}([^a-z0-9]|$)`, "i").test(text);
 }
 
-/** A learned request is this exact call: host, method, path and body. A different body to the same
- *  path (a GraphQL mutation after a query) is a different request. */
 /** A GraphQL mutation, in a JSON body or as a raw query string. */
 export function looksLikeMutation(body?: string): boolean {
   if (!body) return false;
@@ -53,11 +54,55 @@ export function looksLikeMutation(body?: string): boolean {
   return /(^|[\s{}])mutation\b/.test(q.replace(/#[^\n]*/g, ""));
 }
 
+/** Query params that change on every load (cache-busters): left out of a learned request's key. */
+const CACHE_BUSTERS = new Set(["_", "t", "ts", "cb", "cachebust", "cachebuster", "nocache", "rnd", "rand", "random"]);
+const isCacheBuster = (k: string, v: string) => CACHE_BUSTERS.has(k.toLowerCase()) || /^\d{10,}$/.test(v);
+
+/** The query with cache-busters dropped and params sorted, so the same call matches on every load. */
+function stableQuery(u: URL): string {
+  const kept = [...u.searchParams.entries()].filter(([k, v]) => !isCacheBuster(k, v)).sort(([a, x], [b, y]) => (a < b ? -1 : a > b ? 1 : x < y ? -1 : x > y ? 1 : 0));
+  return kept.length ? "?" + new URLSearchParams(kept).toString() : "";
+}
+
+/** A learned request is this exact call: host, method, path, query and body. A different body or
+ *  query to the same path (a GraphQL mutation after a query, `?op=deleteUser` after `?op=getUser`)
+ *  is a different request. Cache-buster params (`?_=1700000000000`) don't count. */
 export const requestKey = (method: string, url: string, body = "") => {
   const u = new URL(url);
   const h = body ? " #" + createHash("sha256").update(body).digest("hex").slice(0, 16) : "";
-  return `${method.toUpperCase()} ${u.host}${u.pathname}${h}`;
+  return `${method.toUpperCase()} ${u.host}${u.pathname}${stableQuery(u)}${h}`;
 };
+
+/**
+ * A URL pattern: a path glob, optionally followed by `?name=value&...`. Without `?` it matches the
+ * path only (`**\/logout` never matches `/signin?next=%2Flogout`). With `?`, every named param must
+ * be present with a matching value (`*` globs; a bare `name` only needs the param), in any order.
+ */
+export function urlMatches(pattern: string, u: URL): boolean {
+  const q = pattern.indexOf("?");
+  if (q < 0) return globMatch(pattern, u.pathname);
+  const pathPat = pattern.slice(0, q) || "**";
+  if (!globMatch(pathPat, u.pathname)) return false;
+  const params = [...u.searchParams.entries()].map(([k, v]) => [k.toLowerCase(), v] as const);
+  return pattern.slice(q + 1).split("&").filter(Boolean).every((part) => {
+    const eq = part.indexOf("=");
+    const name = (eq < 0 ? part : part.slice(0, eq)).toLowerCase();
+    if (eq < 0) return params.some(([k]) => k === name);
+    let want = part.slice(eq + 1);
+    try { want = decodeURIComponent(want); } catch { /* keep raw */ }
+    return params.some(([k, v]) => k === name && valueMatch(want, v));
+  });
+}
+
+function valueMatch(pattern: string, value: string): boolean {
+  const re = pattern.split("*").map((x) => x.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*");
+  return new RegExp(`^${re}$`, "i").test(value);
+}
+
+/** A known sign-in or error-reporting call on another host (see PLATFORM_CALLS). */
+function isPlatformCall(u: URL, baseHost?: string): boolean {
+  return !!baseHost && u.host !== baseHost && PLATFORM_CALLS.some((c) => c.host.test(u.hostname) && c.path.test(u.pathname));
+}
 
 /** Categories whose URL patterns also apply to page navigations (GETs with side effects, like /logout). */
 const GET_CATEGORIES: PatternCategory[] = ["auth", "delete"];
@@ -82,7 +127,7 @@ export const UNIQUE_ID = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9
 /** Literal path segments, ;params dropped. Undefined when the raw path hides a slash, a backslash or a dot segment. */
 function rawSegments(path: string): string[] | undefined {
   if (/%2f|%5c|%2e|\\/i.test(path)) return undefined;
-  const segs = path.split("/").filter(Boolean).map((x) => x.split(";")[0]!);
+  const segs = path.split("/").filter(Boolean).map((x) => x.split(";")[0] ?? x);
   return segs.some((x) => x === "." || x === "..") ? undefined : segs;
 }
 
@@ -99,8 +144,8 @@ function ownsPath(path: string, created: string[] = []): boolean {
     const n = rawSegments(c);
     if (!n || !n.length) return false;
     if (p.join("/") === n.join("/")) return true;
-    const id = n[n.length - 1]!;
-    if (!UNIQUE_ID.test(id)) return false;
+    const id = n[n.length - 1];
+    if (!id || !UNIQUE_ID.test(id)) return false;
     const at = p.lastIndexOf(id);
     return at >= 0 && p.length - at <= 2;
   });
@@ -152,17 +197,18 @@ export function decide(req: GuardRequest, ctx: GuardContext): Decision {
     if (req.document) {
       for (const cat of GET_CATEGORIES) {
         if (runner.allow.includes(cat)) continue;
-        const g = cfg.patterns[cat].urls.find((x) => globMatch(x, path));
+        const g = cfg.patterns[cat].urls.find((x) => urlMatches(x, u));
         if (g) return { action: "abort", category: cat, reason: `page link matches protected ${cat} URL pattern`, trigger: g };
       }
     }
     return { action: "continue" };
   }
 
+  const infra = isPlatformCall(u, ctx.baseHost);
   for (const cat of PATTERN_ORDER) {
     if (runner.allow.includes(cat)) continue;
     const p = cfg.patterns[cat];
-    const url = p.urls.find((g) => globMatch(g, path));
+    const url = p.urls.find((g) => urlMatches(g, u));
     if (url) return { action: "abort", category: cat, reason: `matches protected ${cat} URL pattern`, trigger: url };
     // A "Delete" click on a record this run created is the cleaner's job: only the word check is
     // waived, never the protected URL patterns.
@@ -171,8 +217,8 @@ export function decide(req: GuardRequest, ctx: GuardContext): Decision {
     // live elsewhere). Only known sign-in and error-reporting services are left out: refreshing a
     // session or sending a report in the same moment is not what the click did, and blocking them
     // breaks the page. Protected URL patterns above still apply to every host.
-    const infra = !!ctx.baseHost && u.host !== ctx.baseHost && PLATFORM_CALLS.some((c) => c.host.test(u.hostname) && c.path.test(u.pathname));
-    const word = !infra && req.clickText ? p.words.find((w) => wordHit(req.clickText!, w)) : undefined;
+    const clickText = infra ? undefined : req.clickText;
+    const word = clickText ? p.words.find((w) => wordHit(clickText, w)) : undefined;
     if (word) return { action: "abort", category: cat, reason: `clicked control looks like ${cat}`, trigger: word.toLowerCase() };
   }
 
@@ -188,6 +234,11 @@ export function decide(req: GuardRequest, ctx: GuardContext): Decision {
   if (ctx.learned.has(key)) return { action: "continue" };
   // A read-only POST path is allowed only for reads: a GraphQL mutation to the same path is a write.
   if (cfg.readPosts.some((g) => globMatch(g, path)) && !looksLikeMutation(req.body)) return { action: "continue" };
+  // An unlabelled control can't be judged by its words: its write goes out only when it is about
+  // a record the run created (fail closed). Sign-in and error-reporting calls are left alone.
+  if (req.clickWordless && !req.clickText && !infra && !ownsRequest(u.pathname, req.body, ctx.createdPaths)) {
+    return { action: "abort", category: "unknown-write", reason: "clicked control has no words to check, and this is not the run's own record" };
+  }
   if (runner.depth === "look") return { action: "abort", category: "unknown-write", reason: "look-only runner: this would change data" };
   return { action: "continue" };
 }
@@ -218,7 +269,7 @@ export function decodeMessage(message: string): { text: string; undecodable: boo
   // so double encoding can't hide a word.
   const dec = new TextDecoder("utf-8", { fatal: false });
   for (let i = 0; i < 20 && /%[0-9a-f]{2}/i.test(text); i++) {
-    const next = text.replace(/(%[0-9a-f]{2})+/gi, (m) => dec.decode(Uint8Array.from(m.match(/%([0-9a-f]{2})/gi)!.map((h) => parseInt(h.slice(1), 16)))));
+    const next = text.replace(/(%[0-9a-f]{2})+/gi, (m) => dec.decode(Uint8Array.from((m.match(/%([0-9a-f]{2})/gi) ?? []).map((h) => parseInt(h.slice(1), 16)))));
     if (next === text) break;
     text = next;
   }
@@ -235,10 +286,10 @@ export function wsDecide(req: { url: string; loading: boolean; message?: string 
   if (isProduction(httpish, cfg) && !runner.allow.includes("live")) {
     return { action: "abort", category: "live", reason: "production site, live testing not allowed for this runner" };
   }
-  const path = new URL(httpish).pathname;
+  const wsUrl = new URL(httpish);
   for (const cat of PATTERN_ORDER) {
     if (runner.allow.includes(cat)) continue;
-    const g = cfg.patterns[cat].urls.find((x) => globMatch(x, path));
+    const g = cfg.patterns[cat].urls.find((x) => urlMatches(x, wsUrl));
     if (g) return { action: "abort", category: cat, reason: `WebSocket URL matches protected ${cat} pattern`, trigger: g };
   }
   if (req.message === undefined) return { action: "continue" };
@@ -252,7 +303,8 @@ export function wsDecide(req: { url: string; loading: boolean; message?: string 
     const text = splitWords(decoded.text);
     // Escapes left after decoding mean we can't read it: fail closed.
     if (decoded.undecodable) return { action: "abort", category: "unknown-write", reason: "WebSocket message could not be decoded to check it" };
-    const word = cfg.patterns[cat].words.find((w) => wordHit(text, normaliseMessage(w)) || wordHit(req.message!, w));
+    const raw = req.message;
+    const word = cfg.patterns[cat].words.find((w) => wordHit(text, normaliseMessage(w)) || wordHit(raw, w));
     if (word) return { action: "abort", category: cat, reason: `WebSocket message looks like ${cat}`, trigger: word.toLowerCase() };
   }
   return { action: "continue" };

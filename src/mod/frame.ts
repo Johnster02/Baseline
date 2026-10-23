@@ -6,7 +6,7 @@ import { renderProgress, renderSummary } from "../render/terminal";
 
 export type Segment = { text: string; color?: string };
 export type RunSummary = SummaryInput & { runId: string; finishedAt: string; link?: string; localPath?: string };
-export type FrameState = { progress?: Progress; summary?: RunSummary; now: number };
+export type FrameState = { progress?: Progress | undefined; summary?: RunSummary | undefined; now: number };
 
 const SUMMARY_MS = 10 * 60 * 1000;
 
@@ -59,9 +59,8 @@ function fitProgress(lines: string[], maxRows: number): string[] {
 export function frame(s: FrameState, theme: ThemeName, width: number, maxRows: number): Segment[][] {
   const opts = { color: "truecolor" as const, width, now: s.now };
   let lines: string[] = [];
-  const live = s.progress && !s.progress.finishedAt;
-  if (live) {
-    lines = fitProgress(renderProgress(s.progress!, theme, opts), maxRows);
+  if (s.progress && !s.progress.finishedAt) {
+    lines = fitProgress(renderProgress(s.progress, theme, opts), maxRows);
   } else if (s.summary && s.now - Date.parse(s.summary.finishedAt) <= SUMMARY_MS) {
     lines = renderSummary(s.summary, theme, { ...opts, link: s.summary.link, localPath: s.summary.localPath });
     lines = fitRows(lines.filter((l) => l !== ""), maxRows, (l, i) => i === 0 || /pass rate|result|report/i.test(l.replace(/\x1b\[[0-9;]*m/g, "")));

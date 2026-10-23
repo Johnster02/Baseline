@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OwnedTracker, LANDING_WINDOW_MS } from "../src/browser/owned";
@@ -169,11 +169,56 @@ describe("OwnedTracker", () => {
   });
 
   it("shares what it owns with other runners through its file", () => {
-    const file = join(mkdtempSync(join(tmpdir(), "owned-")), "owned.json");
+    const file = join(mkdtempSync(join(tmpdir(), "owned-")), "owned.jsonl");
     const a = new OwnedTracker(file);
     a.add("/orders/" + NEW_ID);
     const b = new OwnedTracker(file);
     expect(b.paths).toContain("/orders/" + NEW_ID);
-    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual(["/orders/" + NEW_ID]);
+    expect(readFileSync(file, "utf8").trim().split("\n").map((l) => JSON.parse(l))).toEqual(["/orders/" + NEW_ID]);
+  });
+
+  it("two runners adding at the same time never lose each other's records (append-only)", () => {
+    const file = join(mkdtempSync(join(tmpdir(), "owned-")), "owned.jsonl");
+    const a = new OwnedTracker(file), b = new OwnedTracker(file);
+    // Both opened before either wrote: a read-merge-write would let the second write drop the first.
+    a.add("/orders/" + NEW_ID);
+    b.add("/orders/01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    const c = new OwnedTracker(file);
+    expect(c.paths.sort()).toEqual(["/orders/" + NEW_ID, "/orders/01ARZ3NDEKTSV4RRFFQ69G5FAV"].sort());
+  });
+});
+
+describe("OwnedTracker across runners and client-side routes", () => {
+  it("a tracker opened earlier sees records another runner's tracker added later", () => {
+    const file = join(mkdtempSync(join(tmpdir(), "owned-")), "owned.jsonl");
+    const early = new OwnedTracker(file);
+    expect(early.paths).toEqual([]);
+    new OwnedTracker(file).add("/orders/" + NEW_ID);
+    const later = new Date(Date.now() + 5000);
+    utimesSync(file, later, later); // a different mtime, without waiting for the clock
+    early.refresh();
+    expect(early.paths).toContain("/orders/" + NEW_ID);
+  });
+
+  it("a client-side landing after a later click (a row in a refreshed list) is not ours", () => {
+    const t = new OwnedTracker();
+    t.clicked();
+    t.wrote(1000);
+    t.seeText(NEW_ID);
+    t.clicked(); // the agent clicks a row the list now shows
+    expect(t.landed(`${SITE}/orders/${NEW_ID}`, 1200, false, { document: false })).toBeUndefined();
+  });
+
+  it("a client-side landing straight after the write, or at the reply's redirect target, is ours", () => {
+    const a = new OwnedTracker();
+    a.clicked();
+    a.wrote(1000);
+    a.seeText(NEW_ID);
+    expect(a.landed(`${SITE}/orders/${NEW_ID}`, 1200, false, { document: false })).toBe(`/orders/${NEW_ID}`);
+    const b = new OwnedTracker();
+    b.wrote(1000);
+    b.seeReplyPath(`/orders/${NEW_ID}`);
+    b.clicked();
+    expect(b.landed(`${SITE}/orders/${NEW_ID}`, 1200, false, { document: false })).toBe(`/orders/${NEW_ID}`);
   });
 });

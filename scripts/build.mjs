@@ -8,8 +8,10 @@ import { join } from "node:path";
 const verify = process.argv.includes("--verify");
 const outRoot = verify ? mkdtempSync(join(tmpdir(), "baseline-build-")) : ".";
 const targets = [
-  { entry: "src/entry.ts", out: "dist/cli.cjs", format: "cjs" },
+  { entry: "src/entry.ts", out: "dist/cli.cjs", format: "cjs", minify: true },
   { entry: "src/browser/client.ts", out: "dist/client.cjs", format: "cjs" },
+  // The guard hooks run on every tool call: their own small bundle, no zod, no command registry.
+  { entry: "src/hooks/entry.ts", out: "dist/hook.cjs", format: "cjs", minify: true },
 ];
 if (existsSync("src/mod/pane.ts")) targets.push({ entry: "src/mod/pane.ts", out: "mod/pane.js", format: "esm" });
 
@@ -22,7 +24,7 @@ const raw = { name: "raw", setup(b) {
 for (const t of targets) {
   await build({ plugins: [raw],
     entryPoints: [t.entry], bundle: true, platform: "node", target: "node20", format: t.format,
-    outfile: join(outRoot, t.out), external: ["playwright", "playwright-core"], legalComments: "none", logLevel: "error",
+    outfile: join(outRoot, t.out), minify: t.minify === true, external: ["playwright", "playwright-core"], legalComments: "none", logLevel: "error",
     banner: t.format === "cjs" ? { js: "/* Baseline engine. Built from src/ by scripts/build.mjs. Do not edit. */" } : undefined,
   });
 }

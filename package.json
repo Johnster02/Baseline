@@ -12,8 +12,10 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:fast": "vitest run --exclude \"test/{guard,runner-script,signin,fixture-app,host}.spec.ts\"",
     "typecheck": "tsc --noEmit",
-    "check": "tsc --noEmit && vitest run && node scripts/build.mjs --verify && (command -v claude >/dev/null && claude plugin test || echo \"claude CLI not found: mod tests skipped\")",
+    "check": "tsc --noEmit && vitest run && node scripts/build.mjs --verify && (command -v claude >/dev/null && claude plugin test || echo \"WARNING: claude CLI not found, mod tests skipped\" >&2)",
     "fixture": "tsx test/fixture-app/run.ts",
     "prepare": "git config core.hooksPath .githooks || true",
     "test:mod": "claude plugin test",
@@ -21,6 +23,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
+    "@vitest/coverage-v8": "5.0.5",
     "esbuild": "^0.28.2",
     "playwright": "^1.64.1",
     "tsx": "^4.23.15",

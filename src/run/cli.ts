@@ -2,75 +2,99 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { register, out, err, io } from "../cli";
 import { checkTarget, describePermissions, loadConfig } from "../config/store";
-import { activeRunDir } from "../browser/runner-script";
+import { activeRunDir, isInside } from "../core/paths";
+import { parseFlags, isOneOf } from "../core/args";
+import { readJsonFile } from "../core/json";
 import { newRun, finishRun } from "./state";
+import { stopHosts } from "../browser/host";
 import { PHASES, updateProgress, readProgress } from "./progress";
-import type { Phase } from "./progress";
 import { sizeRun, SIZES } from "./sizing";
-import type { RunSize } from "./sizing";
 import { commitInfo } from "./commit";
-import { mergeSiteMap, readSiteMap } from "./sitemap";
-import { createdFile } from "../browser/owned";
+import { mergeSiteMap, parseSiteMap, readSiteMap } from "./sitemap";
+import { inputsFileSchema, parse, runFileSchema } from "./schemas";
+import type { RunFile } from "./schemas";
+import { readCreated } from "../browser/owned";
+import { trustedActiveRun } from "../hooks/active-run";
 
-const flag = (args: string[], name: string) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
 const STATUSES = ["pending", "active", "done", "skipped"] as const;
 
-function needRun(args: string[]): string | undefined {
-  const d = activeRunDir(process.cwd(), flag(args, "--run"));
+/** The run a command works on: --run <dir>, else the active run. Same rule for every command. */
+export function runFor(runFlag: string | undefined): string | undefined {
+  return activeRunDir(process.cwd(), runFlag, io.origCwd);
+}
+
+function needRun(runFlag: string | undefined): string | undefined {
+  const d = runFor(runFlag);
   if (!d) err("no active run. Start one with: baseline run new --url <url> --label <label>");
   return d;
 }
 
+const readRun = (runDir: string): RunFile | undefined => readJsonFile<RunFile | undefined>(join(runDir, "run.json"), parse(runFileSchema), undefined);
+
 register("created", "what the run created, from Baseline's own record (agents can't edit it): created [--run <dir>]", (args) => {
-  const runDir = needRun(args);
+  const runDir = needRun(parseFlags(args, {}).values.run);
   if (!runDir) return 2;
-  let list: unknown = [];
-  try { list = JSON.parse(readFileSync(createdFile(runDir), "utf8")); } catch { list = []; }
-  out(JSON.stringify(list, null, 2));
+  out(JSON.stringify(readCreated(runDir), null, 2));
   return 0;
 });
 
-register("run", "run new --url <u> --label <l> [--session <id>] | run finish", (args) => {
-  if (args[0] === "new") {
-    const url = flag(args, "--url"), label = flag(args, "--label");
+register("run", "run new --url <u> --label <l> [--session <id>] [--force] | run finish", (args) => {
+  const { values: f, positionals } = parseFlags(args, { url: { type: "string" }, label: { type: "string" }, session: { type: "string" }, live: { type: "boolean" }, force: { type: "boolean" } });
+  if (positionals[0] === "new") {
+    const url = f.url, label = f.label;
     if (!url || !label) { err("usage: baseline run new --url <url> --label <label> [--session <id>]"); return 2; }
     const cfg = loadConfig(process.cwd());
-    const live = args.includes("--live");
+    const live = f.live === true;
     const target = checkTarget(url, cfg, live);
     if (!target.ok) { err(target.reason === "production" ? "refusing: that URL is marked as production. Start the run with --live to test it." : "refusing: not a full http(s) URL"); return 3; }
+    // One run at a time by default: a second one is only started on purpose.
+    const other = trustedActiveRun(process.cwd());
+    if (other && f.force !== true) {
+      err(`another run is still in progress in this project (${other.runDir}). Finish it first with \`baseline run finish\`, or start this one anyway with --force.`);
+      return 4;
+    }
     // Notes travel in their own field: they are the user's words, never part of what a runner may do.
     const permissions = cfg.runners.map((r) => ({ runner: r.key, ...describePermissions(r, cfg.patterns), notes: r.notes }));
-    const created = newRun(process.cwd(), flag(args, "--session"), { url, label, permissions, live });
+    const created = newRun(process.cwd(), f.session, { url, label, permissions, live });
     out(JSON.stringify(created));
     return 0;
   }
-  if (args[0] === "finish") { finishRun(process.cwd()); out("run finished"); return 0; }
+  if (positionals[0] === "finish") {
+    // Never leave a browser running after the run: close every runner's browser for it now.
+    const finished = finishRun(process.cwd());
+    if (finished) stopHosts(finished);
+    out("run finished");
+    return 0;
+  }
   err("usage: baseline run new|finish");
   return 2;
 });
 
 register("progress", "progress start <pr|quick|full> <agents> | phase <name> <status> [pct] [note] | agent <persona> <doing> | agent-done <persona> | done", (args) => {
-  const runDir = needRun(args);
+  const { values: f, positionals } = parseFlags(args, {});
+  const runDir = needRun(f.run);
   if (!runDir) return 2;
-  const [sub, a, b, c, ...rest] = args.filter((x, i, all) => x !== "--run" && all[i - 1] !== "--run");
-  const run = JSON.parse(readFileSync(join(runDir, "run.json"), "utf8"));
+  const [sub, a, b, c, ...rest] = positionals;
+  const run = readRun(runDir);
+  if (!run) { err(`no readable run.json in ${runDir}`); return 2; }
   switch (sub) {
     case "start":
-      if (!SIZES.includes(a as RunSize)) { err(`size must be one of ${SIZES.join(", ")}`); return 2; }
-      updateProgress(runDir, { runId: run.runId, label: run.label, size: a as RunSize, agents: Number(b) || 0, startedAt: new Date().toISOString() });
+      if (!isOneOf(SIZES, a)) { err(`size must be one of ${SIZES.join(", ")}`); return 2; }
+      updateProgress(runDir, { runId: run.runId, label: run.label, size: a, agents: Number(b) || 0, startedAt: new Date().toISOString() });
       return 0;
     case "phase":
-      if (!PHASES.includes(a as Phase) || !STATUSES.includes(b as (typeof STATUSES)[number])) {
+      if (!isOneOf(PHASES, a) || !isOneOf(STATUSES, b)) {
         err(`phase must be one of ${PHASES.join(", ")}; status one of ${STATUSES.join(", ")}`);
         return 2;
       }
-      updateProgress(runDir, { phase: { name: a as Phase, status: b as (typeof STATUSES)[number], ...(c !== undefined && c !== "" ? { pct: Math.max(0, Math.min(100, Number(c))) } : {}), ...(rest.length ? { note: rest.join(" ") } : {}) } });
+      updateProgress(runDir, { phase: { name: a, status: b, ...(c !== undefined && c !== "" ? { pct: Math.max(0, Math.min(100, Number(c))) } : {}), ...(rest.length ? { note: rest.join(" ") } : {}) } });
       return 0;
     case "agent":
       if (!a || !b) { err("usage: baseline progress agent <persona> <what it is doing>"); return 2; }
       updateProgress(runDir, { agent: { persona: a, doing: [b, c, ...rest].filter(Boolean).join(" ").slice(0, 80) } });
       return 0;
     case "agent-done":
+      if (!a) { err("usage: baseline progress agent-done <persona>"); return 2; }
       updateProgress(runDir, { agentDone: a });
       return 0;
     case "done":
@@ -83,27 +107,29 @@ register("progress", "progress start <pr|quick|full> <agents> | phase <name> <st
 });
 
 register("size", "size the active run from its inputs.json: size --personas a,b [--guide]", async (args) => {
-  const runDir = needRun(args);
+  const { values: f } = parseFlags(args, { personas: { type: "string" }, guide: { type: "boolean" } });
+  const runDir = needRun(f.run);
   if (!runDir) return 2;
-  const inputs = JSON.parse(readFileSync(join(runDir, "inputs.json"), "utf8")) as { items: { ref: { kind: string }; body?: string; changedFiles?: string[] }[] };
-  const personas = (flag(args, "--personas") ?? "").split(",").filter(Boolean);
+  const inputs = readJsonFile(join(runDir, "inputs.json"), parse(inputsFileSchema), undefined);
+  if (!inputs) { err(`no readable inputs.json in ${runDir}. Run: baseline inputs <input...>`); return 2; }
+  const personas = (f.personas ?? "").split(",").filter(Boolean);
   const paths = inputs.items.flatMap((i) => i.changedFiles ?? []);
   const changed = paths.length;
-  const sized = inputs.items.map((i) => ({ kind: i.ref.kind, words: (i.body ?? "").split(/\s+/).filter(Boolean).length, guide: args.includes("--guide") }));
+  const sized = inputs.items.map((i) => ({ kind: i.ref.kind, words: (i.body ?? "").split(/\s+/).filter(Boolean).length, guide: f.guide === true }));
   const info = await commitInfo(process.cwd(), loadConfig(process.cwd()));
   out(JSON.stringify({ ...sizeRun(sized, changed, personas, info.codeRead, paths), changedFiles: changed }));
   return 0;
 });
 
-register("commit", "which commit the code is at and which the site is running: commit [--out <file>]", async (args) => {
-  const runDir = activeRunDir(process.cwd());
-  let runUrl: string | undefined;
-  try { runUrl = runDir ? JSON.parse(readFileSync(join(runDir, "run.json"), "utf8")).url : undefined; } catch { runUrl = undefined; }
+register("commit", "which commit the code is at and which the site is running: commit [--out <file>] [--run <dir>]", async (args) => {
+  const { values: f } = parseFlags(args, { out: { type: "string" } });
+  const runDir = runFor(f.run);
+  const runUrl = runDir ? readRun(runDir)?.url : undefined;
   const info = JSON.stringify(await commitInfo(process.cwd(), loadConfig(process.cwd()), undefined, runUrl));
-  const outFile = flag(args, "--out");
-  if (outFile) {
-    if (!runDir || !resolve(io.origCwd, outFile).startsWith(runDir)) { err("--out must be inside the active run folder"); return 2; }
-    writeFileSync(resolve(io.origCwd, outFile), info);
+  if (f.out) {
+    const target = resolve(io.origCwd, f.out);
+    if (!runDir || !isInside(runDir, target) || resolve(target) === resolve(runDir)) { err("--out must be inside the active run folder"); return 2; }
+    writeFileSync(target, info);
   }
   out(info);
   return 0;
@@ -113,7 +139,8 @@ register("sitemap", "sitemap show | merge <file.json>", (args) => {
   if (args[0] === "show") { out(JSON.stringify(readSiteMap(process.cwd()), null, 2)); return 0; }
   if (args[0] === "merge" && args[1]) {
     let partial;
-    try { partial = JSON.parse(readFileSync(resolve(io.origCwd, args[1]), "utf8")); } catch { err("sitemap file must be JSON: {routes:[{path,title,personas}], notes:[]}"); return 2; }
+    try { partial = parseSiteMap(JSON.parse(readFileSync(resolve(io.origCwd, args[1]), "utf8"))); }
+    catch (e) { err(`sitemap file must be JSON: {routes:[{path,title,personas}], notes:[]} (${e instanceof Error ? e.message : String(e)})`); return 2; }
     const m = mergeSiteMap(process.cwd(), partial);
     out(`site map: ${m.routes.length} routes`);
     return 0;

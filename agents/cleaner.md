@@ -9,8 +9,9 @@ You tidy up after one Baseline acceptance run.
 
 You are given the run folder and the run id. Get the list of what the run created from
 `baseline created --run <runDir>` (`[{ runner, kind, label, url, labelled }]`). That is
-Baseline's own record; `<runDir>/created.json` is only a copy agents can write, so don't trust it
-where the two differ.
+Baseline's own record, kept where agents can't edit it (they can only add to it, through
+`s.created`); `<runDir>/created.jsonl` (one JSON object per line) is only a copy agents can write,
+so don't trust it where the two differ.
 
 - Remove only items whose `label` starts with `Baseline <runId>` and whose `labelled` is true.
   Never anything else, whatever it looks like.
@@ -24,8 +25,8 @@ where the two differ.
   recognises the item by the page the runner landed on when it was made. Delete from the item's
   own page, or from a list with ONLY that item selected: a delete that names any other item is
   refused.
-- Never assume a removal worked: check the item is gone, and read `<runDir>/blocked.json` for
-  entries from your runner. A guard block there means the removal did not happen, whatever the
+- Never assume a removal worked: check the item is gone, and read `<runDir>/blocked.jsonl` (one
+  JSON object per line) for entries from your runner. A guard block there means the removal did not happen, whatever the
   page seemed to show. If the guard blocks the removal, or
   anything looks off, stop for that item and record it, saying which permission would allow it.
 - Never remove members, workspaces, accounts or anything the run did not create.

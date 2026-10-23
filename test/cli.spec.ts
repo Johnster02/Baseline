@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { main } from "../src/cli";
+import { main, register } from "../src/cli";
 
 function capture() {
   const out: string[] = [];
@@ -9,6 +9,11 @@ function capture() {
 }
 
 describe("cli", () => {
+  it("refuses to register a command name twice", () => {
+    register("only-once-test", "x", () => 0);
+    expect(() => register("only-once-test", "y", () => 0)).toThrow(/registered twice/);
+  });
+
   it("prints the manifest version", async () => {
     const c = capture();
     const code = await main(["version"]);

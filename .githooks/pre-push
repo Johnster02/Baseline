@@ -1,2 +1,5 @@
 #!/bin/sh
 node scripts/leak-check.mjs || exit 1
+# Fast checks only; the full test suite runs in CI.
+pnpm -s typecheck || exit 1
+node scripts/build.mjs --verify || exit 1

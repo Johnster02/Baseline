@@ -1,6 +1,6 @@
 # Baseline: open-source acceptance-testing plugin for Claude Code
 
-Status: design, awaiting approval · 2026-10-22 · Author: John Chaplin (with Claude)
+Status: accepted, implemented (see "Decisions since" at the end) · 2026-10-22, updated 2026-10-23 · Author: John Chaplin (with Claude)
 
 ## 1. What it is, and why
 
@@ -250,3 +250,36 @@ emails, tokens or private URLs in the repo).
 - How the progress view is drawn, within 4.2.
 - Packaging, versioning, licence (an open-source licence is expected), README and contributing
   docs.
+
+## Decisions since the design
+
+Changes made while building and reviewing Baseline. Where these and the sections above disagree,
+these win.
+
+- **Commands.** Runs start from the `run` skill (`/baseline:run`), not `/baseline <input>`, and
+  results go to the run's HTML report and terminal summary, not a hub.
+- **Sessions group runs.** Runs live under `.baseline/sessions/<session>/runs/<run>/`; the
+  project's `active-run` pointer is only a hint for the CLI.
+- **Browser host process.** Each runner gets one long-lived browser per run, held by a background
+  host (`baseline browser-host`) on a private Unix socket with a token. Agent scripts talk to it
+  through `baseline script` over IPC using a fixed command list (`src/browser/rpc.ts`). Hosts close
+  when their own run finishes or after an idle spell (paused while an explorer is BLOCKED), never
+  because another run started.
+- **Script sandbox.** Agent scripts run under Node's permission model with an empty environment,
+  read access to their run folder only, write access to their run folder only, and network APIs
+  blocked by a preload. They never hold Playwright objects.
+- **Trusted run state.** Anything the guard relies on lives in the data folder, out of agents'
+  reach: the run's URL and config as of `run new`, the learned page-load requests, the owned and
+  created lists, the blocked log the report reads, and the "finished" marker
+  (`src/core/paths.ts`). The run folder keeps copies agents can read.
+- **Hooks.** A small separate bundle (`dist/hook.cjs`) guards Bash, MCP browser tools, Read/Grep/
+  Glob and Write/Edit. It keeps agents out of the data folder at all times and blocks permission
+  changes, direct site writes and Playwright use while a run is active. It is a second layer; the
+  guard inside the browser session is the first.
+- **Credentials are bound to a site.** Saved passwords carry the origin they were saved for and
+  are only typed there. Browsers and script sandboxes only open for run folders `run new`
+  recorded in the data folder; a second concurrent run needs `--force`, and subagents can't start,
+  finish or sign in runs while one is active.
+- **Threat model.** Agents read untrusted page and ticket text, so prompt injection is in scope.
+  See `docs/permissions.md` for the layers and their limits.
+

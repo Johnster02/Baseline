@@ -1,17 +1,15 @@
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { closeSync, openSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
-import type { Counts } from "../findings/counts";
+import type { z } from "zod";
 import { emptyCounts } from "../findings/counts";
+import { readJsonFile, writeJsonAtomic } from "../core/json";
 import { estimatePct } from "./estimate";
-import type { RunSize } from "./sizing";
+import { parse, progressFileSchema } from "./schemas";
 
 export const PHASES = ["gather", "read-code", "explore", "verdicts", "refute", "clean-up"] as const;
 export type Phase = (typeof PHASES)[number];
-export type PhaseState = { name: Phase; status: "pending" | "active" | "done" | "skipped"; pct?: number; note?: string; since?: string; pctAt?: string };
-export type Progress = {
-  runId: string; label: string; size: RunSize; agents: number; startedAt: string;
-  phases: PhaseState[]; active: { persona: string; doing: string }[]; counts: Counts; finishedAt?: string;
-};
+export type Progress = z.infer<typeof progressFileSchema>;
+export type PhaseState = Progress["phases"][number];
 export type ProgressPatch = Partial<Pick<Progress, "runId" | "label" | "size" | "agents" | "counts" | "startedAt" | "finishedAt">> & {
   phase?: PhaseState; agent?: { persona: string; doing: string }; agentDone?: string;
 };
@@ -19,24 +17,45 @@ export type ProgressPatch = Partial<Pick<Progress, "runId" | "label" | "size" | 
 const file = (runDir: string) => join(runDir, "progress.json");
 
 export function readProgress(runDir: string): Progress | undefined {
-  try { return JSON.parse(readFileSync(file(runDir), "utf8")); } catch { return undefined; }
+  return readJsonFile<Progress | undefined>(file(runDir), parse(progressFileSchema), undefined);
 }
 
-/** Atomic: written to a temp file and renamed, so the live pane never reads half a file. */
+const LOCK_WAIT_MS = 2000, LOCK_STALE_MS = 5000;
+const sleep = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+/** Parallel agents report at once: a lock file makes each read-modify-write whole, so none is lost.
+ *  A lock left by a killed process goes stale; after waiting LOCK_WAIT_MS we go ahead anyway. */
+function withLock<T>(path: string, fn: () => T): T {
+  const lock = path + ".lock";
+  const until = Date.now() + LOCK_WAIT_MS;
+  let fd: number | undefined;
+  while (fd === undefined) {
+    try { fd = openSync(lock, "wx"); } catch {
+      try { if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) { rmSync(lock, { force: true }); continue; } } catch { continue; }
+      if (Date.now() > until) break;
+      sleep(10);
+    }
+  }
+  try { return fn(); } finally {
+    if (fd !== undefined) { closeSync(fd); rmSync(lock, { force: true }); }
+  }
+}
+
+/** Locked, and atomic (temp file and rename), so the live pane never reads half a file. */
 export function updateProgress(runDir: string, patch: ProgressPatch): Progress {
-  const p: Progress = readProgress(runDir) ?? {
-    runId: "", label: "", size: "quick", agents: 0, startedAt: new Date().toISOString(),
-    phases: PHASES.map((name) => ({ name, status: "pending" })), active: [], counts: emptyCounts(),
-  };
-  const { phase, agent, agentDone, ...rest } = patch;
-  Object.assign(p, rest);
-  if (phase) p.phases = p.phases.map((x) => (x.name === phase.name ? nextPhase(x, phase, p.size) : x));
-  if (agent) p.active = [...p.active.filter((a) => a.persona !== agent.persona), agent];
-  if (agentDone) p.active = p.active.filter((a) => a.persona !== agentDone);
-  const tmp = `${file(runDir)}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(p, null, 2));
-  renameSync(tmp, file(runDir));
-  return p;
+  return withLock(file(runDir), () => {
+    const p: Progress = readProgress(runDir) ?? {
+      runId: "", label: "", size: "quick", agents: 0, startedAt: new Date().toISOString(),
+      phases: PHASES.map((name) => ({ name, status: "pending" as const })), active: [], counts: emptyCounts(),
+    };
+    const { phase, agent, agentDone, ...rest } = patch;
+    Object.assign(p, rest);
+    if (phase) p.phases = p.phases.map((x) => (x.name === phase.name ? nextPhase(x, phase, p.size) : x));
+    if (agent) p.active = [...p.active.filter((a) => a.persona !== agent.persona), agent];
+    if (agentDone) p.active = p.active.filter((a) => a.persona !== agentDone);
+    writeJsonAtomic(file(runDir), p);
+    return p;
+  });
 }
 
 /** Keep when an active phase started and never let its bar go backwards: a reported pct counts

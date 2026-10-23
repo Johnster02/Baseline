@@ -4,6 +4,7 @@ import "./browser/runner-script";
 import "./browser/host";
 import "./browser/signin-cli";
 import "./inputs/cli";
+import "./hooks/cli";
 import "./run/cli";
 import "./findings/cli";
 import "./render/cli";

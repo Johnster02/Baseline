@@ -1,5 +1,6 @@
 import { main, io } from "./cli";
 import { findProjectRoot } from "./project";
+import { errMsg } from "./core/json";
 import "./commands";
 
 // Agents may call baseline from inside a run folder. Work from the project root, but remember
@@ -10,8 +11,8 @@ if (root && root !== process.cwd()) process.chdir(root);
 
 main(process.argv.slice(2)).then(
   (code) => process.exit(code),
-  (e) => {
-    process.stderr.write(String((e && e.message) || e) + "\n");
+  (e: unknown) => {
+    process.stderr.write(errMsg(e) + "\n");
     process.exit(1);
   },
 );

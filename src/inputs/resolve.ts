@@ -1,7 +1,8 @@
 import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 
-export type InputKind = "github-pr" | "github-issue" | "jira" | "linear" | "file" | "folder" | "text" | "url";
+export const INPUT_KINDS = ["github-pr", "github-issue", "jira", "linear", "file", "folder", "text", "url"] as const;
+export type InputKind = (typeof INPUT_KINDS)[number];
 export type InputRef = { kind: InputKind; ref: string };
 export type Ambiguous = { ambiguous: string; options: InputKind[] };
 
@@ -15,9 +16,9 @@ function one(arg: string, ctx: { trackers: { jira: boolean; linear: boolean }; c
     if (u.hostname === "github.com" && /\/pull\/\d+/.test(u.pathname)) return { kind: "github-pr", ref: a };
     if (u.hostname === "github.com" && /\/issues\/\d+/.test(u.pathname)) return { kind: "github-issue", ref: a };
     const jira = u.hostname.endsWith(".atlassian.net") && u.pathname.match(/\/browse\/([A-Z][A-Z0-9]+-\d+)/);
-    if (jira) return { kind: "jira", ref: jira[1]! };
+    if (jira && jira[1]) return { kind: "jira", ref: jira[1] };
     const lin = u.hostname === "linear.app" && u.pathname.match(/\/issue\/([A-Z][A-Z0-9]+-\d+)/);
-    if (lin) return { kind: "linear", ref: lin[1]! };
+    if (lin && lin[1]) return { kind: "linear", ref: lin[1] };
     return { kind: "url", ref: a };
   }
   if (/^#?\d+$/.test(a)) return { kind: "github-pr", ref: a.replace(/^#/, "") };

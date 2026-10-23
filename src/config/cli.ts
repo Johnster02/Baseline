@@ -1,9 +1,15 @@
 import { register, out, err, io } from "../cli";
+import { z } from "zod";
 import { CATEGORIES, DEPTHS, THEMES, projectConfigSchema } from "./schema";
-import type { Category, Depth } from "./schema";
+import { isOneOf } from "../core/args";
 import { checkTarget, describePermissions, ensureGitignored, loadConfig, newRunner, saveConfig } from "./store";
-import { dataDir, removeSecret, setSecret } from "./secrets";
+import { dataDir, originOf, removeSecret, setSecret } from "./secrets";
 import { secretForm } from "./secret-form";
+
+/** What `config set patterns` accepts: any subset of categories, each with optional lists. */
+const patternSetInput = z.object({ urls: z.array(z.string()).optional(), words: z.array(z.string()).optional() });
+const patternsInput = z.object({ email: patternSetInput, auth: patternSetInput, delete: patternSetInput, finance: patternSetInput }).partial();
+const credentialsInput = z.object({ username: z.string(), password: z.string() });
 
 const SETTABLE = ["patterns", "readPosts", "productionUrls", "lastUrl", "theme", "versionProbe", "checklistExtra", "publish"] as const;
 
@@ -42,26 +48,28 @@ register("config", "show | describe | add-runner | remove-runner | depth | allow
         return 2;
       }
       if (cfg.runners.some((r) => r.key === key)) { err(`runner "${key}" already exists`); return 2; }
-      cfg.runners.push(newRunner(key, persona, kind === "form" ? { kind, loginUrl: loginUrl! } : { kind }));
+      cfg.runners.push(newRunner(key, persona, kind === "form" && loginUrl ? { kind, loginUrl } : { kind: "session" as const }));
       saveConfig(dir, cfg);
       ensureGitignored(dir);
       out(`added runner ${key} (look only)`);
       return 0;
     }
     case "remove-runner": {
+      const key = a[0];
       const before = cfg.runners.length;
-      cfg.runners = cfg.runners.filter((r) => r.key !== a[0]);
-      if (cfg.runners.length === before) { err(`no runner "${a[0]}"`); return 2; }
+      cfg.runners = cfg.runners.filter((r) => r.key !== key);
+      if (!key || cfg.runners.length === before) { err(`no runner "${key ?? ""}"`); return 2; }
       saveConfig(dir, cfg);
-      removeSecret(dataDir(), dir, a[0]!);
-      out(`removed runner ${a[0]} and its saved sign-in`);
+      removeSecret(dataDir(), dir, key);
+      out(`removed runner ${key} and its saved sign-in`);
       return 0;
     }
     case "depth": {
       const r = runnerOr(cfg, a[0]);
       if (!r) return 2;
-      if (!DEPTHS.includes(a[1] as Depth)) { err(`depth must be one of ${DEPTHS.join(", ")}`); return 2; }
-      r.depth = a[1] as Depth;
+      const depth = a[1];
+      if (!isOneOf(DEPTHS, depth)) { err(`depth must be one of ${DEPTHS.join(", ")}`); return 2; }
+      r.depth = depth;
       saveConfig(dir, cfg);
       out(`${r.key} depth: ${r.depth}`);
       return 0;
@@ -70,8 +78,8 @@ register("config", "show | describe | add-runner | remove-runner | depth | allow
     case "deny": {
       const r = runnerOr(cfg, a[0]);
       if (!r) return 2;
-      const c = a[1] as Category;
-      if (!CATEGORIES.includes(c)) { err(`category must be one of ${CATEGORIES.join(", ")}`); return 2; }
+      const c = a[1];
+      if (!isOneOf(CATEGORIES, c)) { err(`category must be one of ${CATEGORIES.join(", ")}`); return 2; }
       r.allow = sub === "allow" ? [...new Set([...r.allow, c])] : r.allow.filter((x) => x !== c);
       saveConfig(dir, cfg);
       out(`${r.key} ${sub === "allow" ? "may now" : "may no longer"}: ${c}`);
@@ -98,7 +106,7 @@ register("config", "show | describe | add-runner | remove-runner | depth | allow
     }
     case "set": {
       const [field, value] = a;
-      if (!SETTABLE.includes(field as (typeof SETTABLE)[number]) || value === undefined) {
+      if (!isOneOf(SETTABLE, field) || value === undefined) {
         err(`usage: baseline config set <${SETTABLE.join("|")}> <json or text> [--replace]`);
         return 2;
       }
@@ -106,19 +114,20 @@ register("config", "show | describe | add-runner | remove-runner | depth | allow
       if (/^\s*[[{]/.test(value) || value === "true" || value === "false") {
         try { parsed = JSON.parse(value); } catch { err(`${field} must be valid JSON`); return 2; }
       }
-      if (field === "theme" && !THEMES.includes(parsed as never)) { err(`theme must be one of ${THEMES.join(", ")}`); return 2; }
+      if (field === "theme" && !isOneOf(THEMES, parsed)) { err(`theme must be one of ${THEMES.join(", ")}`); return 2; }
       // Lists and patterns add to what is saved (re-running setup never drops a protection); --replace replaces.
       const replace = a.includes("--replace");
-      if (!replace && Array.isArray(parsed) && Array.isArray((cfg as Record<string, unknown>)[field])) {
-        parsed = [...new Set([...((cfg as Record<string, unknown>)[field] as unknown[]), ...parsed])];
+      const current: unknown = cfg[field];
+      if (!replace && Array.isArray(parsed) && Array.isArray(current)) {
+        parsed = [...new Set([...current, ...parsed])];
       }
-      if (!replace && field === "patterns" && parsed && typeof parsed === "object") {
-        const cur = cfg.patterns as Record<string, { urls: string[]; words: string[] }>;
-        const add = parsed as Record<string, { urls?: string[]; words?: string[] }>;
-        parsed = Object.fromEntries(Object.keys(cur).map((k) => [k, {
-          urls: [...new Set([...cur[k]!.urls, ...(add[k]?.urls ?? [])])],
-          words: [...new Set([...cur[k]!.words, ...(add[k]?.words ?? [])])],
-        }]));
+      if (!replace && field === "patterns") {
+        const add = patternsInput.safeParse(parsed);
+        if (!add.success) { err(`patterns must look like {"email":{"urls":[...],"words":[...]}, ...}: ${add.error.issues[0]?.message ?? "invalid"}`); return 2; }
+        parsed = Object.fromEntries(Object.entries(cfg.patterns).map(([k, cur]) => {
+          const extra = add.data[k as keyof typeof add.data];
+          return [k, { urls: [...new Set([...cur.urls, ...(extra?.urls ?? [])])], words: [...new Set([...cur.words, ...(extra?.words ?? [])])] }];
+        }));
       }
       const next = projectConfigSchema.safeParse({ ...cfg, [field]: parsed });
       if (!next.success) { err(next.error.issues.map((i) => i.message).join("; ")); return 2; }
@@ -129,18 +138,23 @@ register("config", "show | describe | add-runner | remove-runner | depth | allow
     case "secret": {
       const r = runnerOr(cfg, a[0]);
       if (!r) return 2;
+      // The site these details are for: they are only ever typed there (see signin).
+      const urlAt = a.indexOf("--url");
+      const origin = originOf(urlAt >= 0 ? a[urlAt + 1] : cfg.lastUrl);
+      if (!origin) { err("which site are these sign-in details for? Pass --url <test site URL> (or set lastUrl first)."); return 2; }
       // The default: a one-time local form, so the password never passes through the chat.
       if (a.includes("--form")) {
-        const res = await secretForm({ data: dataDir(), projectDir: dir, runner: r.key });
+        const res = await secretForm({ data: dataDir(), projectDir: dir, runner: r.key, origin });
         if (!res.ok) { err("The form closed without saving. Run it again when ready."); return 1; }
-        out(`saved sign-in details for ${r.key}`);
+        out(`saved sign-in details for ${r.key} (typed only on ${origin})`);
         return 0;
       }
       // For scripts and CI: JSON on stdin, so it never sits in shell history or argv.
-      let creds: { username?: unknown; password?: unknown };
-      try { creds = JSON.parse(io.readStdin()); } catch { err("stdin must be JSON: {\"username\":..., \"password\":...}"); return 2; }
-      if (typeof creds.username !== "string" || typeof creds.password !== "string") { err("stdin must be {\"username\":..., \"password\":...}"); return 2; }
-      setSecret(dataDir(), dir, r.key, { username: creds.username as string, password: creds.password as string });
+      let raw: unknown;
+      try { raw = JSON.parse(io.readStdin()); } catch { err("stdin must be JSON: {\"username\":..., \"password\":...}"); return 2; }
+      const creds = credentialsInput.safeParse(raw);
+      if (!creds.success) { err("stdin must be {\"username\":..., \"password\":...}"); return 2; }
+      setSecret(dataDir(), dir, r.key, { ...creds.data, origin });
       out(`saved sign-in details for ${r.key}`);
       return 0;
     }

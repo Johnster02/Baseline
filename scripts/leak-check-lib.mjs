@@ -7,6 +7,7 @@ import { existsSync, readFileSync } from "node:fs";
  * @returns {{file: string, line: number, term: string}[]}
  */
 export function leakCheck(files, bannedTermsFile) {
+  // No list means nothing to check against: the caller warns (scripts/leak-check.mjs).
   if (!existsSync(bannedTermsFile)) return [];
   const terms = readFileSync(bannedTermsFile, "utf8")
     .split("\n").map((t) => t.trim().toLowerCase()).filter(Boolean);

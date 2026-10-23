@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveInputs } from "../src/inputs/resolve";
-import { fetchInput } from "../src/inputs/fetch";
+import { fetchInput, insecureTrackerWarning } from "../src/inputs/fetch";
 import { adfToText } from "../src/inputs/jira";
 
 const ctx = (jira = false, linear = false, cwd = mkdtempSync(join(tmpdir(), "in-"))) => ({ trackers: { jira, linear }, cwd });
@@ -43,6 +43,18 @@ describe("resolveInputs", () => {
 });
 
 describe("fetchInput", () => {
+  it("a tracker response of the wrong shape gives a readable error, not a crash later", async () => {
+    const http = async () => ({ ok: true, status: 200, json: async () => ({ data: { issue: { identifier: 7, title: null } } }) });
+    await expect(fetchInput({ kind: "linear", ref: "ENG-7" }, { http, trackers: { linear: { apiKey: "k" } } })).rejects.toThrow(/Linear sent a response/);
+    const exec = async () => JSON.stringify({ body: "no title" });
+    await expect(fetchInput({ kind: "github-issue", ref: "9" }, { exec })).rejects.toThrow(/gh issue view/);
+  });
+
+  it("warns when the Jira token would go over plain http", () => {
+    expect(insecureTrackerWarning({ jira: { baseUrl: "http://jira.local", email: "", token: "t" } })).toMatch(/unencrypted/);
+    expect(insecureTrackerWarning({ jira: { baseUrl: "https://acme.atlassian.net", email: "", token: "t" } })).toBeUndefined();
+  });
+
   it("GitHub PR returns changed files and head sha via gh", async () => {
     const exec = async (cmd: string, args: string[]) => {
       expect(cmd).toBe("gh");

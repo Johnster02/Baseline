@@ -1,10 +1,15 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import type { ThemeName } from "../config/schema";
 import type { InputRef } from "../inputs/resolve";
-import type { BlockedEntry } from "../browser/session";
 import type { CommitInfo } from "../run/commit";
 import type { RunSize } from "../run/sizing";
+import { readJsonFile, readJsonl } from "../core/json";
+import type { Parse } from "../core/json";
+import { isInside, trustedRunPath } from "../core/paths";
+import { readTrustedRun } from "../core/trusted-run";
+import { blockedEntrySchema, cleanupFileSchema, commitFileSchema, inputsFileSchema, parse, progressFileSchema, runFileSchema, runnersFileSchema } from "../run/schemas";
+import type { BlockedRecord } from "../run/schemas";
 import type { Counts } from "../findings/counts";
 import { countRun } from "../findings/counts";
 import { filterFindings } from "../findings/filter";
@@ -17,11 +22,13 @@ import CSS from "../report/style.css?raw";
 export type RunRecord = {
   runId: string; label: string; inputs: InputRef[]; url: string; size: RunSize; agents: number;
   startedAt: string; durationMin: number; commit: CommitInfo;
-  permissions: { runner: string; can: string[]; cannot: string[]; notes?: string[] }[];
-  findings: Finding[]; other: Finding[]; otherHidden: number; skipped: BlockedEntry[]; counts: Counts;
+  permissions: { runner: string; can: string[]; cannot: string[]; notes?: string[] | undefined }[];
+  findings: Finding[]; other: Finding[]; otherHidden: number; skipped: BlockedRecord[]; counts: Counts;
+  /** Findings in findings.json that failed validation and were left out, with why. */
+  rejected: { index: number; id?: string; reason: string }[];
   unreadLinks: string[];
   /** Each runner's sign-in status this run. */
-  runners: { key: string; ok: boolean; error?: string }[];
+  runners: { key: string; ok: boolean; error?: string | undefined }[];
   /** Things the run created and could not remove. */
   leftBehind: { label: string; note: string }[];
   /** Screenshot path (relative to the run folder) to base64 JPEG/PNG. */
@@ -29,7 +36,8 @@ export type RunRecord = {
 };
 
 const SHOT_BUDGET = 13 * 1024 * 1024;
-const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+const ENTITIES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => ENTITIES[c] ?? c);
 const group = (v: string) => (isConflict(v as Finding["verdict"]) ? "conflict" : v);
 /** A problem someone should act on. Unverified and skipped are gaps in the run, not problems. */
 const needsAttention = (f: Finding) => isConflict(f.verdict) || f.verdict === "product" || f.verdict === "unspecced";
@@ -42,29 +50,64 @@ const ALLOW_HINT: Record<string, string> = {
   live: "allow live testing", "unknown-write": "give this runner create depth, or list the path as a read-only POST",
 };
 
-function readJson<T>(p: string, fallback: T): T {
-  try { return JSON.parse(readFileSync(p, "utf8")); } catch { return fallback; }
+/** A run log: JSONL now, a JSON array in older runs. Records that fail `check` are skipped. */
+function readLog<T>(paths: string[], check: Parse<T>): T[] {
+  for (const p of paths) {
+    if (!existsSync(p)) continue;
+    let text = "";
+    try { text = readFileSync(p, "utf8"); } catch { continue; }
+    if (text.trimStart().startsWith("[")) {
+      try {
+        const arr: unknown = JSON.parse(text);
+        return Array.isArray(arr) ? arr.flatMap((v) => { try { return [check(v)]; } catch { return []; } }) : [];
+      } catch { return []; }
+    }
+    return readJsonl(p, check);
+  }
+  return [];
+}
+
+/** Why a finding failed validation, short enough for the report. */
+function rejectReason(raw: unknown, index: number): { index: number; id?: string; reason: string } | undefined {
+  const r = findingSchema.safeParse(raw);
+  if (r.success) return undefined;
+  const id = raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : undefined;
+  const reason = r.error.issues.slice(0, 3).map((i) => `${i.path.join(".") || "finding"}: ${i.message}`).join("; ");
+  return { index, ...(id ? { id } : {}), reason };
 }
 
 /** Everything the report needs about one run, read from its folder. Findings are filtered here. */
 export function buildRunRecord(runDir: string): RunRecord {
-  const run = readJson<{ runId: string; url: string; label: string; startedAt: string; permissions?: RunRecord["permissions"] }>(join(runDir, "run.json"), { runId: "", url: "", label: "", startedAt: "" });
-  const inputs = readJson<{ items: { ref: InputRef }[]; unreadLinks?: string[] }>(join(runDir, "inputs.json"), { items: [] });
-  const progress = readJson<{ size?: RunSize; agents?: number; startedAt?: string; finishedAt?: string }>(join(runDir, "progress.json"), {});
-  const commit = readJson<CommitInfo>(join(runDir, "commit.json"), { codeRead: false, mismatch: false });
-  const raw = readJson<unknown[]>(join(runDir, "findings.json"), []);
-  const parsed = raw.map((r) => findingSchema.safeParse(r)).filter((r) => r.success).map((r) => r.data!);
+  const run = readJsonFile(join(runDir, "run.json"), parse(runFileSchema), { runId: "", url: "", label: "", startedAt: "", permissions: [], live: false });
+  const inputs = readJsonFile(join(runDir, "inputs.json"), parse(inputsFileSchema), { items: [], unreadLinks: [] });
+  const progress = readJsonFile(join(runDir, "progress.json"), (v) => progressFileSchema.partial().parse(v), {});
+  const commit: CommitInfo = readJsonFile(join(runDir, "commit.json"), parse(commitFileSchema), { codeRead: false, mismatch: false });
+  const raw = readJsonFile<unknown[]>(join(runDir, "findings.json"), (v) => (Array.isArray(v) ? v : []), []);
+  const parsed = raw.flatMap((r) => { const p = findingSchema.safeParse(r); return p.success ? [p.data] : []; });
+  const rejected = raw.flatMap((r, i) => { const x = rejectReason(r, i); return x ? [x] : []; });
   const rel = (p: string) => (isAbsolute(p) ? relative(runDir, p) : p);
   for (const f of parsed) if (f.observed) f.observed.shots = f.observed.shots.map(rel);
   const res = filterFindings(parsed, { otherCap: 5, codeRead: commit.codeRead });
   const order = (a: Finding, b: Finding) => Number(needsAttention(b)) - Number(needsAttention(a)) || severityRank(a.severity) - severityRank(b.severity);
   const findings = [...res.kept].sort(order);
-  const skipped = readJson<BlockedEntry[]>(join(runDir, "blocked.json"), []);
+  // A run Baseline recorded: only its own blocked log counts (agents can write the run folder's
+  // copy, so it could add or hide entries). Older runs without a record fall back to that copy.
+  // (Paths built without creating anything: reading a report shouldn't.)
+  let trustedLog: string | undefined;
+  try { trustedLog = readTrustedRun(runDir) ? join(trustedRunPath(runDir), "blocked.jsonl") : undefined; } catch { trustedLog = undefined; }
+  const skipped = readLog(trustedLog ? [trustedLog] : [join(runDir, "blocked.jsonl"), join(runDir, "blocked.json")], parse(blockedEntrySchema));
   const shots: Record<string, string> = {};
   const want = new Set([...findings, ...res.other].flatMap((f) => f.observed?.shots ?? []));
+  // base64 is 4/3 of the file: stop reading once the inline budget is spent.
+  let left = SHOT_BUDGET;
   for (const p of want) {
     const abs = join(runDir, p);
-    if (!abs.startsWith(runDir) || !existsSync(abs)) continue;
+    if (!isInside(runDir, abs) || !existsSync(abs)) continue;
+    let size = 0;
+    try { size = statSync(abs).size; } catch { continue; }
+    const encoded = Math.ceil(size / 3) * 4;
+    if (encoded > left) continue;
+    left -= encoded;
     shots[p] = readFileSync(abs).toString("base64");
   }
   const start = Date.parse(progress.startedAt ?? run.startedAt), end = Date.parse(progress.finishedAt ?? "");
@@ -72,10 +115,10 @@ export function buildRunRecord(runDir: string): RunRecord {
     runId: run.runId, label: run.label, inputs: inputs.items.map((i) => i.ref), url: run.url,
     size: progress.size ?? "quick", agents: progress.agents ?? 0, startedAt: run.startedAt,
     durationMin: Number.isFinite(end - start) ? Math.round(((end - start) / 60000) * 10) / 10 : 0,
-    commit, permissions: run.permissions ?? [], findings, other: res.other, otherHidden: res.otherHidden,
-    skipped, counts: countRun(findings, skipped), unreadLinks: inputs.unreadLinks ?? [], shots,
-    runners: readJson<RunRecord["runners"]>(join(runDir, "runners.json"), []),
-    leftBehind: readJson<{ label: string; removed: boolean; note?: string }[]>(join(runDir, "cleanup.json"), [])
+    commit, permissions: run.permissions, findings, other: res.other, otherHidden: res.otherHidden,
+    skipped, rejected, counts: countRun(findings, skipped), unreadLinks: inputs.unreadLinks, shots,
+    runners: readJsonFile(join(runDir, "runners.json"), parse(runnersFileSchema), []),
+    leftBehind: readJsonFile(join(runDir, "cleanup.json"), parse(cleanupFileSchema), [])
       .filter((c) => !c.removed).map((c) => ({ label: c.label, note: c.note ?? "" })),
   };
 }
@@ -138,7 +181,7 @@ function runHTML(r: RunRecord, hidden: boolean): string {
   const legend = (["conflict", "product", "unspecced", "unverified", "match"] as const).map((g) => {
     const n = r.findings.filter((f) => group(f.verdict) === g).length;
     const v = g === "conflict" ? "--v-specbuilt" : VERDICT_VAR[g];
-    return `<button class="lg${n ? "" : " zero"}" type="button" ${g === "match" ? "data-passes" : `data-filter="${g}"`} aria-pressed="false" style="--c:var(${v})"><i class="sw"></i><span class="t">${g === "conflict" ? "Conflicts" : g[0]!.toUpperCase() + g.slice(1)}</span><span class="n">${n}</span></button>`;
+    return `<button class="lg${n ? "" : " zero"}" type="button" ${g === "match" ? "data-passes" : `data-filter="${g}"`} aria-pressed="false" style="--c:var(${v})"><i class="sw"></i><span class="t">${g === "conflict" ? "Conflicts" : g.charAt(0).toUpperCase() + g.slice(1)}</span><span class="n">${n}</span></button>`;
   }).join("");
   const warn = [
     !r.commit.codeRead ? `<p class="warn">Code was not read for this run: findings compare the spec with the site only.</p>` : "",
@@ -154,10 +197,13 @@ function runHTML(r: RunRecord, hidden: boolean): string {
     `<div class="row"><span><b>${esc(x.key)}</b></span><span>${x.ok ? "signed in" : "not signed in"}</span><span class="k">${esc(x.error ?? "")}</span></div>`).join("")}</div></section>` : "";
   const leftHTML = (r.leftBehind ?? []).length ? `<section class="sec wp" style="--w:6"><h2>Left behind · ${r.leftBehind.length}</h2><div class="rows">${r.leftBehind.map((x) =>
     `<div class="row"><span><b>${esc(x.label)}</b></span><span>${esc(x.note)}</span><span class="k">Remove it by hand on the site.</span></div>`).join("")}</div></section>` : "";
+  const rejected = r.rejected ?? [];
+  const rejectedHTML = rejected.length ? `<section class="sec wp" style="--w:7"><h2>Findings left out · ${rejected.length}</h2><p class="notice">These entries in findings.json were not valid findings, so they are not counted above.</p><div class="rows">${rejected.map((x) =>
+    `<div class="row"><span><b>${esc(x.id ?? `#${x.index + 1}`)}</b></span><span class="k">${esc(x.reason)}</span></div>`).join("")}</div></section>` : "";
   const unread = r.unreadLinks.length ? `<section class="sec wp" style="--w:7"><h2>Links that could not be read</h2><div class="rows">${r.unreadLinks.map((l) => `<div class="row"><span class="k">${esc(l)}</span></div>`).join("")}</div></section>` : "";
   return `<section class="run" data-run="${esc(r.runId)}"${hidden ? " hidden" : ""}>
 <header class="case wp" style="--w:0"><div><h1>${esc(r.label)}</h1><div class="tele"><span>run <b>${esc(r.runId)}</b></span><span>${esc(r.size)} · <b>${esc(Number(r.agents) || 0)} agents</b></span><span>${r.durationMin}m</span><span>${esc(r.url)}${r.commit.commitRead ? ` @ <b>${esc(r.commit.commitRead)}</b>` : ""}</span></div></div><span class="result">Complete</span></header>
-${warn}
+${warn}${rejected.length ? `<p class="warn">${rejected.length} finding${rejected.length === 1 ? " was" : "s were"} not valid and left out. See “Findings left out” below.</p>` : ""}
 <div class="summary wp" style="--w:1"><div class="block">${attention
     ? `<div class="count"><b>${attention}</b><span>need a look: ${gotoIds(issues)}<br>${r.counts.passRate === null ? "nothing verified yet" : `${r.counts.passRate}% pass · ${r.counts.checked} verified`}</span></div>`
     : `<div class="count clear"><b>All clear</b><span>no issues found · ${r.counts.passRate === null ? "nothing verified on the site" : `${r.counts.passed} of ${r.counts.checked} checked on the site passed`}</span></div>`}
@@ -173,7 +219,7 @@ ${unchecked.length ? `<p class="unchecked">${unchecked.length} not checked on th
 <div class="tools-r"><span class="readout data"><b>${open.length}</b> shown</span><input class="search" type="search" placeholder="Search findings" aria-label="Search findings"></div></div>
 <div class="list wp" style="--w:3;${idWidth(r.findings)}">${open.length ? open.map((f, i) => findingHTML(f, r, i, budget)).join("") : `<p class="empty">${passes.length ? "No issues found." : "No findings for this run."}</p>`}</div>
 ${passes.length ? `<details class="sec fold passes wp" style="--w:4"><summary><h2>Passed · ${passes.length}</h2>${TOG}</summary><div class="plist" style="${idWidth(r.findings)}">${passes.map((f, i) => findingHTML(f, r, i, budget)).join("")}</div></details>` : ""}
-${runnersHTML}${leftHTML}${otherHTML}${skippedHTML}${permHTML}${unread}
+${runnersHTML}${leftHTML}${otherHTML}${skippedHTML}${rejectedHTML}${permHTML}${unread}
 </section>`;
 }
 

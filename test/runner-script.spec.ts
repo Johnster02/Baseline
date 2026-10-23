@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -37,10 +37,10 @@ function project() {
     mkdirSync(join(sp, ".."), { recursive: true });
     writeFileSync(sp, JSON.stringify({ cookies: [{ name: "sid", value: "ok", domain: new URL(f.url).hostname, path: "/", expires: -1, httpOnly: true, secure: false, sameSite: "Lax" }], origins: [] }));
   }
-  const runDir = join(proj, ".baseline", "runs", "r-test");
-  mkdirSync(runDir, { recursive: true });
-  writeFileSync(join(runDir, "run.json"), JSON.stringify({ runId: "r-test", url: f.url }));
-  return { proj, env, runDir };
+  // A real run: Baseline only opens browsers for runs it recorded starting.
+  const started = cli(["run", "new", "--url", f.url, "--label", "test"]);
+  const runDir = (JSON.parse(started.stdout) as { runDir: string }).runDir;
+  return { proj, env, runDir, cli };
 }
 
 const runScript = (p: ReturnType<typeof project>, body: string, extra: string[] = ["--run", p.runDir]) =>
@@ -93,18 +93,46 @@ describe("baseline script (browser in the parent, script talks over IPC)", () =>
     expect(r.stdout).toContain("OK");
   });
 
-  it("keeps one browser per runner: the next script starts where the last one left off, faster", async () => {
+  it("keeps one browser per runner: the next script starts where the last one left off", async () => {
     const p = project();
     writeFileSync(join(p.proj, ".baseline", "active-run"), p.runDir);
-    const first = Date.now();
+    const hostPids = () => readdirSync(join(p.env.BASELINE_DATA as string, "hosts")).filter((x) => /^[0-9a-f]{16}\.json$/.test(x))
+      .map((x) => JSON.parse(readFileSync(join(p.env.BASELINE_DATA as string, "hosts", x), "utf8")).pid);
     const a = await runScript(p, `const s = await B.open(); await s.goto("/cart"); await s.close();`);
-    const firstMs = Date.now() - first;
     expect(a.stderr).toBe("");
-    const second = Date.now();
+    const first = hostPids();
+    expect(first).toHaveLength(1);
     const b = await runScript(p, `const s = await B.open(); console.log("AT " + new URL(await s.url()).pathname); await s.close();`);
-    const secondMs = Date.now() - second;
     expect(b.stdout).toContain("AT /cart");
-    expect(secondMs).toBeLessThan(firstMs);
+    expect(hostPids()).toEqual(first);
+  });
+
+  it("a script that never calls close(), or throws first, still exits", async () => {
+    const p = project();
+    const started = Date.now();
+    const r = await runScript(p, `const s = await B.open(); await s.goto("/cart"); console.log("DONE");`);
+    expect(r.stdout).toContain("DONE");
+    expect(r.code).toBe(0);
+    const p2 = project();
+    writeFileSync(join(p2.proj, ".baseline", "active-run"), p2.runDir);
+    const file = join(p2.runDir, "throws.cjs");
+    writeFileSync(file, `const B = require("baseline"); B.open().then(() => { throw new Error("boom"); });`);
+    const c = spawn("node", [join(ROOT, "dist/cli.cjs"), "script", "customer", file], { cwd: p2.proj, env: p2.env });
+    const code = await new Promise<number | null>((res) => c.on("close", res));
+    expect(code).not.toBe(0);
+    expect(Date.now() - started).toBeLessThan(25_000);
+  });
+
+  it("a script can't open its own network connections", async () => {
+    const p = project();
+    const r = await runScript(p, `const out = [];
+      for (const [n, f] of [["http", () => require("http").get(${JSON.stringify("http://127.0.0.1:9/")})], ["net", () => require("net").connect(9, "127.0.0.1")], ["fetch", () => fetch("http://127.0.0.1:9/")]]) {
+        try { await f(); out.push(n + ":open"); } catch (e) { out.push(n + ":" + (/network connections/.test(e.message) ? "blocked" : e.message)); }
+      }
+      console.log("NET " + out.join(" "));
+      const s = await B.open(); console.log("TITLE " + (await (async () => { await s.goto("/cart"); return s.title(); })())); await s.close();`);
+    expect(r.stdout).toContain("NET http:blocked net:blocked fetch:blocked");
+    expect(r.stdout).toContain("TITLE Cart");
   });
 
   it("run finish closes the run's browsers, and a finished run never keeps one", async () => {
@@ -114,8 +142,7 @@ describe("baseline script (browser in the parent, script talks over IPC)", () =>
     const hosts = () => { try { return readdirSync(join(p.env.BASELINE_DATA as string, "hosts")).filter((x) => /^[0-9a-f]{16}\.json$/.test(x)).length; } catch { return 0; } };
     expect(hosts()).toBe(1);
     spawnSync("node", [join(ROOT, "dist/cli.cjs"), "run", "finish"], { cwd: p.proj, env: p.env, encoding: "utf8" });
-    for (let i = 0; i < 40 && hosts() > 0; i++) await new Promise((r) => setTimeout(r, 250));
-    expect(hosts()).toBe(0);
+    await vi.waitFor(() => expect(hosts()).toBe(0), { timeout: 15_000, interval: 100 });
     // A script against the finished run gets its own browser and leaves nothing running.
     const r = await runScript(p, `const s = await B.open(); console.log("AT " + await s.url()); await s.close();`);
     expect(r.stdout).toContain("AT about:blank");
@@ -128,6 +155,23 @@ describe("baseline script (browser in the parent, script talks over IPC)", () =>
     await runScript({ ...p, env }, `const s = await B.open(); await s.goto("/cart"); await s.close();`);
     const r = await runScript({ ...p, env }, `const s = await B.open(); console.log("AT " + await s.url()); await s.close();`);
     expect(r.stdout).toContain("AT about:blank");
+  });
+
+  it("refuses a run folder Baseline didn't start, so a script can't be sandboxed in a folder of its choosing", async () => {
+    const p = project();
+    // A look-alike outside .baseline/sessions (the project root, standing in for a home folder).
+    writeFileSync(join(p.proj, "run.json"), JSON.stringify({ runId: "x", url: f.url }));
+    const outside = await runScript(p, `console.log("RAN");`, ["--run", p.proj]);
+    expect(outside.code).toBe(2);
+    expect(outside.stdout).not.toContain("RAN");
+    expect(outside.stderr).toMatch(/not a run folder of this project/);
+    // Inside .baseline/sessions but never started by `run new`.
+    const fake = join(p.proj, ".baseline", "sessions", "s", "runs", "r-fake");
+    mkdirSync(fake, { recursive: true });
+    writeFileSync(join(fake, "run.json"), JSON.stringify({ runId: "r-fake", url: f.url }));
+    const unrecorded = await runScript(p, `console.log("RAN");`, ["--run", fake]);
+    expect(unrecorded.code).toBe(2);
+    expect(unrecorded.stderr).toMatch(/no record of starting the run/);
   });
 
   it("refuses an unknown runner", () => {

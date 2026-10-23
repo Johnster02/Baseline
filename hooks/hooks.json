@@ -1,5 +1,5 @@
 {
-  "description": "Baseline: the live band above the prompt, tracker options for the CLI, and guards on Bash and browser tools while a run is active",
+  "description": "Baseline: the live band above the prompt, tracker options for the CLI, guards on Bash and browser tools while a run is active, and Baseline's data folder kept out of every tool",
   "modules": [
     "../mod/pane.js"
   ],
@@ -9,7 +9,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/baseline\" hook store-options"
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/cli.cjs",
+              "hook",
+              "store-options"
+            ]
           }
         ]
       }
@@ -20,7 +25,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/baseline\" hook bash-guard"
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/hook.cjs",
+              "bash-guard"
+            ]
           }
         ]
       },
@@ -29,7 +38,37 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/baseline\" hook tool-guard"
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/hook.cjs",
+              "tool-guard"
+            ]
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/hook.cjs",
+              "read-guard"
+            ]
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/hook.cjs",
+              "write-guard"
+            ]
           }
         ]
       }

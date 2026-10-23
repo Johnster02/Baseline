@@ -54,16 +54,21 @@ function call(method, ...args) {
   const id = ++seq;
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject });
+    if (pending.size === 1) process.channel?.ref();
     process.send({ id, method, args });
   });
 }
-process.on("message", (m) => {
+process.on("message", (raw) => {
+  const m = raw;
+  if (!m || typeof m.id !== "number") return;
   const p = pending.get(m.id);
   if (!p) return;
   pending.delete(m.id);
+  if (pending.size === 0) process.channel?.unref();
   if (m.ok) p.resolve(m.value);
-  else p.reject(new Error(m.error));
+  else p.reject(new Error(typeof m.error === "string" ? m.error : "Baseline: the command failed"));
 });
+process.channel?.unref();
 async function open() {
   const info = await call("open");
   const api = { runner: info.runner, persona: info.persona, depth: info.depth };

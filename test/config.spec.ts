@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { loadConfig, saveConfig, ensureGitignored, newRunner, checkTarget, describePermissions } from "../src/config/store";
 import { secretsPath, setSecret, getSecret } from "../src/config/secrets";
 import { defaultPatterns, projectConfigSchema } from "../src/config/schema";
+import { isProduction } from "../src/config/target";
 
 const tmp = (p = "cfg-") => mkdtempSync(join(tmpdir(), p));
 
@@ -28,7 +29,7 @@ describe("config", () => {
     cfg.lastUrl = "http://localhost:3000";
     saveConfig(d, cfg);
     const back = loadConfig(d);
-    expect(back.runners[0].key).toBe("admin");
+    expect(back.runners[0]?.key).toBe("admin");
     expect(back.lastUrl).toBe("http://localhost:3000");
   });
 
@@ -148,5 +149,13 @@ describe("gitignore respects an existing ignore", () => {
     appendFileSync(join(d, ".git", "info", "exclude"), ".baseline/\n");
     ensureGitignored(d);
     expect(existsSync(join(d, ".gitignore"))).toBe(false);
+  });
+});
+
+describe("isProduction", () => {
+  it("subdomains of a production host are production too", () => {
+    const cfg = { ...loadConfig(tmp()), productionUrls: ["https://acme.dev"] };
+    expect(isProduction("https://api.acme.dev/x", cfg)).toBe(true);
+    expect(isProduction("https://notacme.dev/x", cfg)).toBe(false);
   });
 });

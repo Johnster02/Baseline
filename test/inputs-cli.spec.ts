@@ -51,3 +51,12 @@ describe("baseline inputs", () => {
     expect(out).toMatch(/Linear is not set up/);
   });
 });
+
+describe("baseline inputs --as", () => {
+  it("applies to every ambiguous key instead of crashing", async () => {
+    const run = mkdtempSync(join(tmpdir(), "run-"));
+    const code = await main(["inputs", "--run", run, "--as", "linear", "ABC-1", "DEF-2"]);
+    expect(code).toBe(1);
+    expect(out).toMatch(/Linear is not set up/);
+  });
+});

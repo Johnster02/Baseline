@@ -1,4 +1,5 @@
-type Node = { type?: string; text?: string; content?: Node[] };
+export type AdfNode = { type?: string | undefined; text?: string | undefined; content?: AdfNode[] | undefined };
+type Node = AdfNode;
 
 /** Atlassian Document Format to plain text: paragraphs and headings on their own lines, list items prefixed. */
 export function adfToText(node: Node | null | undefined): string {

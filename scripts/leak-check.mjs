@@ -9,7 +9,9 @@ import { leakCheck, leakCheckAuthors } from "./leak-check-lib.mjs";
 
 const banned = process.env.BASELINE_BANNED_TERMS || join(homedir(), ".config", "baseline-private", "banned-terms.txt");
 if (!existsSync(banned)) {
-  console.log("leak check skipped: no banned-terms file");
+  // Other contributors have no list, so this passes; say so loudly so it is never mistaken for a pass.
+  console.warn(`WARNING: leak check skipped: no banned-terms file at ${banned} (set BASELINE_BANNED_TERMS).`);
+  if (process.env.GITHUB_ACTIONS) console.log("::warning::leak check skipped: no banned-terms file");
   process.exit(0);
 }
 const files = execSync("git ls-files", { encoding: "utf8" }).split("\n").filter(Boolean)

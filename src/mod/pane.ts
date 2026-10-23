@@ -5,22 +5,39 @@ import type { FrameState, RunSummary } from "./frame";
 import type { Progress } from "../run/progress";
 import type { ThemeName } from "../config/schema";
 
+/** The slice of the mod host's API this band uses. */
+type UiNode = unknown;
+type UiFactory = (props: Record<string, unknown>) => UiNode;
+interface ModContext {
+  fs: { exists(path: string): Promise<boolean>; read(path: string): Promise<unknown> };
+  session: { cwd(): Promise<unknown> | unknown };
+  ui: { invalidate(event: string): void; resolve(e: RenderEvent): { Box: UiFactory; Text: UiFactory } };
+  clock: { every(ms: number, fn: () => unknown): void };
+}
+type ModEvent = Record<string, unknown>;
+type RenderEvent = ModEvent & { props?: { bodyColumns?: unknown; maxRows?: unknown } };
+type Next<E> = (e: E) => Promise<UiNode> | UiNode;
+type On = {
+  (event: "session.start", handler: ($: ModContext, e: ModEvent, next: Next<ModEvent>) => unknown): void;
+  (event: "ui.render", filter: { component: string }, handler: ($: ModContext, e: RenderEvent, next: Next<RenderEvent>) => unknown): void;
+};
+
 let state: FrameState = { now: Date.now() };
 let theme: ThemeName = "br2049";
 let lastKey = "";
 
-async function readJson<T>($: any, path: string): Promise<T | undefined> {
+async function readJson<T>($: ModContext, path: string): Promise<T | undefined> {
   try {
     if (!(await $.fs.exists(path))) return undefined;
-    return JSON.parse(String(await $.fs.read(path)));
+    return JSON.parse(String(await $.fs.read(path))) as T;
   } catch { return undefined; }
 }
 
-async function readText($: any, path: string): Promise<string | undefined> {
+async function readText($: ModContext, path: string): Promise<string | undefined> {
   try { return (await $.fs.exists(path)) ? String(await $.fs.read(path)).trim() : undefined; } catch { return undefined; }
 }
 
-async function refresh($: any) {
+async function refresh($: ModContext) {
   const cwd = String(await $.session.cwd());
   const root = cwd + "/.baseline";
   const cfg = await readJson<{ theme?: ThemeName }>($, root + "/config.json");
@@ -39,14 +56,14 @@ async function refresh($: any) {
   if (key !== lastKey) { lastKey = key; $.ui.invalidate("ui.render"); }
 }
 
-export function register(on: any) {
-  on("session.start", async ($: any, e: any, next: any) => {
+export function register(on: On) {
+  on("session.start", async ($, e, next) => {
     await refresh($);
     $.clock.every(1000, () => refresh($));
     return next(e);
   });
 
-  on("ui.render", { component: "AbovePrompt" }, async ($: any, e: any, next: any) => {
+  on("ui.render", { component: "AbovePrompt" }, async ($, e, next) => {
     const width = Math.max(30, Number(e.props?.bodyColumns) || 72);
     const maxRows = Math.max(1, Number(e.props?.maxRows) || 12);
     const rows = frame({ ...state, now: Date.now() }, theme, Math.min(width, 72), maxRows);

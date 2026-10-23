@@ -1,9 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { newRun, finishRun } from "../src/run/state";
+import { recordRunnerStatus } from "../src/run/runners";
 import { updateProgress, readProgress } from "../src/run/progress";
 import { sizeRun } from "../src/run/sizing";
 import { commitInfo } from "../src/run/commit";
@@ -15,8 +16,12 @@ const tmp = () => mkdtempSync(join(tmpdir(), "run-"));
 describe("newRun", () => {
   it("runs in one session share a session dir and write run.json + active-run", () => {
     const p = tmp();
+    const warn = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     const a = newRun(p, "sess-1", { url: "http://localhost:3000", label: "PR #412" });
     const b = newRun(p, "sess-1", { url: "http://localhost:3000", label: "PR #412" });
+    // A second unfinished run in the project is allowed, with a warning.
+    expect(warn.mock.calls.map((c) => String(c[0])).join("")).toMatch(/another run is still in progress/);
+    warn.mockRestore();
     expect(a.sessionDir).toBe(b.sessionDir);
     expect(a.runDir).not.toBe(b.runDir);
     expect(JSON.parse(readFileSync(join(b.runDir, "run.json"), "utf8"))).toMatchObject({ runId: b.runId, url: "http://localhost:3000" });
@@ -25,7 +30,9 @@ describe("newRun", () => {
 
   it("without a session id each run gets its own session dir", () => {
     const p = tmp();
+    const warn = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     expect(newRun(p, undefined, { url: "http://x", label: "x" }).sessionDir).not.toBe(newRun(p, undefined, { url: "http://x", label: "x" }).sessionDir);
+    warn.mockRestore();
   });
 
   it("run ids look like r-YYYYMMDD-HHMM with a suffix when needed", () => {
@@ -153,3 +160,22 @@ describe("probe origin", () => {
     expect(called).toBe(0);
   });
 });
+
+describe("recordRunnerStatus", () => {
+  it("keeps one entry per runner, newest winning, and drops error when signed in", () => {
+    const dir = tmp();
+    recordRunnerStatus(dir, [{ key: "customer", ok: false, error: "wrong password" }, { key: "admin", ok: true }]);
+    recordRunnerStatus(dir, [{ key: "customer", ok: true }]);
+    expect(JSON.parse(readFileSync(join(dir, "runners.json"), "utf8"))).toEqual([{ key: "admin", ok: true }, { key: "customer", ok: true }]);
+  });
+  it("ignores a corrupt or hand-edited file", () => {
+    const dir = tmp();
+    writeFileSync(join(dir, "runners.json"), '[{"key":1},"x",{"key":"admin","ok":true}');
+    recordRunnerStatus(dir, [{ key: "customer", ok: false, error: "signed out" }]);
+    expect(JSON.parse(readFileSync(join(dir, "runners.json"), "utf8"))).toEqual([{ key: "customer", ok: false, error: "signed out" }]);
+    writeFileSync(join(dir, "runners.json"), '[{"key":1},"x",{"key":"admin","ok":true}]');
+    recordRunnerStatus(dir, []);
+    expect(JSON.parse(readFileSync(join(dir, "runners.json"), "utf8"))).toEqual([{ key: "admin", ok: true }]);
+  });
+});
+

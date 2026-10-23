@@ -1,18 +1,20 @@
 import { register, out, err } from "../cli";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { z } from "zod";
+import { readJsonFile } from "../core/json";
+import { projectStateDir, readActivePointer } from "../core/paths";
+import { readFileSync } from "node:fs";
 import { addNote, listNotes } from "./notes";
+
+const findingRefs = z.array(z.object({ id: z.string(), title: z.string().optional(), route: z.string().optional() }).loose());
 
 /** The finding in the latest run with this id, for its title and screen. */
 function findFinding(id: string): { title?: string; route?: string } | undefined {
-  const base = join(process.cwd(), ".baseline");
-  for (const pointer of ["active-run", "last-run"]) {
-    try {
-      const runDir = readFileSync(join(base, pointer), "utf8").trim();
-      const all = JSON.parse(readFileSync(join(runDir, "findings.json"), "utf8")) as { id: string; title?: string; route?: string }[];
-      const f = all.find((x) => x.id === id);
-      if (f) return { title: f.title, route: f.route };
-    } catch { /* try the next */ }
+  const lastRun = (() => { try { return readFileSync(join(projectStateDir(process.cwd()), "last-run"), "utf8").trim() || undefined; } catch { return undefined; } })();
+  for (const runDir of [readActivePointer(process.cwd()), lastRun]) {
+    if (!runDir) continue;
+    const f = readJsonFile(join(runDir, "findings.json"), (v) => findingRefs.parse(v), []).find((x) => x.id === id);
+    if (f) return { ...(f.title ? { title: f.title } : {}), ...(f.route ? { route: f.route } : {}) };
   }
   return undefined;
 }

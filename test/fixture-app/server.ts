@@ -38,6 +38,9 @@ const PAGES: Record<string, string> = {
       .then(r => document.getElementById('status').textContent = 'done ' + r.status).catch(() => document.getElementById('status').textContent = 'failed'); }
     gql('query { me { name } }');
     </script>`),
+  // Unlabelled fields: typing autosaves, Enter sends a search from a form with no submit button.
+  "/notes": page("Notes", `<textarea id="n" oninput="call('/api/notes/save', {text: this.value})"></textarea>
+    <form id="f" onsubmit="event.preventDefault(); call('/api/notes/find', {q: document.getElementById('s').value})"><input id="s"></form>`),
   "/users/7/delete": page("Removed", `<p>Member removed.</p>`),
   "/logout": page("Logged out", `<p>Bye.</p>`),
   "/tracked": page("Tracked", `<p>This page reports a view on load.</p><script>fetch('/api/track', {method: 'POST', body: '{}'})</script>`),

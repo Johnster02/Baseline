@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { ProjectConfig } from "../config/schema";
 
-export type CommitInfo = { codeRead: boolean; commitRead?: string; deployed?: string; mismatch: boolean };
+export type CommitInfo = { codeRead: boolean; commitRead?: string | undefined; deployed?: string | undefined; mismatch: boolean };
 
 /** The commit the code reader reads, and (when setup gave a version probe) the one the site is running. */
 /** The probe may only call the site under test (same host as the run URL), over http(s), with a timeout. */

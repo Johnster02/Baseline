@@ -1,39 +1,21 @@
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { homedir } from "node:os";
-import { join, resolve, sep } from "node:path";
-
-export type Credentials = { username: string; password: string };
-
-const pointerFile = (home: string) => join(home, ".config", "baseline", "plugin-data");
-
-/** Hooks see CLAUDE_PLUGIN_DATA but plain Bash calls don't: the SessionStart hook leaves a pointer. */
-export function recordPluginData(dir: string, home = homedir()): void {
-  mkdirSync(join(home, ".config", "baseline"), { recursive: true, mode: 0o700 });
-  writeFileSync(pointerFile(home), dir + "\n", { mode: 0o600 });
-}
-
-/** The pointer is trusted only if it is ours and points inside ~/.claude/plugins. */
-function readPointer(home: string): string | undefined {
-  try {
-    const f = pointerFile(home);
-    if (typeof process.getuid === "function" && statSync(f).uid !== process.getuid()) return undefined;
-    const p = resolve(readFileSync(f, "utf8").trim());
-    return p.startsWith(join(home, ".claude", "plugins") + sep) ? p : undefined;
-  } catch { return undefined; }
-}
+import { join, resolve } from "node:path";
 
 /**
- * Durable per-user data dir: env first, then the pointer the plugin's hook wrote, then a default.
- * Never inside the project, so credentials can't end up in a repository.
+ * A runner's sign-in details. `origin` is the site they were saved for: Baseline types them on that
+ * site only. Details saved before origins were recorded have none and must be saved again.
  */
-export function dataDir(projectDir = process.cwd()): string {
-  const home = process.env.HOME || homedir();
-  const dir = resolve(process.env.BASELINE_DATA || process.env.CLAUDE_PLUGIN_DATA || readPointer(home) || join(home, ".config", "baseline"));
-  const proj = resolve(projectDir);
-  if (dir === proj || dir.startsWith(proj + sep)) throw new Error(`Refusing a Baseline data folder inside the project (${dir}).`);
-  return dir;
+export type Credentials = { username: string; password: string; origin?: string | undefined };
+
+/** The origin (scheme://host:port) of a URL, or undefined. */
+export function originOf(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try { const u = new URL(url); return /^https?:$/.test(u.protocol) ? u.origin : undefined; } catch { return undefined; }
 }
+
+// Data-folder location lives in core/paths; re-exported for existing callers.
+export { dataDir, recordPluginData } from "../core/paths";
 
 export function projectHash(projectDir: string): string {
   let p = resolve(projectDir);

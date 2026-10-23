@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startFixture, FIXTURE_USER } from "./fixture-app/server";
-import { signIn, SignedOutError } from "../src/browser/signin";
+import { signIn, SignedOutError, chooseSignInUrl, looksSignedOut } from "../src/browser/signin";
 import { openSession } from "../src/browser/session";
+import { trustRun } from "./helpers/trust";
 import { loadConfig, newRunner } from "../src/config/store";
 import { setSecret, sessionPath } from "../src/config/secrets";
 
@@ -12,12 +13,12 @@ let f: Awaited<ReturnType<typeof startFixture>>;
 beforeAll(async () => { f = await startFixture(); });
 afterAll(() => f.stop());
 
-const setup = (password = FIXTURE_USER.password) => {
+const setup = (password = FIXTURE_USER.password, origin: string | null = f.url) => {
   const proj = mkdtempSync(join(tmpdir(), "proj-"));
   const data = mkdtempSync(join(tmpdir(), "data-"));
   const runner = newRunner("customer", "customer", { kind: "form", loginUrl: "/login" });
   const cfg = { ...loadConfig(proj), runners: [runner] };
-  setSecret(data, proj, "customer", { username: FIXTURE_USER.username, password });
+  setSecret(data, proj, "customer", { username: FIXTURE_USER.username, password, ...(origin ? { origin } : {}) });
   return { proj, data, runner, cfg, runDir: mkdtempSync(join(tmpdir(), "run-")) };
 };
 
@@ -53,6 +54,7 @@ describe("signed-out detection", () => {
     f.requests.length = 0;
     const state = join(s.runDir, "expired.json");
     writeFileSync(state, JSON.stringify({ cookies: [], origins: [] }));
+    trustRun({ runDir: s.runDir, runId: "r-x", baseUrl: f.url, cfg: s.cfg });
     const sess = await openSession({ runDir: s.runDir, runId: "r-x", runner: s.runner, cfg: s.cfg, baseUrl: f.url, storageState: state });
     try {
       await expect(sess.goto("/cart")).rejects.toBeInstanceOf(SignedOutError);
@@ -60,4 +62,54 @@ describe("signed-out detection", () => {
     // It never typed credentials anywhere while signed out.
     expect(f.requests.filter((r) => r.method === "POST" && r.path === "/login").length).toBe(0);
   }, 30000);
+});
+
+describe("where signin may type stored passwords", () => {
+  const staging = "https://staging.acme.dev";
+  it("during a run, only on the run's own site", () => {
+    expect(chooseSignInUrl({ flagUrl: "https://evil.tld", activeUrl: staging })).toMatchObject({ ok: false, reason: expect.stringMatching(/run is active/) });
+    expect(chooseSignInUrl({ flagUrl: "https://evil.tld", activeUrl: staging, lastUrl: "https://evil.tld" })).toMatchObject({ ok: false });
+    expect(chooseSignInUrl({ flagUrl: staging + "/app", activeUrl: staging })).toEqual({ ok: true, url: staging + "/app" });
+    expect(chooseSignInUrl({ activeUrl: staging, lastUrl: "https://old.acme.dev" })).toEqual({ ok: true, url: staging });
+  });
+  it("outside a run, a --url must be on the configured site", () => {
+    expect(chooseSignInUrl({ flagUrl: "https://evil.tld", lastUrl: staging })).toMatchObject({ ok: false, reason: expect.stringMatching(/config set lastUrl/) });
+    expect(chooseSignInUrl({ flagUrl: staging + "/x", lastUrl: staging })).toEqual({ ok: true, url: staging + "/x" });
+    expect(chooseSignInUrl({ flagUrl: "http://staging.acme.dev", lastUrl: staging })).toMatchObject({ ok: false });
+  });
+  it("first setup (nothing configured) takes the --url; no URL at all is an error", () => {
+    expect(chooseSignInUrl({ flagUrl: staging })).toEqual({ ok: true, url: staging });
+    expect(chooseSignInUrl({ lastUrl: staging })).toEqual({ ok: true, url: staging });
+    expect(chooseSignInUrl({})).toMatchObject({ ok: false });
+    expect(chooseSignInUrl({ flagUrl: "not a url" })).toMatchObject({ ok: false });
+  });
+  it("an absolute login URL on another site is refused before anything is typed", async () => {
+    const { proj, data, cfg } = setup();
+    const runner = newRunner("customer", "customer", { kind: "form", loginUrl: "https://evil.tld/login" });
+    const r = await signIn(runner, { ...cfg, runners: [runner] }, { projectDir: proj, data, baseUrl: f.url });
+    expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/different site/) });
+  });
+  it("saved details are typed only on the site they were saved for, whatever URL signin is given", async () => {
+    const s = setup(FIXTURE_USER.password, "https://staging.acme.dev");
+    f.requests.length = 0;
+    const r = await signIn(s.runner, s.cfg, { projectDir: s.proj, data: s.data, baseUrl: f.url });
+    expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/for https:\/\/staging\.acme\.dev/) });
+    expect(f.requests.length).toBe(0);
+  });
+  it("details saved before origins were recorded are refused until saved again", async () => {
+    const s = setup(FIXTURE_USER.password, null);
+    const r = await signIn(s.runner, s.cfg, { projectDir: s.proj, data: s.data, baseUrl: f.url });
+    expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/Save them again/) });
+  });
+});
+
+describe("looksSignedOut", () => {
+  it("a password field on a normal page is not 'signed out' for a session runner", () => {
+    const runner = newRunner("a", "a", { kind: "session" });
+    expect(looksSignedOut("https://s.acme.dev/settings/password", true, runner)).toBe(false);
+    expect(looksSignedOut("https://s.acme.dev/login?next=/cart", true, runner)).toBe(true);
+    const form = newRunner("b", "b", { kind: "form", loginUrl: "/auth/enter" });
+    expect(looksSignedOut("https://s.acme.dev/auth/enter", false, form)).toBe(true);
+    expect(looksSignedOut("https://s.acme.dev/account", true, form)).toBe(false);
+  });
 });

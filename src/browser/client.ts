@@ -12,17 +12,25 @@ function call(method: string, ...args: unknown[]): Promise<unknown> {
   const id = ++seq;
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject });
+    // Keep the process alive only while a call is in flight (see below).
+    if (pending.size === 1) process.channel?.ref();
     process.send!({ id, method, args });
   });
 }
 
-process.on("message", (m: Reply) => {
+process.on("message", (raw: unknown) => {
+  const m = raw as Partial<Reply> | null;
+  if (!m || typeof m.id !== "number") return;
   const p = pending.get(m.id);
   if (!p) return;
   pending.delete(m.id);
+  if (pending.size === 0) process.channel?.unref();
   if (m.ok) p.resolve(m.value);
-  else p.reject(new Error(m.error));
+  else p.reject(new Error(typeof m.error === "string" ? m.error : "Baseline: the command failed"));
 });
+// A listener holds the IPC channel open, so a script that never calls close() (or throws first)
+// would never exit. Let go of it whenever nothing is waiting on a reply.
+process.channel?.unref();
 
 export async function open() {
   const info = (await call("open")) as { runner: string; persona: string; depth: string };

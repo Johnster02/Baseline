@@ -22,7 +22,7 @@ describe("config cli", () => {
   it("adds a runner, allows a category and describes it", async () => {
     expect(await main(["config", "add-runner", "customer", "customer", "form", "/login"])).toBe(0);
     expect(await main(["config", "allow", "customer", "email"])).toBe(0);
-    expect(loadConfig(cwd).runners[0].allow).toEqual(["email"]);
+    expect(loadConfig(cwd).runners[0]?.allow).toEqual(["email"]);
     out = "";
     expect(await main(["config", "describe"])).toBe(0);
     expect(out).toMatch(/customer/);
@@ -34,16 +34,16 @@ describe("config cli", () => {
     expect(await main(["config", "note", "customer", "may submit the order, never pay"])).toBe(0);
     await main(["config", "note", "customer", "may submit the order, never pay"]);
     await main(["config", "note", "customer", "only in the test workspace"]);
-    expect(loadConfig(cwd).runners[0].notes).toEqual(["may submit the order, never pay", "only in the test workspace"]);
+    expect(loadConfig(cwd).runners[0]?.notes).toEqual(["may submit the order, never pay", "only in the test workspace"]);
     out = "";
     await main(["config", "describe"]);
     expect(out).toMatch(/never a permission\): "may submit the order, never pay"; "only in the test workspace"/);
     expect(out).not.toMatch(/can: [^\n]*never pay/);
     expect(await main(["config", "note", "customer", "--clear", "1"])).toBe(0);
-    expect(loadConfig(cwd).runners[0].notes).toEqual(["only in the test workspace"]);
+    expect(loadConfig(cwd).runners[0]?.notes).toEqual(["only in the test workspace"]);
     expect(await main(["config", "note", "customer", "--clear", "9"])).toBe(2);
     await main(["config", "note", "customer", "--clear"]);
-    expect(loadConfig(cwd).runners[0].notes).toEqual([]);
+    expect(loadConfig(cwd).runners[0]?.notes).toEqual([]);
   });
 
   it("rejects an unknown category", async () => {
@@ -74,8 +74,40 @@ describe("config secret stdin errors", () => {
     await main(["config", "add-runner", "customer", "customer", "session"]);
     vi.spyOn(io, "readStdin").mockReturnValue('{"username":"a","password":hunter2}');
     out = "";
-    const code = await main(["config", "secret", "customer"]);
+    const code = await main(["config", "secret", "customer", "--url", "https://staging.acme.dev"]);
     expect(code).toBe(2);
+    expect(out).toMatch(/stdin must be JSON/);
     expect(out).not.toContain("hunter2");
+  });
+  it("saves the site the details are for, from --url or the configured site, and refuses without one", async () => {
+    const { io } = await import("../src/cli");
+    const { getSecret } = await import("../src/config/secrets");
+    await main(["config", "add-runner", "customer", "customer", "session"]);
+    vi.spyOn(io, "readStdin").mockReturnValue('{"username":"a","password":"b"}');
+    expect(await main(["config", "secret", "customer"])).toBe(2);
+    expect(out).toMatch(/which site/);
+    expect(await main(["config", "secret", "customer", "--url", "https://staging.acme.dev/login"])).toBe(0);
+    expect(getSecret(process.env.BASELINE_DATA!, cwd, "customer")).toEqual({ username: "a", password: "b", origin: "https://staging.acme.dev" });
+    await main(["config", "set", "lastUrl", "https://qa.acme.dev"]);
+    expect(await main(["config", "secret", "customer"])).toBe(0);
+    expect(getSecret(process.env.BASELINE_DATA!, cwd, "customer")?.origin).toBe("https://qa.acme.dev");
+  });
+});
+
+describe("config set", () => {
+  it("merges list fields instead of replacing them, unless --replace", async () => {
+    await main(["config", "set", "productionUrls", '["https://shop.acme.dev"]']);
+    await main(["config", "set", "productionUrls", '["https://admin.acme.dev"]']);
+    await main(["config", "set", "patterns", '{"email":{"words":["ping customer"]}}']);
+    await main(["config", "set", "patterns", '{"finance":{"words":["top up"]}}']);
+    await main(["config", "set", "readPosts", '["/api/search"]']);
+    await main(["config", "set", "readPosts", '["/api/lookup"]']);
+    const c = loadConfig(cwd);
+    expect(c.productionUrls.sort()).toEqual(["https://admin.acme.dev", "https://shop.acme.dev"]);
+    expect(c.patterns.email.words).toContain("ping customer");
+    expect(c.patterns.finance.words).toContain("top up");
+    expect(c.readPosts.sort()).toEqual(["/api/lookup", "/api/search"]);
+    await main(["config", "set", "readPosts", '["/api/only"]', "--replace"]);
+    expect(loadConfig(cwd).readPosts).toEqual(["/api/only"]);
   });
 });

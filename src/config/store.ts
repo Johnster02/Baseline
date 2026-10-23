@@ -9,8 +9,13 @@ export const configPath = (projectDir: string) => join(configDir(projectDir), "c
 
 export function loadConfig(projectDir: string): ProjectConfig {
   const p = configPath(projectDir);
-  const raw = existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : {};
-  return projectConfigSchema.parse(raw);
+  let raw: unknown = {};
+  if (existsSync(p)) {
+    try { raw = JSON.parse(readFileSync(p, "utf8")); } catch { throw new Error(`${p} is not valid JSON. Fix it, or run setup again.`); }
+  }
+  const r = projectConfigSchema.safeParse(raw);
+  if (!r.success) throw new Error(`${p} is not a valid Baseline config: ${r.error.issues.slice(0, 3).map((i) => `${i.path.join(".") || "config"}: ${i.message}`).join("; ")}`);
+  return r.data;
 }
 
 export function saveConfig(projectDir: string, cfg: ProjectConfig): void {
@@ -37,28 +42,8 @@ export function ensureGitignored(projectDir: string): void {
   writeFileSync(p, text + sep + ".baseline/\n");
 }
 
-/** Hostname without a trailing dot, lowercased. Protocol and port are ignored on purpose:
- *  http://shop and https://shop:8443 are the same production site. */
-export function hostKey(url: string): string | undefined {
-  try { return new URL(url).hostname.replace(/\.$/, "").toLowerCase() || undefined; } catch { return undefined; }
-}
-
-export function isProduction(url: string, cfg: ProjectConfig): boolean {
-  const h = hostKey(url);
-  if (!h) return false;
-  return cfg.productionUrls.some((p) => {
-    const ph = hostKey(p);
-    return !!ph && (h === ph || h.endsWith("." + ph));
-  });
-}
-
-export function checkTarget(url: string, cfg: ProjectConfig, live: boolean): { ok: true } | { ok: false; reason: "production" | "invalid" } {
-  let u: URL;
-  try { u = new URL(url); } catch { return { ok: false, reason: "invalid" }; }
-  if (!/^https?:$/.test(u.protocol)) return { ok: false, reason: "invalid" };
-  if (isProduction(url, cfg) && !live) return { ok: false, reason: "production" };
-  return { ok: true };
-}
+// Re-exported: the URL checks live in a zod-free module so the guard can import them cheaply.
+export { checkTarget, hostKey, isProduction } from "./target";
 
 const DEPTH_CAN: Record<Runner["depth"], string[]> = {
   look: ["browse pages and read what they show"],

@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import type { Page } from "playwright";
 import type { ProjectConfig, Runner } from "../config/schema";
 import { checkTarget } from "../config/store";
-import { getSecret, sessionPath } from "../config/secrets";
+import { getSecret, originOf, sessionPath } from "../config/secrets";
 import { loadPlaywright } from "./session";
 
 export class SignedOutError extends Error {
@@ -18,6 +18,26 @@ export type SignInResult = { key: string; ok: boolean; landed?: string; error?: 
 
 const PASSWORD = 'input[type="password"]';
 const USERNAME = 'input[type="email"], input[autocomplete="username"], input[name*="user" i], input[name*="email" i], input[name*="login" i], input[type="text"]';
+
+const origin = (u: string) => { try { return new URL(u).origin; } catch { return undefined; } };
+
+/**
+ * Which site `signin` may type credentials on. While a run is active only the run's own site
+ * (from trusted state); otherwise a --url must be on the configured site (`lastUrl`) when one is set.
+ */
+export function chooseSignInUrl(o: { flagUrl?: string | undefined; lastUrl?: string | undefined; activeUrl?: string | undefined }): { ok: true; url: string } | { ok: false; reason: string } {
+  if (o.flagUrl !== undefined && !origin(o.flagUrl)) return { ok: false, reason: `not a valid URL: ${o.flagUrl}` };
+  if (o.activeUrl) {
+    if (o.flagUrl && origin(o.flagUrl) !== origin(o.activeUrl)) return { ok: false, reason: `refusing to sign in at ${origin(o.flagUrl)}: a run is active on ${origin(o.activeUrl)}, and sign-in details are only typed on the site under test.` };
+    return { ok: true, url: o.flagUrl ?? o.activeUrl };
+  }
+  if (o.flagUrl) {
+    if (o.lastUrl && origin(o.lastUrl) && origin(o.flagUrl) !== origin(o.lastUrl)) return { ok: false, reason: `refusing to sign in at ${origin(o.flagUrl)}: the configured test site is ${origin(o.lastUrl)}. If the user chose a new site, save it first with \`baseline config set lastUrl <url>\`.` };
+    return { ok: true, url: o.flagUrl };
+  }
+  if (o.lastUrl) return { ok: true, url: o.lastUrl };
+  return { ok: false, reason: "no URL: pass --url <url>" };
+}
 
 const SIGN_IN_PATH = /\/(log-?in|sign-?in|auth|session|sso)(\/|$|\?)/i;
 
@@ -65,11 +85,16 @@ export async function signIn(runner: Runner, cfg: ProjectConfig, ctx: SignInCont
     }
     const creds = getSecret(ctx.data, ctx.projectDir, runner.key);
     if (!creds) return { key: runner.key, ok: false, error: "No sign-in details saved for this runner. Re-run setup." };
-    const context = await browser.newContext({ baseURL: ctx.baseUrl });
+    // Saved details are typed only on the site they were saved for. Nothing an agent can pass
+    // (--url, lastUrl, a run's URL) changes that site.
+    const home = originOf(creds.origin);
+    if (!home) return { key: runner.key, ok: false, error: `These sign-in details were saved before Baseline recorded which site they're for. Save them again: baseline config secret ${runner.key} --form --url <test site URL>` };
+    if (originOf(ctx.baseUrl) !== home) return { key: runner.key, ok: false, error: `Refusing to sign in: these sign-in details are for ${home}, not ${originOf(ctx.baseUrl) ?? ctx.baseUrl}.` };
+    const context = await browser.newContext({ baseURL: home });
     context.setDefaultTimeout(15000);
     const page = await context.newPage();
-    const loginUrl = new URL(runner.auth.loginUrl, ctx.baseUrl);
-    if (loginUrl.host !== new URL(ctx.baseUrl).host) return { key: runner.key, ok: false, error: "The login URL is on a different site from the test URL. Refusing to type credentials there." };
+    const loginUrl = new URL(runner.auth.loginUrl, home);
+    if (loginUrl.origin !== home) return { key: runner.key, ok: false, error: "The login URL is on a different site from the one these sign-in details are for. Refusing to type credentials there." };
     await page.goto(loginUrl.toString(), { waitUntil: "load" });
     const user = page.locator(USERNAME).first();
     await user.fill(creds.username);
@@ -79,7 +104,7 @@ export async function signIn(runner: Runner, cfg: ProjectConfig, ctx: SignInCont
       await user.press("Enter");
       await pw.waitFor({ state: "visible", timeout: 10000 }).catch(() => {});
     }
-    if (new URL(page.url()).host !== loginUrl.host) return { key: runner.key, ok: false, error: "Sign-in left the site before the password step. Use a manual sign-in for this runner." };
+    if (new URL(page.url()).origin !== home) return { key: runner.key, ok: false, error: "Sign-in left the site before the password step. Use a manual sign-in for this runner." };
     await pw.fill(creds.password);
     await Promise.all([page.waitForLoadState("load"), pw.press("Enter")]);
     await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
@@ -87,7 +112,7 @@ export async function signIn(runner: Runner, cfg: ProjectConfig, ctx: SignInCont
     saveState(file, await context.storageState());
     return { key: runner.key, ok: true, landed: new URL(page.url()).pathname };
   } catch (e) {
-    return { key: runner.key, ok: false, error: `Sign-in failed: ${(e as Error).name || "error"}` };
+    return { key: runner.key, ok: false, error: `Sign-in failed: ${(e instanceof Error && e.name) || "error"}` };
   } finally {
     await browser.close();
   }
@@ -102,7 +127,9 @@ export async function captureSession(runner: Runner, cfg: ProjectConfig, ctx: Si
   const browser = await chromium.launch({ headless: false });
   const context = await browser.newContext({ baseURL: ctx.baseUrl });
   const page = await context.newPage();
-  await page.goto(runner.auth.kind === "form" ? new URL(runner.auth.loginUrl, ctx.baseUrl).toString() : ctx.baseUrl);
+  const start = runner.auth.kind === "form" ? new URL(runner.auth.loginUrl, ctx.baseUrl) : new URL(ctx.baseUrl);
+  if (start.host !== new URL(ctx.baseUrl).host) { await browser.close(); return { key: runner.key, ok: false, error: "The login URL is on a different site from the test URL. Refusing to open it." }; }
+  await page.goto(start.toString());
   let saved = false;
   const timer = setInterval(async () => {
     try { saveState(file, await context.storageState()); saved = true; } catch { /* window closing */ }

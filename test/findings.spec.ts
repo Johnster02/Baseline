@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { mkdtempSync } from "node:fs";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { filterFindings } from "../src/findings/filter";
@@ -7,6 +7,8 @@ import { countRun } from "../src/findings/counts";
 import { addNote, listNotes } from "../src/findings/notes";
 import { findingSchema } from "../src/findings/schema";
 import type { Finding } from "../src/findings/schema";
+import { main } from "../src/cli";
+import "../src/commands";
 
 let n = 0;
 const F = (o: Partial<Finding>): Finding => findingSchema.parse({
@@ -102,5 +104,37 @@ describe("pass rate covers requirement checks only (dogfood 2)", () => {
     const fs = [F({ verdict: "match" }), F({ verdict: "unspecced" }), F({ verdict: "product" })];
     expect(countRun(fs, [])).toMatchObject({ checked: 1, passed: 1, passRate: 100, unspecced: 1, product: 1 });
     expect(countRun([F({ verdict: "unspecced" })], []).passRate).toBeNull();
+  });
+});
+
+describe("filterFindings: dedupe", () => {
+  const G = (o: object) => findingSchema.parse({ id: `X-${++n}`, title: "t", verdict: "unspecced", specced: { text: "-", ref: "-" }, route: "/cart", personas: ["a"], observed: { text: "o", shots: [`s${n}.jpg`], steps: ["x"] }, ...o });
+  it("different unspecced findings on one route stay apart", () => {
+    expect(filterFindings([G({ title: "Prices missing" }), G({ title: "Search button does nothing" })], opts).kept).toHaveLength(2);
+  });
+  it("merged findings keep both personas' evidence", () => {
+    const r = filterFindings([G({ title: "Same", personas: ["a"] }), G({ title: "same", personas: ["b"] })], opts).kept;
+    expect(r).toHaveLength(1);
+    expect(r[0]?.observed?.shots).toHaveLength(2);
+  });
+});
+
+describe("baseline dismiss", () => {
+  let cwd: string;
+  beforeEach(() => {
+    cwd = mkdtempSync(join(tmpdir(), "dismiss-"));
+    vi.spyOn(process, "cwd").mockReturnValue(cwd);
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  });
+  afterEach(() => vi.restoreAllMocks());
+  it("records the finding's title and route, so the note survives renumbering", async () => {
+    const runDir = join(cwd, ".baseline", "sessions", "s", "runs", "r-1");
+    mkdirSync(runDir, { recursive: true });
+    writeFileSync(join(runDir, "run.json"), JSON.stringify({ runId: "r-1", url: "http://x", label: "x", startedAt: new Date().toISOString() }));
+    writeFileSync(join(runDir, "findings.json"), JSON.stringify([{ id: "U-customer-1", title: "Prices missing on cart", route: "/cart", verdict: "unspecced", specced: { text: "-", ref: "-" } }]));
+    writeFileSync(join(cwd, ".baseline", "last-run"), runDir);
+    expect(await main(["dismiss", "U-customer-1", "Prices are shown at checkout by design"])).toBe(0);
+    expect(listNotes(cwd)[0]).toMatchObject({ findingId: "U-customer-1", title: "Prices missing on cart", route: "/cart", text: "Prices are shown at checkout by design" });
   });
 });

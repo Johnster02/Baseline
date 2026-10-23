@@ -51,6 +51,10 @@ messages short: the band above the prompt shows progress, and the report holds t
    stop and tell the user why, in one line.
 4. `baseline run new --url <url> --label "<short name of what is being checked>" --session ${CLAUDE_SESSION_ID}`
    (add `--live` only if the user passed `--live`). Keep `runDir` and `sessionDir` from its JSON.
+   If it refuses because another run is still in progress in this project, ask the user whether
+   to finish that run (`baseline run finish`, then retry) or run both (retry with `--force`).
+   Only this main session starts, finishes or signs in runs: subagents are refused those
+   commands while a run is active.
    On a live run, name any runner that is not allowed `live` in `baseline config describe`: the
    guard will block everything it does, so leave it out and say so in one line.
 5. Sign in: start `baseline signin --all --url <url>` (add `--live` if the user passed `--live`)
@@ -209,7 +213,7 @@ When all explorers are back and nothing is blocked, mark `read-code` and `explor
 | everything agrees, seen on the site | `match` |
 
 Copy each explorer item's `observed.shots` across as-is. If an explorer left them out, look in
-`<runDir>/shots.json` for that runner's captions and attach the matching files.
+`<runDir>/shots.jsonl` (one JSON object per line) for that runner's captions and attach the matching files.
 
 Severity: `critical` for money, data loss, or someone seeing or changing what they should not;
 `high` for a core flow that is broken; otherwise `medium` or `low`. Mark `scope: unrelated` for
@@ -246,7 +250,7 @@ If `baseline created --run <runDir>` lists anything: `baseline progress phase cl
 
 ## 7. Skipped actions
 
-Read `<runDir>/blocked.json`. If anything was skipped, group it by runner and category and ask
+Read `<runDir>/blocked.jsonl` (one JSON object per line). If anything was skipped, group it by runner and category and ask
 the user with AskUserQuestion (multi-select) which of these the runner may do next time, for
 example "customer: send email (3 skipped)". For each one they choose, run
 `baseline config allow <runner> <category>`. For `unknown-write`, offer

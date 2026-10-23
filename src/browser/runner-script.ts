@@ -1,14 +1,18 @@
+import { activeRunDir as coreActiveRunDir, dataDir, isInside, trustedFiles } from "../core/paths";
 import { fork } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve, sep } from "node:path";
+import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { register, err, io } from "../cli";
 import { loadConfig } from "../config/store";
-import { dataDir, sessionPath } from "../config/secrets";
+import { sessionPath } from "../config/secrets";
+import { checkRunDir } from "../core/trusted-run";
+import { parseFlags } from "../core/args";
+import { recordRunnerStatus } from "../run/runners";
 import { openSession } from "./session";
-import type { Session } from "./session";
-import { isCommand } from "./rpc";
+import { parseRequest } from "./rpc";
 import { connectHost } from "./host";
 import type { HostReply } from "./host";
+import { createDispatcher } from "./dispatch";
 
 /** The plugin root: dist/cli.cjs lives in <root>/dist. */
 function pluginRoot(): string {
@@ -16,30 +20,49 @@ function pluginRoot(): string {
 }
 
 export function activeRunDir(projectDir: string, flag?: string): string | undefined {
-  if (flag) return resolve(io.origCwd, flag);
-  if (process.env.BASELINE_RUN_DIR) return process.env.BASELINE_RUN_DIR;
-  const p = join(projectDir, ".baseline", "active-run");
-  return existsSync(p) ? readFileSync(p, "utf8").trim() : undefined;
+  return coreActiveRunDir(projectDir, flag, io.origCwd);
+}
+
+/**
+ * Preloaded into every script. Node's permission model (on this Node) doesn't cover the network,
+ * so scripts lose their sockets here: they reach the site only through the guarded commands.
+ * The IPC channel to `baseline script` is set up by Node itself and is not affected.
+ */
+function preloadSource(client: string): string {
+  return `"use strict";
+const M = require("module"); const t = ${JSON.stringify(client)};
+const r = M._resolveFilename; M._resolveFilename = function (req, ...a) { return req === "baseline" ? t : r.call(this, req, ...a); };
+const deny = function () { throw new Error("Baseline: scripts can't open network connections. Drive the page with the baseline commands."); };
+const patch = (o, k) => { try { Object.defineProperty(o, k, { value: deny, writable: false, configurable: false }); } catch (e) {} };
+const net = require("net"); for (const k of ["connect", "createConnection", "createServer"]) patch(net, k); patch(net.Socket.prototype, "connect");
+for (const m of ["http", "https"]) { const x = require(m); for (const k of ["request", "get", "createServer"]) patch(x, k); }
+const tls = require("tls"); for (const k of ["connect", "createServer"]) patch(tls, k);
+try { const h2 = require("http2"); for (const k of ["connect", "createServer", "createSecureServer"]) patch(h2, k); } catch (e) {}
+patch(require("dgram"), "createSocket");
+for (const k of ["fetch", "WebSocket", "EventSource"]) if (k in globalThis) patch(globalThis, k);
+patch(process, "binding"); patch(process, "_linkedBinding");
+`;
 }
 
 /** A tiny node_modules/baseline pointing at the IPC client, so scripts can require("baseline"). */
 function shimDir(root: string): string {
   const dir = join(dataDir(), "shim", "node_modules", "baseline");
+  const client = join(root, "dist", "client.cjs");
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "index.js"), `module.exports = require(${JSON.stringify(join(root, "dist", "client.cjs"))});\n`);
+  writeFileSync(join(dir, "index.js"), `module.exports = require(${JSON.stringify(client)});\n`);
   // Preloaded into each script: require("baseline") resolves straight to the client, without
   // walking parent folders (which the sandbox does not let it read).
-  writeFileSync(join(dataDir(), "shim", "preload.cjs"), `const M = require("module"); const t = ${JSON.stringify(join(root, "dist", "client.cjs"))};
-const r = M._resolveFilename; M._resolveFilename = function (req, ...a) { return req === "baseline" ? t : r.call(this, req, ...a); };\n`);
+  writeFileSync(join(dataDir(), "shim", "preload.cjs"), preloadSource(client));
   return dirname(dir);
 }
 
-export function parseScriptArgs(args: string[]): { runnerKey?: string; file?: string; runFlag?: string } {
-  const runIdx = args.indexOf("--run");
-  const runFlag = runIdx >= 0 ? args[runIdx + 1] : undefined;
-  const rest = args.filter((_, i) => !(runIdx >= 0 && (i === runIdx || i === runIdx + 1)));
-  return { runnerKey: rest[0], file: rest[1], runFlag };
+export function parseScriptArgs(args: string[]): { runnerKey?: string | undefined; file?: string | undefined; runFlag?: string | undefined } {
+  const { values, positionals } = parseFlags(args, {});
+  return { runnerKey: positionals[0], file: positionals[1], runFlag: values.run };
 }
+
+/** Use the shared browser while the run is going; a finished run (a late cleanup) gets its own. */
+const wantsSharedBrowser = (runDir: string) => !existsSync(trustedFiles.finished(runDir));
 
 register("script", "run an agent's browser script as a runner: script <runner> <file.cjs> [--run <dir>]", async (args) => {
   const { runnerKey, file, runFlag } = parseScriptArgs(args);
@@ -50,11 +73,15 @@ register("script", "run an agent's browser script as a runner: script <runner> <
     err(`usage: baseline script <runner> <file.cjs> [--run <dir>]. Runners: ${cfg.runners.map((r) => r.key).join(", ") || "none"}`);
     return 2;
   }
-  const runDir = activeRunDir(projectDir, runFlag);
-  if (!runDir || !existsSync(join(runDir, "run.json"))) { err("no active run. Start one with /baseline:run."); return 2; }
-  const run = JSON.parse(readFileSync(join(runDir, "run.json"), "utf8")) as { runId: string; url: string };
+  const wanted = activeRunDir(projectDir, runFlag);
+  if (!wanted) { err("no active run. Start one with /baseline:run."); return 2; }
+  // Only a run Baseline started: the folder becomes the script's sandbox, so an agent can't
+  // point it at a folder of its choosing (its home, Baseline's data folder).
+  const checked = checkRunDir(projectDir, wanted);
+  if (!checked.ok) { err(checked.reason); return 2; }
+  const run = checked.run;
+  const runDir = run.runDir;
 
-  let session: Session | undefined;
   const scriptPath = resolve(io.origCwd, file);
   const shim = shimDir(pluginRoot());
   // Node's permission model: the script may read its run folder, the shim and Baseline's client,
@@ -66,25 +93,23 @@ register("script", "run an agent's browser script as a runner: script <runner> <
   // macOS and Windows paths ignore case, so compare without it there.
   const fold = (p: string) => (process.platform === "darwin" || process.platform === "win32" ? p.toLowerCase() : p);
   const data = fold(real(dataDir())), script = fold(real(scriptPath));
-  if (data.startsWith(script) || script.startsWith(data + sep)) { err("refusing: scripts may not live in Baseline's data folder"); return 2; }
+  if (isInside(script, data) || isInside(data, script)) { err("refusing: scripts may not live in Baseline's data folder"); return 2; }
   const execArgv = [permFlag, `--require=${real(join(dataDir(), "shim", "preload.cjs"))}`, `--allow-fs-read=${real(join(dataDir(), "shim"))}`, `--allow-fs-read=${real(runDir)}`, `--allow-fs-read=${real(scriptPath)}`, `--allow-fs-read=${real(shim)}`,
     `--allow-fs-read=${real(join(pluginRoot(), "dist"))}`, `--allow-fs-write=${real(runDir)}`];
-  // The runner's browser for the whole run, kept open by a background host, but only for the
-  // active run: a script against a finished run (a late cleanup) gets a browser of its own that
-  // closes when the script ends, so nothing is left running. Without a host (it could not start,
-  // or BASELINE_SHARED_BROWSER=0) the script also gets its own.
-  let activePointer = "";
-  try { activePointer = readFileSync(join(projectDir, ".baseline", "active-run"), "utf8").trim(); } catch { activePointer = ""; }
-  const isActive = !!activePointer && resolve(activePointer) === resolve(runDir);
-  const host = isActive ? await connectHost(projectDir, runDir, runner.key, join(pluginRoot(), "dist", "cli.cjs")) : undefined;
+  // The runner's browser for the whole run, kept open by a background host. A script against a
+  // finished run (a late cleanup) gets a browser of its own that closes when the script ends, so
+  // nothing is left running. Without a host (it could not start, or BASELINE_SHARED_BROWSER=0)
+  // the script also gets its own.
+  const host = wantsSharedBrowser(runDir) ? await connectHost(projectDir, runDir, runner.key, join(pluginRoot(), "dist", "cli.cjs")) : undefined;
 
   // The report shows which runner was signed out mid-run.
-  const noteSignedOut = (message: string) => {
-    const file = join(runDir, "runners.json");
-    let prev: { key: string }[] = [];
-    try { prev = JSON.parse(readFileSync(file, "utf8")); } catch { prev = []; }
-    writeFileSync(file, JSON.stringify([...prev.filter((p) => p.key !== runner.key), { key: runner.key, ok: false, error: message }], null, 2));
-  };
+  const noteSignedOut = (message: string) => recordRunnerStatus(runDir, [{ key: runner.key, ok: false, error: message }]);
+  const own = createDispatcher({
+    openSession: () => openSession({ runDir, runId: run.runId, runner, cfg, baseUrl: run.url, storageState: sessionPath(dataDir(), projectDir, runner.key) }),
+    info: { runner: runner.key, persona: runner.persona, depth: runner.depth },
+    keepOnClose: false,
+    onSignedOut: noteSignedOut,
+  });
 
   const child = fork(real(scriptPath), [], {
     cwd: runDir,
@@ -94,34 +119,24 @@ register("script", "run an agent's browser script as a runner: script <runner> <
     env: { PATH: process.env.PATH ?? "", HOME: runDir, NODE_PATH: shim },
   });
 
-  let chain: Promise<unknown> = Promise.resolve();
-  child.on("message", (m: { id: number; method: unknown; args?: unknown[] }) => {
-    chain = chain.then(async () => {
-      const reply = (ok: boolean, value?: unknown, error?: string) => { if (child.connected) child.send({ id: m.id, ok, value, error }); };
-      if (!isCommand(m.method)) return reply(false, undefined, `"${String(m.method)}" is not an allowed command`);
-      if (host) {
-        const r: HostReply = await host({ id: m.id, method: m.method, args: m.args }).catch((e: Error) => ({ id: m.id, ok: false, error: `HostError: ${e.message}` }));
+  let relay: Promise<unknown> = Promise.resolve();
+  child.on("message", (raw: unknown) => {
+    const m = parseRequest(raw);
+    if (!m) return;
+    const send = (r: HostReply) => { if (child.connected) child.send(r); };
+    if (!host) { void own.handle(m).then(send); return; }
+    const p = host.call({ id: m.id, method: String(m.method), args: m.args })
+      .catch((e: unknown): HostReply => ({ id: m.id, ok: false, error: `HostError: ${e instanceof Error ? e.message : String(e)}` }))
+      .then((r) => {
         if (!r.ok && r.error?.startsWith("SignedOutError:")) noteSignedOut(r.error.slice("SignedOutError: ".length));
-        return reply(r.ok, r.value, r.error);
-      }
-      try {
-        if (m.method === "open") {
-          session ??= await openSession({ runDir, runId: run.runId, runner, cfg, baseUrl: run.url, storageState: sessionPath(dataDir(), projectDir, runner.key) });
-          return reply(true, { runner: runner.key, persona: runner.persona, depth: runner.depth });
-        }
-        if (!session) return reply(false, undefined, "call open() first");
-        if (m.method === "close") { await session.close(); session = undefined; return reply(true); }
-        const fn = (session as unknown as Record<string, (...a: unknown[]) => unknown>)[m.method]!;
-        return reply(true, await fn(...(m.args ?? [])));
-      } catch (e) {
-        if ((e as Error).name === "SignedOutError") noteSignedOut((e as Error).message);
-        return reply(false, undefined, `${(e as Error).name}: ${(e as Error).message.split("\n")[0]}`);
-      }
-    });
+        send(r);
+      });
+    relay = relay.then(() => p);
   });
 
   const code = await new Promise<number>((res) => child.on("exit", (c) => res(c ?? 1)));
-  await chain.catch(() => {});
-  if (session) await session.close().catch(() => {});
+  await relay.catch(() => {});
+  host?.close();
+  await own.close();
   return code;
 });

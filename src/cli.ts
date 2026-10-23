@@ -9,8 +9,8 @@ export const io = {
   readStdin: (): string => readFileSync(0, "utf8"),
   /** Open a local file in the default browser. */
   openFile(path: string): void {
-    const [cmd, args] = process.platform === "darwin" ? ["open", [path]] : process.platform === "win32" ? ["cmd", ["/c", "start", "", path]] : ["xdg-open", [path]];
-    try { spawn(cmd as string, args as string[], { stdio: "ignore", detached: true }).unref(); } catch { /* the path is printed anyway */ }
+    const [cmd, args]: [string, string[]] = process.platform === "darwin" ? ["open", [path]] : process.platform === "win32" ? ["cmd", ["/c", "start", "", path]] : ["xdg-open", [path]];
+    try { spawn(cmd, args, { stdio: "ignore", detached: true }).unref(); } catch { /* the path is printed anyway */ }
   },
   get origCwd(): string { return orig ?? process.cwd(); },
   set origCwd(v: string) { orig = v; },
@@ -21,6 +21,8 @@ export type Handler = (args: string[]) => Promise<number> | number;
 const commands = new Map<string, { handler: Handler; help: string }>();
 
 export function register(name: string, help: string, handler: Handler): void {
+  // Two modules claiming one name would silently drop the first handler.
+  if (commands.has(name)) throw new Error(`baseline: command "${name}" is registered twice`);
   commands.set(name, { handler, help });
 }
 

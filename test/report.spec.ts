@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { trustedFiles } from "../src/core/paths";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderSessionReport, buildRunRecord } from "../src/render/report";
@@ -16,7 +17,7 @@ const record = (o: Partial<RunRecord> = {}): RunRecord => ({
   size: "quick", agents: 3, startedAt: "2026-10-22T09:14:00Z", durationMin: 9.2,
   commit: { codeRead: true, commitRead: "a41c9e2", mismatch: false },
   permissions: [{ runner: "customer", can: ["browse pages"], cannot: ["send email"] }],
-  findings: [finding({})], other: [], otherHidden: 0,
+  findings: [finding({})], other: [], otherHidden: 0, rejected: [],
   skipped: [{ at: "", runner: "customer", method: "POST", host: "staging.acme.dev", path: "/api/invoice/send", category: "email", reason: "clicked control looks like email", trigger: "send invoice" }],
   counts: { checked: 10, passed: 6, passRate: 60, conflicts: 2, product: 1, unspecced: 0, unverified: 1, skipped: 1 },
   unreadLinks: [], shots: {}, runners: [], leftBehind: [], ...o,
@@ -130,6 +131,55 @@ describe("buildRunRecord", () => {
     expect(r.unreadLinks).toEqual(["https://wiki/x"]);
     expect(Buffer.from(r.shots["shots/customer-a-1.jpg"]!, "base64").toString()).toBe("JPEGDATA");
   });
+
+  it("counts invalid findings instead of dropping them silently, and reads JSONL logs", () => {
+    const proj = mkdtempSync(join(tmpdir(), "p-"));
+    const runDir = join(proj, ".baseline", "sessions", "s", "runs", "r-1");
+    mkdirSync(runDir, { recursive: true });
+    writeFileSync(join(runDir, "run.json"), JSON.stringify({ runId: "r-1", url: "http://x", label: "PR #1", startedAt: "2026-10-22T09:00:00Z" }));
+    writeFileSync(join(runDir, "findings.json"), JSON.stringify([
+      { id: "R-1", title: "a", verdict: "match", specced: { text: "s", ref: "R1" } },
+      { id: "R-2", title: "b", verdict: "maybe", specced: { text: "s", ref: "R2" } },
+      { title: "no id" },
+    ]));
+    const blocked = { at: "", runner: "customer", method: "POST", host: "x", path: "/api/a", category: "email", reason: "r" };
+    writeFileSync(join(runDir, "blocked.jsonl"), JSON.stringify(blocked) + "\n" + "{torn" + "\n");
+    const r = buildRunRecord(runDir);
+    expect(r.findings.map((f) => f.id)).toEqual(["R-1"]);
+    expect(r.rejected.map((x) => x.id ?? x.index)).toEqual(["R-2", 2]);
+    expect(r.rejected[0]!.reason).toMatch(/verdict/);
+    expect(r.skipped).toHaveLength(1);
+    const html = renderSessionReport([r], "light");
+    expect(html).toContain("Findings left out · 2");
+  });
+
+  it("for a run Baseline recorded, reads only its own blocked log, never the run folder's copy", () => {
+    const proj = mkdtempSync(join(tmpdir(), "p-"));
+    const runDir = join(proj, ".baseline", "sessions", "s", "runs", "r-1");
+    mkdirSync(runDir, { recursive: true });
+    writeFileSync(join(runDir, "run.json"), JSON.stringify({ runId: "r-1", url: "http://x", label: "PR #1", startedAt: "2026-10-22T09:00:00Z" }));
+    writeFileSync(trustedFiles.run(runDir), JSON.stringify({ runDir, projectDir: proj, runId: "r-1", url: "http://x", startedAt: "2026-10-22T09:00:00Z" }));
+    // An agent adds a fake "skipped" entry to the copy it can write; the run itself blocked nothing.
+    const fake = { at: "", runner: "customer", method: "POST", host: "x", path: "/api/fake", category: "email", reason: "r" };
+    writeFileSync(join(runDir, "blocked.jsonl"), JSON.stringify(fake) + "\n");
+    expect(buildRunRecord(runDir).skipped).toEqual([]);
+    appendFileSync(trustedFiles.blocked(runDir), JSON.stringify({ ...fake, path: "/api/real" }) + "\n");
+    expect(buildRunRecord(runDir).skipped.map((b) => b.path)).toEqual(["/api/real"]);
+  });
+
+  it("never reads a screenshot from outside the run folder, even a sibling with the same prefix", () => {
+    const proj = mkdtempSync(join(tmpdir(), "p-"));
+    const runs = join(proj, ".baseline", "sessions", "s", "runs");
+    const runDir = join(runs, "r-1");
+    mkdirSync(runDir, { recursive: true });
+    mkdirSync(join(runs, "r-1-evil"), { recursive: true });
+    writeFileSync(join(runs, "r-1-evil", "x.jpg"), "SECRET");
+    writeFileSync(join(runDir, "run.json"), JSON.stringify({ runId: "r-1", url: "http://x", label: "PR #1", startedAt: "2026-10-22T09:00:00Z" }));
+    writeFileSync(join(runDir, "findings.json"), JSON.stringify([
+      { id: "R-1", title: "a", verdict: "product", specced: { text: "s", ref: "R1" }, observed: { text: "o", shots: ["../r-1-evil/x.jpg"], steps: [] } },
+    ]));
+    expect(buildRunRecord(runDir).shots).toEqual({});
+  });
 });
 
 describe("baseline report cli", () => {
@@ -177,5 +227,20 @@ describe("report --open", () => {
     vi.restoreAllMocks();
     expect(opened).toEqual([join(sess, "report.html")]);
     void spy;
+  });
+});
+
+describe("report: runners and cleanup", () => {
+  it("shows runner sign-in status and anything left behind", () => {
+    const proj = mkdtempSync(join(tmpdir(), "rep-"));
+    const runDir = join(proj, ".baseline", "sessions", "s", "runs", "r-1");
+    mkdirSync(runDir, { recursive: true });
+    writeFileSync(join(runDir, "run.json"), JSON.stringify({ runId: "r-1", url: "http://x", label: "x", startedAt: "2026-10-22T09:00:00Z" }));
+    writeFileSync(join(runDir, "runners.json"), JSON.stringify([{ key: "customer", ok: true }, { key: "admin", ok: false, error: "signed out at /login" }]));
+    writeFileSync(join(runDir, "cleanup.json"), JSON.stringify([{ label: "Baseline r-1 order", removed: false, note: "delete was blocked" }]));
+    const html = renderSessionReport([buildRunRecord(runDir)], "br2049");
+    expect(html).toContain("signed out at /login");
+    expect(html).toContain("Left behind");
+    expect(html).toContain("Baseline r-1 order");
   });
 });

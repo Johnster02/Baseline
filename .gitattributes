@@ -1,0 +1,3 @@
+# Built from src/ by scripts/build.mjs; review the source, not the bundle.
+dist/** linguist-generated=true -diff
+mod/pane.js linguist-generated=true -diff

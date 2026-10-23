@@ -116,7 +116,7 @@ function painter(theme2, mode) {
   const t = THEMES[theme2];
   return (token, s) => {
     if (mode === "none" || !s) return s;
-    const hex = t[token] ?? t.ink;
+    const hex = t[token] ?? t.ink ?? "#ffffff";
     const code = mode === "truecolor" ? `38;2;${rgb(hex).join(";")}` : `38;5;${to256(rgb(hex))}`;
     return `\x1B[${code}m${s}\x1B[0m`;
   };
@@ -140,7 +140,8 @@ function renderProgress(p, theme2, o) {
   const glyph = { done: br ? "\u25A0" : "\u2713", active: br ? "\u25B6" : "\u25CF", pending: br ? "\u25A1" : "\u25CB", skipped: br ? "\xB7" : "\u2013" };
   const lines = [header(theme2, c, `${clean(p.label)} \xB7 ${clean(p.size)} run \xB7 ${num(p.agents)} agents`), rule];
   for (const ph of p.phases) {
-    const name = (br ? PHASE_NAME[ph.name] : PHASE_NAME[ph.name][0].toUpperCase() + PHASE_NAME[ph.name].slice(1)).padEnd(10);
+    const label = PHASE_NAME[ph.name];
+    const name = (br ? label : label.charAt(0).toUpperCase() + label.slice(1)).padEnd(10);
     if (ph.status === "done") lines.push(`${c(br ? "accent" : "match", glyph.done)} ${name}  ${c("accent", "done")}   ${c("ink3", clean(ph.note))}`);
     else if (ph.status === "active") {
       const pct = Math.round(estimatePct(ph, p.size, o.now ?? Date.now()));
@@ -159,7 +160,18 @@ function renderSummary(r, theme2, o) {
   const br = theme2 === "br2049";
   const rule = c("accentDim", "\u2500".repeat(Math.max(10, Math.min(o.width, 48))));
   const verified = r.counts.passRate !== null && r.counts.passRate !== void 0 && Number(r.counts.checked) > 0;
-  const k = Object.fromEntries(Object.entries(r.counts).map(([key, v]) => [key, num(v)]));
+  const rc = r.counts;
+  const k = {
+    checked: num(rc.checked),
+    passed: num(rc.passed),
+    passRate: num(rc.passRate),
+    conflicts: num(rc.conflicts),
+    product: num(rc.product),
+    unspecced: num(rc.unspecced),
+    unverified: num(rc.unverified),
+    skipped: num(rc.skipped)
+  };
+  const rejected = num(r.rejectedCount);
   const [on, off] = bar(k.passRate, 10);
   const d = num(r.durationMin);
   const dur = `${Math.floor(d)}m ${String(Math.round(d % 1 * 60)).padStart(2, "0")}s`;
@@ -175,6 +187,7 @@ function renderSummary(r, theme2, o) {
     ...k.unspecced ? [row("unspecced", "unspecced", k.unspecced)] : [],
     row("unverified", "unverified", k.unverified),
     row("skipped", "skipped", k.skipped),
+    ...rejected ? [`${c("conflict", "left out".padEnd(13))} ${c("ink", String(rejected))} ${c("ink3", "invalid findings, see report")}`] : [],
     "",
     `${c("ink3", "result".padEnd(11))} ${c("accent", br ? "COMPLETE" : "Complete")}`,
     rule
@@ -231,8 +244,7 @@ function fitProgress(lines, maxRows) {
 function frame(s, theme2, width, maxRows) {
   const opts = { color: "truecolor", width, now: s.now };
   let lines = [];
-  const live = s.progress && !s.progress.finishedAt;
-  if (live) {
+  if (s.progress && !s.progress.finishedAt) {
     lines = fitProgress(renderProgress(s.progress, theme2, opts), maxRows);
   } else if (s.summary && s.now - Date.parse(s.summary.finishedAt) <= SUMMARY_MS) {
     lines = renderSummary(s.summary, theme2, { ...opts, link: s.summary.link, localPath: s.summary.localPath });

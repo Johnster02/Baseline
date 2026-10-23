@@ -1,16 +1,19 @@
 // What this run created, worked out from what the browser saw, so the cleaner may delete it
 // without the delete permission. Agents can't add to this: it lives in Baseline's data folder
-// (out of the script sandbox's reach) and only the browser's own traffic feeds it.
+// (out of the script sandbox's reach) and only the browser's own traffic feeds it. Every runner's
+// host shares the file, and each re-reads it when it changes, so one role can clean up another's.
 //
 // A record counts as the run's own when either:
 //   - the site answered a write with 201 Created and a Location, or
 //   - right after a write the guard allowed, the browser was taken (not sent by the agent) to a
 //     page whose path carries a unique id that first appeared in the site's reply to that write.
 //     An id already on a list, in a link or in a URL the agent asked for belongs to someone else.
-import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { dataDir } from "../config/secrets";
+//     A landing without a page load (a client-side route change) counts only when no click came
+//     between the write and the landing, or the site's reply named that path.
+import { mkdirSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { appendJsonl, readJsonFile, readJsonl } from "../core/json";
+import { dataDir, runKey, trustedRunDir } from "../core/paths";
 import { UNIQUE_ID } from "./guard";
 
 /** How long after a write a landing still counts as "where the new record lives". */
@@ -20,11 +23,6 @@ const BODY_ID = /\b(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 /** Request side: no word boundaries, so an id glued to other text is still caught. */
 const ANY_ID = /(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9A-HJKMNP-TV-Z]{26})/gi;
 
-/**
- * Every way a server might read a request: raw, percent-decoded, form fields, JSON string
- * values. `clean` is false when something could not be decoded, and then nothing reached right
- * after this write may count as created (fail closed).
- */
 /**
  * One canonical form for comparing ids with anything a request carried: decoded until it stops
  * changing, HTML entities resolved, lower case, Crockford look-alikes folded (i/l to 1, o to 0),
@@ -49,14 +47,19 @@ function canonDeep(s: string): { text: string; settled: boolean } {
     if (next === t) { settled = true; break; }
     t = next;
   }
-  if (!settled && /%[0-9a-f]{2}|&#|\\u[0-9a-f]{4}/i.test(t)) settled = false;
-  else settled = true;
+  // Five rounds that never settled still count as settled when nothing encoded is left.
+  if (!settled && !/%[0-9a-f]{2}|&#|\\u[0-9a-f]{4}/i.test(t)) settled = true;
   return { text: t.toLowerCase().replace(/[il]/g, "1").replace(/o/g, "0").replace(/[^0-9a-z]/g, ""), settled };
 }
 
 /** How much of what the run sent is kept for the never-sent check. Past this, nothing new is owned. */
 const SENT_LIMIT = 8_000_000;
 
+/**
+ * Every way a server might read a request: raw, percent-decoded, form fields, JSON string
+ * values. `clean` is false when something could not be decoded, and then nothing reached right
+ * after this write may count as created (fail closed).
+ */
 export function requestTexts(url: string, body?: string): { texts: string[]; clean: boolean } {
   const texts: string[] = [url];
   let clean = true;
@@ -77,16 +80,40 @@ export function requestTexts(url: string, body?: string): { texts: string[]; cle
   return { texts, clean };
 }
 
-const runKey = (runDir: string) => createHash("sha256").update(resolve(runDir)).digest("hex").slice(0, 16);
-
 export function ownedFile(runDir: string): string {
-  return join(dataDir(), "hosts", `owned-${runKey(runDir)}.json`);
+  return join(trustedRunDir(runDir), "owned.jsonl");
 }
 
-/** Baseline's own record of what the run said it created: agents can't edit it (data folder). */
+/**
+ * Baseline's own copy of what agents said they created (JSONL, data folder). Agents can add to it
+ * through `s.created()`, but can't edit or remove what is already there.
+ */
 export function createdFile(runDir: string): string {
-  return join(dataDir(), "hosts", `created-${runKey(runDir)}.json`);
+  return join(trustedRunDir(runDir), "created.jsonl");
 }
+
+export type CreatedEntry = { runner: string; kind: string; label: string; url?: string; labelled: boolean; at: string };
+
+const isCreated = (v: unknown): CreatedEntry => {
+  const o = v as Partial<CreatedEntry> | null;
+  if (!o || typeof o.runner !== "string" || typeof o.kind !== "string" || typeof o.label !== "string") throw new Error("not a created entry");
+  return { runner: o.runner, kind: o.kind, label: o.label, ...(typeof o.url === "string" ? { url: o.url } : {}), labelled: o.labelled === true, at: String(o.at ?? "") };
+};
+
+export function appendCreated(runDir: string, entry: CreatedEntry): void {
+  const f = createdFile(runDir);
+  mkdirSync(dirname(f), { recursive: true, mode: 0o700 });
+  appendJsonl(f, entry, 0o600);
+}
+
+/** The trusted created list (plus the older JSON-array file of runs from before JSONL). */
+export function readCreated(runDir: string): CreatedEntry[] {
+  const legacy = readJsonFile(join(dataDir(), "hosts", `created-${runKey(runDir)}.json`), (v) => (Array.isArray(v) ? v : []), [] as unknown[]);
+  const old = legacy.flatMap((v) => { try { return [isCreated(v)]; } catch { return []; } });
+  return [...old, ...readJsonl(createdFile(runDir), isCreated)];
+}
+
+const asPath = (v: unknown): string => { if (typeof v !== "string" || !v.startsWith("/")) throw new Error("not a path"); return v; };
 
 export class OwnedTracker {
   /** Shared with the guard's context: it reads this array for every request. */
@@ -104,12 +131,32 @@ export class OwnedTracker {
   private sentSize = 0;
   /** Canonical paths the site's replies redirected to: loading exactly one of these is following it. */
   private replyTargets = new Set<string>();
+  /** Order of the agent's last click: a client-side landing after a later click is the agent's doing. */
+  private lastClickSeq = -1;
+  /** The file's size and mtime when last read, so other runners' additions are picked up. */
+  private seen = "";
 
   constructor(private file?: string) {
-    let saved: string[] = [];
-    if (file) { try { saved = JSON.parse(readFileSync(file, "utf8")); } catch { saved = []; } }
-    this.paths = Array.isArray(saved) ? saved.filter((p) => typeof p === "string") : [];
+    this.paths = [];
+    this.refresh();
   }
+
+  /**
+   * Merge in what other runners recorded since the last read. Cheap when nothing changed. The file
+   * is append-only JSONL (one path per line), so runners writing at once never lose each other's.
+   */
+  refresh(): void {
+    if (!this.file) return;
+    let st;
+    try { st = statSync(this.file); } catch { return; }
+    const sig = `${st.size}:${st.mtimeMs}`;
+    if (sig === this.seen) return;
+    this.seen = sig;
+    for (const p of readJsonl(this.file, asPath)) if (!this.paths.includes(p)) this.paths.push(p);
+  }
+
+  /** The agent clicked something. */
+  clicked(): void { this.lastClickSeq = ++this.seq; }
 
   private see(id: string, reply: boolean) {
     const k = id.toLowerCase();
@@ -185,20 +232,25 @@ export class OwnedTracker {
   add(path: string) {
     if (!path || this.paths.includes(path)) return;
     this.paths.push(path);
-    this.save();
+    this.save(path);
   }
 
   /**
    * The browser landed on a page. Returns the record path it now owns, if this is one: the id
    * must have shown up first in the site's reply after the write (a response body or redirect),
    * never in a URL the browser asked for. Pages the agent opened itself (`byAgent`, a goto)
-   * never count, so knowing an id and visiting it can't make it ours.
+   * never count, so knowing an id and visiting it can't make it ours. A landing without a page
+   * load (`document: false`, a client-side route change) counts only when no click came after the
+   * write, or the site's reply named this path: clicking a fresh row in a list is not "created".
    */
-  landed(url: string, at = Date.now(), byAgent = false): string | undefined {
-    let segs: string[];
-    try { segs = new URL(url).pathname.split("/").filter(Boolean); } catch { return undefined; }
+  landed(url: string, at = Date.now(), byAgent = false, opts: { document?: boolean } = {}): string | undefined {
+    let path: string;
+    try { path = new URL(url).pathname; } catch { return undefined; }
+    const segs = path.split("/").filter(Boolean);
+    const clientSide = opts.document === false;
+    const followsSite = !clientSide || this.lastClickSeq < this.lastWriteSeq || this.replyTargets.has(canon(path));
     let owned: string | undefined;
-    if (!byAgent && at > this.dirtyUntil && at - this.lastWriteAt <= LANDING_WINDOW_MS) {
+    if (!byAgent && followsSite && at > this.dirtyUntil && at - this.lastWriteAt <= LANDING_WINDOW_MS) {
       segs.forEach((seg, i) => {
         if (owned || !UNIQUE_ID.test(seg)) return;
         const first = this.firstSeen.get(seg.toLowerCase());
@@ -210,13 +262,10 @@ export class OwnedTracker {
     return owned;
   }
 
-  private save() {
+  private save(path: string) {
     if (!this.file) return;
-    // Merge with what other runners in this run already recorded.
-    let onDisk: string[] = [];
-    try { onDisk = JSON.parse(readFileSync(this.file, "utf8")); } catch { onDisk = []; }
-    for (const p of onDisk) if (typeof p === "string" && !this.paths.includes(p)) this.paths.push(p);
     mkdirSync(dirname(this.file), { recursive: true, mode: 0o700 });
-    writeFileSync(this.file, JSON.stringify(this.paths, null, 2), { mode: 0o600 });
+    appendJsonl(this.file, path, 0o600);
+    this.refresh();
   }
 }
