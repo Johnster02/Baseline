@@ -137,9 +137,10 @@ messages short: the band above the prompt shows progress, and the report holds t
 
 ## Time budget
 
-A PR run on a small change takes **about 5 minutes end to end, at most**: a person would make
-the record and check the screen in one or two, and the run also looks around it, but never takes
-ten times as long. Rough split: start and sign-in under 30 seconds (sign runners in in parallel),
+A PR run on a small change should **always aim for about 5 minutes end to end**: a person would
+make the record and check the screen in one or two, and the run also looks around it, but never
+takes ten times as long. It is a target, not a hard stop: never cut a requirement short to make
+it, and when a run goes well over, say why in the summary. Rough split: start and sign-in under 30 seconds (sign runners in in parallel),
 explorer about 3 minutes, cleanup about 1, verdicts and report under 1. To keep to it:
 - run each step straight after the last, with no waiting between phases; skip a phase with
   nothing to do (code unchanged since the last run on the same commit, a refuter with only

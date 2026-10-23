@@ -98,8 +98,9 @@ What to record, for every requirement your persona can reach:
   end). These get ids `U-<runner>-<n>` and a one-line title. Time cap for this part: 2 minutes on
   a PR run, 10 minutes otherwise. Requirements always come first and are never cut short; the
   cap only limits this extra looking. Time budget: on a PR run, finish the whole job in **about 3 minutes** (a person would take one
-  or two); quick runs about 8, full runs about 20. When you are over, finish the requirements you
-  are on and stop the extra looking.
+  or two); quick runs about 8, full runs about 20. It is a target, not a hard stop: always aim for
+  it, never cut a requirement short to make it, and when you're over, finish the requirements
+  and drop the extra looking.
 - Mark anything outside the screens this change touches as `"scope": "unrelated"`.
 - Skip anything the dismissed notes already explain. Match a note by its `title` and `route`
   (ids change between runs).
