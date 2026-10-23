@@ -94,7 +94,10 @@ register("script", "run an agent's browser script as a runner: script <runner> <
   const fold = (p: string) => (process.platform === "darwin" || process.platform === "win32" ? p.toLowerCase() : p);
   const data = fold(real(dataDir())), script = fold(real(scriptPath));
   if (isInside(script, data) || isInside(data, script)) { err("refusing: scripts may not live in Baseline's data folder"); return 2; }
-  const execArgv = [permFlag, `--require=${real(join(dataDir(), "shim", "preload.cjs"))}`, `--allow-fs-read=${real(join(dataDir(), "shim"))}`, `--allow-fs-read=${real(runDir)}`, `--allow-fs-read=${real(scriptPath)}`, `--allow-fs-read=${real(shim)}`,
+  // Node 20's permission model is experimental and warns on every script; agents would read that
+  // as script output. Silence just that warning where Node supports it (20.11+).
+  const quiet = major < 22 && process.allowedNodeEnvironmentFlags.has("--disable-warning") ? ["--disable-warning=ExperimentalWarning"] : [];
+  const execArgv = [...quiet, permFlag, `--require=${real(join(dataDir(), "shim", "preload.cjs"))}`, `--allow-fs-read=${real(join(dataDir(), "shim"))}`, `--allow-fs-read=${real(runDir)}`, `--allow-fs-read=${real(scriptPath)}`, `--allow-fs-read=${real(shim)}`,
     `--allow-fs-read=${real(join(pluginRoot(), "dist"))}`, `--allow-fs-write=${real(runDir)}`];
   // The runner's browser for the whole run, kept open by a background host. A script against a
   // finished run (a late cleanup) gets a browser of its own that closes when the script ends, so
