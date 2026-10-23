@@ -95,7 +95,7 @@ export async function openSession(o: OpenOptions): Promise<Session> {
   const loadPath = join(o.runDir, "logs", `load-requests-${o.runner.key}.json`);
   const learned = new Set<string>(readJson<string[]>(loadPath, []));
   const clicks: { text: string; at: number }[] = [];
-  const state = { loading: false };
+  const state = { loading: false, agentNav: false };
   const network: { at: string; method: string; host: string; path: string; type: string; outcome: string }[] = [];
   // What this run created, shared by every runner in the run (see owned.ts).
   const owned = new OwnedTracker(ownedFile(o.runDir));
@@ -182,9 +182,11 @@ export async function openSession(o: OpenOptions): Promise<Session> {
     try { u = new URL(res.url()); } catch { return; }
     if (u.host !== baseHost) return;
     const m = res.request().method();
-    if (m !== "GET" && m !== "HEAD" && res.status() === 201) {
+    if (m !== "GET" && m !== "HEAD") {
       const loc = res.headers()["location"];
-      if (loc) { try { const l = new URL(loc, res.url()); if (l.host === baseHost) owned.add(l.pathname); } catch { /* ignore */ } }
+      if (loc && res.status() === 201) { try { const l = new URL(loc, res.url()); if (l.host === baseHost) owned.add(l.pathname); } catch { /* ignore */ } }
+      // A write answered with a redirect: where it sends the browser is the site's reply too.
+      else if (loc && res.status() >= 300 && res.status() < 400) owned.seeText(loc);
     }
     if (STATIC.has(res.request().resourceType())) return;
     const type = res.headers()["content-type"] ?? "";
@@ -199,7 +201,7 @@ export async function openSession(o: OpenOptions): Promise<Session> {
   // Where the browser lands right after a write: a new id there is a record this run created.
   page.on("framenavigated", (f) => {
     if (f !== page.mainFrame()) return;
-    try { if (new URL(f.url()).host === baseHost) owned.landed(f.url()); } catch { /* ignore */ }
+    try { if (new URL(f.url()).host === baseHost) owned.landed(f.url(), Date.now(), state.agentNav); } catch { /* ignore */ }
   });
   const deny = async () => { throw new Error("Baseline: direct API requests are not allowed. Drive the page instead."); };
   for (const api of new Set([context.request, page.request])) {
@@ -242,12 +244,14 @@ export async function openSession(o: OpenOptions): Promise<Session> {
       }
       const url = target.toString();
       try {
+        state.agentNav = true;
         await page.goto(url, { waitUntil: "commit" });
         state.loading = true;
         await page.waitForLoadState("load");
         await page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
       } finally {
         state.loading = false;
+        state.agentNav = false;
       }
       // Never let an agent sign in again on its own: a signed-out runner stops here.
       await afterNav();

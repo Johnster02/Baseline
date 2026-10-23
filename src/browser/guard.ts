@@ -92,19 +92,32 @@ function ownsPath(path: string, created: string[] = []): boolean {
   });
 }
 
-const BODY_ID = /\b(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-hjkmnp-tv-z]{26})\b/gi;
-
 /**
- * A request about records the run created: its path is one (ownsPath), or its body names at
- * least one record id and every id in it is one the run created. A list page's "delete selected"
- * posts to the list, with the chosen ids in the body; one id of anyone else's and it is not ours.
+ * A request about records the run created: its path is one (ownsPath), or it goes to a list
+ * (a path naming no record) with a JSON body that names only the run's records. A list page's
+ * "delete selected" posts like that. Every value in the body must be one of the run's ids or a
+ * plain word label: a number, `true`, another id or anything unparsable means it is not ours.
  */
 function ownsRequest(path: string, body: string | undefined, created: string[] = []): boolean {
   if (ownsPath(path, created)) return true;
   if (!body || !created.length) return false;
+  const segs = rawSegments(path);
+  if (!segs || segs.some((x) => UNIQUE_ID.test(x) || /\d/.test(x))) return false;
   const mine = new Set(created.map((c) => (rawSegments(c) ?? []).pop()?.toLowerCase()).filter((id): id is string => !!id && UNIQUE_ID.test(id)));
-  const named = [...new Set([...body.matchAll(BODY_ID)].map((m) => m[0].toLowerCase()))];
-  return named.length > 0 && named.every((id) => mine.has(id));
+  let parsed: unknown;
+  try { parsed = JSON.parse(body); } catch { return false; }
+  let named = 0;
+  const ok = (v: unknown): boolean => {
+    if (v === null || v === false) return true;
+    if (typeof v === "string") {
+      if (mine.has(v.toLowerCase())) { named++; return true; }
+      return /^[a-z_$.:-]{0,40}$/i.test(v);
+    }
+    if (Array.isArray(v)) return v.every(ok);
+    if (typeof v === "object") return Object.values(v as object).every(ok);
+    return false;
+  };
+  return ok(parsed) && named > 0;
 }
 
 /**

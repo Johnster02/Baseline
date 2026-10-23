@@ -124,6 +124,10 @@ describe("decide hardening", () => {
     expect(bulk(JSON.stringify([{ ids: [mine] }])).action).toBe("continue");
     expect(bulk(JSON.stringify([{ ids: [mine, theirs] }]))).toMatchObject({ action: "abort", category: "delete" });
     expect(bulk(JSON.stringify([{ all: true }]))).toMatchObject({ action: "abort", category: "delete" });
+    expect(bulk(JSON.stringify([{ ids: [mine, 42] }]))).toMatchObject({ action: "abort", category: "delete" });
+    expect(bulk(`ids=${mine}`)).toMatchObject({ action: "abort", category: "delete" });
+    const onTheirs = decide({ method: "POST", url: `https://staging.acme.dev/projects/${theirs}`, loading: false, clickText: "Delete project", body: JSON.stringify([mine]) }, c);
+    expect(onTheirs).toMatchObject({ action: "abort", category: "delete" });
   });
   it("never learns a request to another host", () => {
     expect(decide({ method: "POST", url: "https://analytics.example/collect", loading: true }, ctx(look))).toEqual({ action: "continue" });

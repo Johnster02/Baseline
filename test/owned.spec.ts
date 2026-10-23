@@ -9,9 +9,10 @@ const NEW_ID = "f764b3d9-2ed5-4d46-af8f-63171fd88b4c";
 const OLD_ID = "15f1b5d3-9d93-46bb-bdcc-9dc439525f60";
 
 describe("OwnedTracker", () => {
-  it("owns a new id the browser lands on right after a write", () => {
+  it("owns a new id the site's reply sends the browser to right after a write", () => {
     const t = new OwnedTracker();
     t.wrote(1000);
+    t.seeText(`/orders/${NEW_ID}/edit`);
     expect(t.landed(`${SITE}/orders/${NEW_ID}/edit`, 1500)).toBe(`/orders/${NEW_ID}`);
     expect(t.paths).toEqual([`/orders/${NEW_ID}`]);
   });
@@ -44,7 +45,24 @@ describe("OwnedTracker", () => {
     expect(t.landed(`${SITE}/orders/summary`, 1100)).toBeUndefined();
     const late = new OwnedTracker();
     late.wrote(1000);
+    late.seeText(NEW_ID);
     expect(late.landed(`${SITE}/orders/${NEW_ID}`, 1000 + LANDING_WINDOW_MS + 1)).toBeUndefined();
+  });
+
+  it("knowing an id and going to it never makes it ours", () => {
+    const t = new OwnedTracker();
+    t.wrote(1000);
+    // The agent opens someone's record by an id it was told: only the URL ever named it.
+    t.seeUrl(`${SITE}/orders/${OLD_ID}`);
+    expect(t.landed(`${SITE}/orders/${OLD_ID}`, 1100)).toBeUndefined();
+    // Even if that page's reply then mentions the id, it was seen in the URL first.
+    t.seeText(OLD_ID);
+    expect(t.landed(`${SITE}/orders/${OLD_ID}`, 1200)).toBeUndefined();
+    // And a page the agent opened itself never counts.
+    const u = new OwnedTracker();
+    u.wrote(1000);
+    u.seeText(NEW_ID);
+    expect(u.landed(`${SITE}/orders/${NEW_ID}`, 1100, true)).toBeUndefined();
   });
 
   it("shares what it owns with other runners through its file", () => {

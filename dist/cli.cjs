@@ -20389,13 +20389,33 @@ function ownsPath(path, created = []) {
     return at >= 0 && p.length - at <= 2;
   });
 }
-var BODY_ID = /\b(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-hjkmnp-tv-z]{26})\b/gi;
 function ownsRequest(path, body, created = []) {
   if (ownsPath(path, created)) return true;
   if (!body || !created.length) return false;
+  const segs = rawSegments(path);
+  if (!segs || segs.some((x) => UNIQUE_ID.test(x) || /\d/.test(x))) return false;
   const mine = new Set(created.map((c) => (rawSegments(c) ?? []).pop()?.toLowerCase()).filter((id) => !!id && UNIQUE_ID.test(id)));
-  const named = [...new Set([...body.matchAll(BODY_ID)].map((m) => m[0].toLowerCase()))];
-  return named.length > 0 && named.every((id) => mine.has(id));
+  let parsed;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return false;
+  }
+  let named = 0;
+  const ok = (v) => {
+    if (v === null || v === false) return true;
+    if (typeof v === "string") {
+      if (mine.has(v.toLowerCase())) {
+        named++;
+        return true;
+      }
+      return /^[a-z_$.:-]{0,40}$/i.test(v);
+    }
+    if (Array.isArray(v)) return v.every(ok);
+    if (typeof v === "object") return Object.values(v).every(ok);
+    return false;
+  };
+  return ok(parsed) && named > 0;
 }
 function decide(req, ctx) {
   const { runner, cfg } = ctx;
@@ -20505,7 +20525,7 @@ var import_node_crypto4 = require("node:crypto");
 var import_node_fs5 = require("node:fs");
 var import_node_path4 = require("node:path");
 var LANDING_WINDOW_MS = 15e3;
-var BODY_ID2 = /\b(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9A-HJKMNP-TV-Z]{26})\b/gi;
+var BODY_ID = /\b(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9A-HJKMNP-TV-Z]{26})\b/gi;
 function ownedFile(runDir) {
   const key = (0, import_node_crypto4.createHash)("sha256").update((0, import_node_path4.resolve)(runDir)).digest("hex").slice(0, 16);
   return (0, import_node_path4.join)(dataDir(), "hosts", `owned-${key}.json`);
@@ -20528,12 +20548,13 @@ var OwnedTracker = class {
   paths;
   /** Order of events, not time: an id seen in the write's own URL comes before that write. */
   seq = 0;
+  /** When each id was first seen, and whether the site's reply was where it showed up. */
   firstSeen = /* @__PURE__ */ new Map();
   lastWriteSeq = -1;
   lastWriteAt = -Infinity;
-  see(id) {
+  see(id, reply) {
     const k = id.toLowerCase();
-    if (!this.firstSeen.has(k)) this.firstSeen.set(k, ++this.seq);
+    if (!this.firstSeen.has(k)) this.firstSeen.set(k, { seq: ++this.seq, reply });
   }
   /** Every id in a URL the browser asked for. */
   seeUrl(url2) {
@@ -20543,11 +20564,11 @@ var OwnedTracker = class {
     } catch {
       return;
     }
-    for (const seg of path.split("/")) if (UNIQUE_ID.test(seg)) this.see(seg);
+    for (const seg of path.split("/")) if (UNIQUE_ID.test(seg)) this.see(seg, false);
   }
-  /** Every UUID or ULID in a page or API response. */
+  /** Every UUID or ULID in a page or API response, or a redirect's Location. */
   seeText(text) {
-    for (const m of text.matchAll(BODY_ID2)) this.see(m[0]);
+    for (const m of text.matchAll(BODY_ID)) this.see(m[0], true);
   }
   /** The guard let a write through. */
   wrote(at = Date.now()) {
@@ -20560,8 +20581,13 @@ var OwnedTracker = class {
     this.paths.push(path);
     this.save();
   }
-  /** The browser landed on a page. Returns the record path it now owns, if this is one. */
-  landed(url2, at = Date.now()) {
+  /**
+   * The browser landed on a page. Returns the record path it now owns, if this is one: the id
+   * must have shown up first in the site's reply after the write (a response body or redirect),
+   * never in a URL the browser asked for. Pages the agent opened itself (`byAgent`, a goto)
+   * never count, so knowing an id and visiting it can't make it ours.
+   */
+  landed(url2, at = Date.now(), byAgent = false) {
     let segs;
     try {
       segs = new URL(url2).pathname.split("/").filter(Boolean);
@@ -20569,14 +20595,14 @@ var OwnedTracker = class {
       return void 0;
     }
     let owned;
-    if (at - this.lastWriteAt <= LANDING_WINDOW_MS) {
+    if (!byAgent && at - this.lastWriteAt <= LANDING_WINDOW_MS) {
       segs.forEach((seg, i) => {
         if (owned || !UNIQUE_ID.test(seg)) return;
         const first = this.firstSeen.get(seg.toLowerCase());
-        if (first === void 0 || first > this.lastWriteSeq) owned = "/" + segs.slice(0, i + 1).join("/");
+        if (first && first.reply && first.seq > this.lastWriteSeq) owned = "/" + segs.slice(0, i + 1).join("/");
       });
     }
-    for (const seg of segs) if (UNIQUE_ID.test(seg)) this.see(seg);
+    for (const seg of segs) if (UNIQUE_ID.test(seg)) this.see(seg, false);
     if (owned) this.add(owned);
     return owned;
   }
@@ -20745,7 +20771,7 @@ async function openSession(o) {
   const loadPath = (0, import_node_path6.join)(o.runDir, "logs", `load-requests-${o.runner.key}.json`);
   const learned = new Set(readJson(loadPath, []));
   const clicks = [];
-  const state = { loading: false };
+  const state = { loading: false, agentNav: false };
   const network = [];
   const owned = new OwnedTracker(ownedFile(o.runDir));
   const createdPaths = owned.paths;
@@ -20842,15 +20868,15 @@ async function openSession(o) {
     }
     if (u.host !== baseHost) return;
     const m = res.request().method();
-    if (m !== "GET" && m !== "HEAD" && res.status() === 201) {
+    if (m !== "GET" && m !== "HEAD") {
       const loc2 = res.headers()["location"];
-      if (loc2) {
+      if (loc2 && res.status() === 201) {
         try {
           const l = new URL(loc2, res.url());
           if (l.host === baseHost) owned.add(l.pathname);
         } catch {
         }
-      }
+      } else if (loc2 && res.status() >= 300 && res.status() < 400) owned.seeText(loc2);
     }
     if (STATIC.has(res.request().resourceType())) return;
     const type = res.headers()["content-type"] ?? "";
@@ -20864,7 +20890,7 @@ async function openSession(o) {
   page.on("framenavigated", (f) => {
     if (f !== page.mainFrame()) return;
     try {
-      if (new URL(f.url()).host === baseHost) owned.landed(f.url());
+      if (new URL(f.url()).host === baseHost) owned.landed(f.url(), Date.now(), state.agentNav);
     } catch {
     }
   });
@@ -20912,6 +20938,7 @@ async function openSession(o) {
       }
       const url2 = target.toString();
       try {
+        state.agentNav = true;
         await page.goto(url2, { waitUntil: "commit" });
         state.loading = true;
         await page.waitForLoadState("load");
@@ -20919,6 +20946,7 @@ async function openSession(o) {
         });
       } finally {
         state.loading = false;
+        state.agentNav = false;
       }
       await afterNav();
     },

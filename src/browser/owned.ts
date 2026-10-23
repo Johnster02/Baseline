@@ -4,9 +4,9 @@
 //
 // A record counts as the run's own when either:
 //   - the site answered a write with 201 Created and a Location, or
-//   - right after a write the guard allowed, the browser landed on a page whose path carries a
-//     unique id that had never appeared before that write: not in a URL, not in any page or API
-//     response. An id that was already on a list or in a link belongs to someone else.
+//   - right after a write the guard allowed, the browser was taken (not sent by the agent) to a
+//     page whose path carries a unique id that first appeared in the site's reply to that write.
+//     An id already on a list, in a link or in a URL the agent asked for belongs to someone else.
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -28,7 +28,8 @@ export class OwnedTracker {
   readonly paths: string[];
   /** Order of events, not time: an id seen in the write's own URL comes before that write. */
   private seq = 0;
-  private firstSeen = new Map<string, number>();
+  /** When each id was first seen, and whether the site's reply was where it showed up. */
+  private firstSeen = new Map<string, { seq: number; reply: boolean }>();
   private lastWriteSeq = -1;
   private lastWriteAt = -Infinity;
 
@@ -38,21 +39,21 @@ export class OwnedTracker {
     this.paths = Array.isArray(saved) ? saved.filter((p) => typeof p === "string") : [];
   }
 
-  private see(id: string) {
+  private see(id: string, reply: boolean) {
     const k = id.toLowerCase();
-    if (!this.firstSeen.has(k)) this.firstSeen.set(k, ++this.seq);
+    if (!this.firstSeen.has(k)) this.firstSeen.set(k, { seq: ++this.seq, reply });
   }
 
   /** Every id in a URL the browser asked for. */
   seeUrl(url: string) {
     let path: string;
     try { path = new URL(url).pathname; } catch { return; }
-    for (const seg of path.split("/")) if (UNIQUE_ID.test(seg)) this.see(seg);
+    for (const seg of path.split("/")) if (UNIQUE_ID.test(seg)) this.see(seg, false);
   }
 
-  /** Every UUID or ULID in a page or API response. */
+  /** Every UUID or ULID in a page or API response, or a redirect's Location. */
   seeText(text: string) {
-    for (const m of text.matchAll(BODY_ID)) this.see(m[0]);
+    for (const m of text.matchAll(BODY_ID)) this.see(m[0], true);
   }
 
   /** The guard let a write through. */
@@ -65,19 +66,24 @@ export class OwnedTracker {
     this.save();
   }
 
-  /** The browser landed on a page. Returns the record path it now owns, if this is one. */
-  landed(url: string, at = Date.now()): string | undefined {
+  /**
+   * The browser landed on a page. Returns the record path it now owns, if this is one: the id
+   * must have shown up first in the site's reply after the write (a response body or redirect),
+   * never in a URL the browser asked for. Pages the agent opened itself (`byAgent`, a goto)
+   * never count, so knowing an id and visiting it can't make it ours.
+   */
+  landed(url: string, at = Date.now(), byAgent = false): string | undefined {
     let segs: string[];
     try { segs = new URL(url).pathname.split("/").filter(Boolean); } catch { return undefined; }
     let owned: string | undefined;
-    if (at - this.lastWriteAt <= LANDING_WINDOW_MS) {
+    if (!byAgent && at - this.lastWriteAt <= LANDING_WINDOW_MS) {
       segs.forEach((seg, i) => {
         if (owned || !UNIQUE_ID.test(seg)) return;
         const first = this.firstSeen.get(seg.toLowerCase());
-        if (first === undefined || first > this.lastWriteSeq) owned = "/" + segs.slice(0, i + 1).join("/");
+        if (first && first.reply && first.seq > this.lastWriteSeq) owned = "/" + segs.slice(0, i + 1).join("/");
       });
     }
-    for (const seg of segs) if (UNIQUE_ID.test(seg)) this.see(seg);
+    for (const seg of segs) if (UNIQUE_ID.test(seg)) this.see(seg, false);
     if (owned) this.add(owned);
     return owned;
   }
