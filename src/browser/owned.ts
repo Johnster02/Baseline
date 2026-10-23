@@ -56,9 +56,20 @@ export class OwnedTracker {
     for (const m of text.matchAll(BODY_ID)) this.see(m[0], true);
   }
 
-  /** A same-site path the site's reply redirects to: its ids count as the reply's. */
+  /** A same-site path the site's reply redirects to: its UUIDs and ULIDs count as the reply's. */
   seeReplyPath(path: string) {
-    for (const seg of path.split("/")) if (UNIQUE_ID.test(seg)) this.see(seg, true);
+    for (const m of path.matchAll(BODY_ID)) this.see(m[0], true);
+  }
+
+  /**
+   * A write about to go out: every id it names (path, query, body) came from the request, so a
+   * reply that echoes one back can never make it look new.
+   */
+  seeRequest(url: string, body?: string) {
+    this.seeUrl(url);
+    let query = "";
+    try { query = decodeURIComponent(new URL(url).search); } catch { query = ""; }
+    for (const text of [query, body ?? ""]) for (const m of text.matchAll(BODY_ID)) this.see(m[0], false);
   }
 
   /** The guard let a write through. */

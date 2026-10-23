@@ -149,7 +149,7 @@ export async function openSession(o: OpenOptions): Promise<Session> {
       }
       if (d.learn) { learned.add(d.learn); writeFileSync(loadPath, JSON.stringify([...learned], null, 2)); }
       if (u.host === baseHost) {
-        owned.seeUrl(r.url());
+        owned.seeRequest(r.url(), r.postData() ?? undefined);
         if (method !== "GET" && method !== "HEAD" && !loading) owned.wrote();
       }
       if (u.host === baseHost && !STATIC.has(r.resourceType())) network.push({ at: new Date().toISOString(), ...entry, type: r.resourceType(), outcome: "allowed" });

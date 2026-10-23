@@ -20597,9 +20597,23 @@ var OwnedTracker = class {
   seeText(text) {
     for (const m of text.matchAll(BODY_ID)) this.see(m[0], true);
   }
-  /** A same-site path the site's reply redirects to: its ids count as the reply's. */
+  /** A same-site path the site's reply redirects to: its UUIDs and ULIDs count as the reply's. */
   seeReplyPath(path) {
-    for (const seg of path.split("/")) if (UNIQUE_ID.test(seg)) this.see(seg, true);
+    for (const m of path.matchAll(BODY_ID)) this.see(m[0], true);
+  }
+  /**
+   * A write about to go out: every id it names (path, query, body) came from the request, so a
+   * reply that echoes one back can never make it look new.
+   */
+  seeRequest(url2, body) {
+    this.seeUrl(url2);
+    let query = "";
+    try {
+      query = decodeURIComponent(new URL(url2).search);
+    } catch {
+      query = "";
+    }
+    for (const text of [query, body ?? ""]) for (const m of text.matchAll(BODY_ID)) this.see(m[0], false);
   }
   /** The guard let a write through. */
   wrote(at = Date.now()) {
@@ -20861,7 +20875,7 @@ async function openSession(o) {
         (0, import_node_fs7.writeFileSync)(loadPath, JSON.stringify([...learned], null, 2));
       }
       if (u.host === baseHost) {
-        owned.seeUrl(r.url());
+        owned.seeRequest(r.url(), r.postData() ?? void 0);
         if (method !== "GET" && method !== "HEAD" && !loading) owned.wrote();
       }
       if (u.host === baseHost && !STATIC.has(r.resourceType())) network.push({ at: (/* @__PURE__ */ new Date()).toISOString(), ...entry, type: r.resourceType(), outcome: "allowed" });

@@ -25,6 +25,14 @@ describe("OwnedTracker", () => {
     expect(t.landed(`${SITE}/projects/${NEW_ID}?brief=new`, 1400)).toBe(`/projects/${NEW_ID}`);
   });
 
+  it("never owns an id the write itself named, even when the reply redirects to it", () => {
+    const t = new OwnedTracker();
+    t.seeRequest(`${SITE}/orders/copy?from=${OLD_ID}`, JSON.stringify({ source: OLD_ID }));
+    t.wrote(1000);
+    t.seeReplyPath(`/orders/${OLD_ID}`);
+    expect(t.landed(`${SITE}/orders/${OLD_ID}`, 1200)).toBeUndefined();
+  });
+
   it("never owns an id that was on a page before the write", () => {
     const t = new OwnedTracker();
     t.seeText(`<a href="/orders/${OLD_ID}">Someone's order</a>`);
