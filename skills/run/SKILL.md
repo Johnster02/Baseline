@@ -135,6 +135,19 @@ messages short: the band above the prompt shows progress, and the report holds t
    partly affected (a side screen, an edge case) don't trigger it: they end `skipped` as usual.
 7. `baseline progress start <pr|quick|full> <agents>` and `baseline progress phase gather done`.
 
+## Time budget
+
+A PR run on a small change takes **about 5 minutes end to end, at most**: a person would make
+the record and check the screen in one or two, and the run also looks around it, but never takes
+ten times as long. Rough split: start and sign-in under 30 seconds (sign runners in in parallel),
+explorer about 3 minutes, cleanup about 1, verdicts and report under 1. To keep to it:
+- run each step straight after the last, with no waiting between phases; skip a phase with
+  nothing to do (code unchanged since the last run on the same commit, a refuter with only
+  matches);
+- tell each explorer its budget and to use as few scripts as possible (one if it can);
+- in the summary, give the time each phase took, so a slow one is visible.
+Quick runs aim for about 15 minutes and full runs about 40.
+
 ## 2. Read code and explore (agents in parallel, one message)
 
 `baseline progress phase read-code active` (or `skipped` with no code) and

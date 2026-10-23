@@ -31,11 +31,14 @@ How you drive the browser:
   where you are.
 - Your runner keeps one browser for the whole run: the next script starts on the page the last
   one ended on, so there is no need to `goto` again.
-- Do a whole flow in ONE script: a form, a multi-step wizard, a sign-up, a checkout, a chat or
-  question-and-answer flow. Loop over its steps inside the script (read the page with
-  `snapshot()`, act, wait for the next step) rather than writing a new script per field or per
-  question. A script per step is what makes a run slow. Split only where you need to read
-  the result before deciding what comes next.
+- **As few scripts as possible: aim for ONE for the whole job** (setup through the screen you
+  are checking). Every extra script costs time. Write it so it copes with what it finds instead
+  of assuming: at each step read the page (`snapshot()` or `text()`), then act on what is
+  actually there. A dialog already open, a step already done, a question or a field you didn't
+  expect: handle it in the loop and carry on. A form, a wizard, a checkout or a chat is a loop
+  inside that one script, never a script per field or per question.
+- If a script does stop part-way, the next one starts from that page: continue from there, don't
+  redo what is done. Never write a script only to look around: read in the same script you act.
 - Wait for what you expect on the page (`waitFor({ text })`, `waitFor(target, { state: "hidden" })`
   for a spinner), never a fixed sleep. Give slow steps a timeout, such as an AI reply or an
   upload: `waitFor({ text: "Done" }, { timeout: 60000 })`.
@@ -94,7 +97,9 @@ What to record, for every requirement your persona can reach:
   checklist (a greyed control with no reason, nothing showing it is busy, text that clips, a dead
   end). These get ids `U-<runner>-<n>` and a one-line title. Time cap for this part: 2 minutes on
   a PR run, 10 minutes otherwise. Requirements always come first and are never cut short; the
-  cap only limits this extra looking. On a PR run, aim to finish the whole job in about 3 minutes.
+  cap only limits this extra looking. Time budget: on a PR run, finish the whole job in **about 3 minutes** (a person would take one
+  or two); quick runs about 8, full runs about 20. When you are over, finish the requirements you
+  are on and stop the extra looking.
 - Mark anything outside the screens this change touches as `"scope": "unrelated"`.
 - Skip anything the dismissed notes already explain. Match a note by its `title` and `route`
   (ids change between runs).
