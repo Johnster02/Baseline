@@ -56,7 +56,9 @@ export function looksLikeMutation(body?: string): boolean {
 
 /** Query params that change on every load (cache-busters): left out of a learned request's key. */
 const CACHE_BUSTERS = new Set(["_", "t", "ts", "cb", "cachebust", "cachebuster", "nocache", "rnd", "rand", "random"]);
-const isCacheBuster = (k: string, v: string) => CACHE_BUSTERS.has(k.toLowerCase()) || /^\d{10,}$/.test(v);
+// Dropped only when the name is a known cache-buster AND the value looks like a timestamp or
+// random token. Never by value alone: an id that happens to be long digits must stay in the key.
+const isCacheBuster = (k: string, v: string) => CACHE_BUSTERS.has(k.toLowerCase()) && /^(\d[\d.]*|(?=[a-z]*\d)[a-z0-9]{6,})$/i.test(v);
 
 /** The query with cache-busters dropped and params sorted, so the same call matches on every load. */
 function stableQuery(u: URL): string {

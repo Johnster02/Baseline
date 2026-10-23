@@ -28,8 +28,10 @@ export function runGuardHook(name: GuardHook, stdin: string, env: NodeJS.Process
     const root = str(ti.path);
     const glob = str(ti.glob) || (tool === "Glob" ? str(ti.pattern) : "");
     const globAt = glob && root && !/^[~/]/.test(glob) ? `${root.replace(/\/+$/, "")}/${glob}` : glob;
-    const paths = [str(ti.file_path), root, globAt].filter(Boolean);
-    res = readGuard(paths, { cwd, protectedDirs, search: tool === "Grep" || tool === "Glob" });
+    const search = tool === "Grep" || tool === "Glob";
+    // No root means the search runs from cwd, which may itself contain a data folder.
+    const paths = [str(ti.file_path), root || (search ? cwd : ""), globAt].filter(Boolean);
+    res = readGuard(paths, { cwd, protectedDirs, search });
   } else {
     const run = activeRun(projectDir);
     const urls = run?.urls ?? (run ? [run.url] : []);

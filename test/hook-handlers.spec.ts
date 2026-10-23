@@ -59,6 +59,12 @@ describe("runGuardHook", () => {
     expect(call("read-guard", { tool_name: "Glob", tool_input: { pattern: join(data, "**", "*.json") } }).code).toBe(2);
     expect(call("read-guard", { tool_name: "Glob", tool_input: { pattern: "**/*.json" } }).code).toBe(0);
   });
+  it("read-guard: Grep or Glob with no path searches cwd, refused when cwd contains the data folder", () => {
+    const above = join(data, "..");
+    expect(call("read-guard", { cwd: above, tool_name: "Grep", tool_input: { pattern: "password" } }).code).toBe(2);
+    expect(call("read-guard", { cwd: above, tool_name: "Glob", tool_input: { pattern: "**/*.json" } }).code).toBe(2);
+    expect(call("read-guard", { tool_name: "Grep", tool_input: { pattern: "password" } }).code).toBe(0);
+  });
   it("read-guard: a search rooted above the data folder is refused; Grep's regex is never read as a path", () => {
     const above = join(data, "..");
     expect(call("read-guard", { tool_name: "Grep", tool_input: { pattern: "password", path: above } }).code).toBe(2);

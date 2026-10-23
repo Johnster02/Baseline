@@ -108,7 +108,13 @@ describe("query strings", () => {
     if (load.action === "continue" && load.learn) x.learned.add(load.learn);
     expect(decide(req({ url: base + "/api/poll?feed=main&_=1700000009999" }), x).action).toBe("continue");
     expect(decide(req({ url: base + "/api/poll?feed=other&_=1700000009999" }), x)).toMatchObject({ action: "abort" });
-    expect(requestKey("POST", base + "/a?ts=123&cb=9&q=1&v=17000000000001")).toBe(requestKey("POST", base + "/a?q=1"));
+    expect(requestKey("POST", base + "/a?ts=123&cb=9&q=1")).toBe(requestKey("POST", base + "/a?q=1"));
+  });
+  it("never drops a parameter by its value alone: a long numeric id stays in the learned key", () => {
+    expect(requestKey("POST", base + "/a?id=17000000000001")).not.toBe(requestKey("POST", base + "/a?id=17000000000002"));
+    expect(requestKey("POST", base + "/a?order=17000000000001")).not.toBe(requestKey("POST", base + "/a"));
+    // A cache-buster name with a value that isn't a timestamp or token is kept too.
+    expect(requestKey("POST", base + "/a?t=delete")).not.toBe(requestKey("POST", base + "/a"));
   });
 });
 

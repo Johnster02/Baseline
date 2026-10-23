@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import type { ThemeName } from "../config/schema";
 import type { InputRef } from "../inputs/resolve";
@@ -102,7 +102,9 @@ export function buildRunRecord(runDir: string): RunRecord {
   let left = SHOT_BUDGET;
   for (const p of want) {
     const abs = join(runDir, p);
-    if (!isInside(runDir, abs) || !existsSync(abs)) continue;
+    if (!/\.(png|jpe?g|webp|gif)$/i.test(p) || !isInside(runDir, abs) || !existsSync(abs)) continue;
+    // A symlink in the run folder must not pull files from elsewhere into the report.
+    try { if (lstatSync(abs).isSymbolicLink() || !isInside(realpathSync.native(runDir), realpathSync.native(abs))) continue; } catch { continue; }
     let size = 0;
     try { size = statSync(abs).size; } catch { continue; }
     const encoded = Math.ceil(size / 3) * 4;

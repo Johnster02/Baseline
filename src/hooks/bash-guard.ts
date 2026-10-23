@@ -3,7 +3,8 @@
 // out of Baseline's data folder (passwords, saved sessions, tracker tokens) at all times.
 // Kept free of heavy imports: these run on every tool call from dist/hook.cjs.
 import { homedir } from "node:os";
-import { isAbsolute, resolve } from "node:path";
+import { realpathSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { isInside, pluginDataRoots } from "../core/paths";
 
 export { activeRun } from "./active-run";
@@ -89,7 +90,10 @@ function dataSpellings(dirs: string[]): string[] {
 
 /** True when a command names one of Baseline's data folders. */
 export function mentionsDataDir(command: string, dirs: string[]): boolean {
-  const lower = command.replace(/['"\\]/g, "").toLowerCase();
+  // Collapse // and /./ so `~//.config/./baseline` reads like `~/.config/baseline`.
+  const lower = command.replace(/['"\\]/g, "").toLowerCase().replace(/\/(\.\/)+/g, "/").replace(/\/{2,}/g, "/");
+  // A glob or variable in a path that goes through .config or .claude could expand to the data folder.
+  if (lower.split(/[\s;&|()<>]+/).some((t) => /(^|\/)\.(config|claude)(\/|$)/.test(t) && /[*?[{$]/.test(t))) return true;
   if (/\$\{?claude_plugin_data\b/.test(lower)) return true;
   if (/\.config\/baseline(?=$|[/\s;&|)])/.test(lower)) return true;
   return dataSpellings(dirs).some((d) => {
@@ -185,6 +189,19 @@ export function toolGuard(toolName: string, ctx: { runUrl?: string | undefined }
   return { allow: true };
 }
 
+/** Symlinks resolved through the closest existing parent, so a link into the data folder is caught. */
+function realExisting(p: string): string {
+  let cur = resolve(p);
+  const rest: string[] = [];
+  for (;;) {
+    try { return join(realpathSync.native(cur), ...rest); } catch { /* walk up */ }
+    const up = dirname(cur);
+    if (up === cur) return resolve(p);
+    rest.unshift(basename(cur));
+    cur = up;
+  }
+}
+
 /** `~/x` and relative paths, made absolute. */
 function absPath(p: string, cwd: string): string {
   if (p === "~" || p.startsWith("~/")) return resolve(process.env.HOME || homedir(), p.slice(2));
@@ -204,9 +221,10 @@ export function readGuard(paths: string[], ctx: { cwd: string; protectedDirs: st
     let fixed = p.split(/[*?[{]/)[0] ?? "";
     if (glob) fixed = fixed.slice(0, fixed.lastIndexOf("/") + 1) || (fixed.startsWith("/") ? "/" : ".");
     if (!fixed) continue;
-    const abs = absPath(fixed, ctx.cwd);
-    if (ctx.protectedDirs.some((d) => isInside(d, abs))) return { deny: DATA_DENY };
-    if ((ctx.search || glob) && ctx.protectedDirs.some((d) => isInside(abs, d))) {
+    const abs = realExisting(absPath(fixed, ctx.cwd));
+    const dirs = ctx.protectedDirs.flatMap((d) => [resolve(d), realExisting(d)]);
+    if (dirs.some((d) => isInside(d, abs))) return { deny: DATA_DENY };
+    if ((ctx.search || glob) && dirs.some((d) => isInside(abs, d))) {
       return { deny: "That search would reach into Baseline's data folder (passwords, saved sessions). Search a narrower folder." };
     }
   }

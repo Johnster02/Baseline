@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bashGuard, activeRunUrl, activeRun, normalizeSegment, mentionsDataDir, readGuard, sweepsHome, writeGuard } from "../src/hooks/bash-guard";
@@ -245,6 +245,12 @@ describe("Baseline's data folder is off limits at all times", () => {
       expect(bashGuard(c, { protectedDirs: dirs }), c).toMatchObject({ deny: expect.any(String) });
     }
   });
+  it("bash: doubled slashes, ./ segments, globs and variables near .config or .claude are refused", () => {
+    for (const c of ["cat ~//.config/./baseline/secrets/a.json", "cat ~/.config/basel?ne/trackers.json", "cat ~/.config/{baseline,x}/trackers.json",
+      "D=baseline; cat ~/.config/$D/trackers.json", "ls ~/.claude/plugins/data/*"]) {
+      expect(mentionsDataDir(c, dirs), c).toBe(true);
+    }
+  });
   it("bash: lookalike folders are fine", () => {
     for (const c of ["ls ~/.config/baseline-private", "cat ~/.config/baselinex/a", "baseline config show"]) expect(mentionsDataDir(c, dirs), c).toBe(false);
   });
@@ -254,6 +260,16 @@ describe("Baseline's data folder is off limits at all times", () => {
     expect(readGuard(["~/.config/baseline/trackers.json"], ctx)).toMatchObject({ deny: expect.any(String) });
     expect(readGuard([`${dirs[1]}/**/*.json`], ctx)).toMatchObject({ deny: expect.any(String) });
     expect(readGuard(["/tmp/project/README.md"], ctx)).toEqual({ allow: true });
+  });
+  it("read: a symlink that points into the data folder is followed and refused", () => {
+    const data = mkdtempSync(join(tmpdir(), "rg-data-"));
+    const proj = mkdtempSync(join(tmpdir(), "rg-proj-"));
+    writeFileSync(join(data, "trackers.json"), "{}");
+    symlinkSync(data, join(proj, "link"));
+    const ctx = { cwd: proj, protectedDirs: [data] };
+    expect(readGuard([join(proj, "link", "trackers.json")], ctx)).toMatchObject({ deny: expect.any(String) });
+    expect(readGuard(["link/trackers.json"], ctx)).toMatchObject({ deny: expect.any(String) });
+    expect(readGuard([join(proj, "link", "not-yet", "x.json")], ctx)).toMatchObject({ deny: expect.any(String) });
   });
   it("write and edit can't change it, and can't touch .baseline config mid-run", () => {
     const proj = "/tmp/proj";

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { trustedFiles } from "../src/core/paths";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -179,6 +179,21 @@ describe("buildRunRecord", () => {
       { id: "R-1", title: "a", verdict: "product", specced: { text: "s", ref: "R1" }, observed: { text: "o", shots: ["../r-1-evil/x.jpg"], steps: [] } },
     ]));
     expect(buildRunRecord(runDir).shots).toEqual({});
+  });
+  it("never follows a symlinked screenshot, and only inlines image files", () => {
+    const proj = mkdtempSync(join(tmpdir(), "p-"));
+    const runDir = join(proj, ".baseline", "sessions", "s", "runs", "r-1");
+    mkdirSync(join(runDir, "shots"), { recursive: true });
+    const secret = join(proj, "secret.txt");
+    writeFileSync(secret, "SECRET");
+    symlinkSync(secret, join(runDir, "shots", "a.jpg"));
+    writeFileSync(join(runDir, "shots", "notes.txt"), "not an image");
+    writeFileSync(join(runDir, "shots", "ok.jpg"), "JPEGDATA");
+    writeFileSync(join(runDir, "run.json"), JSON.stringify({ runId: "r-1", url: "http://x", label: "PR #1", startedAt: "2026-10-22T09:00:00Z" }));
+    writeFileSync(join(runDir, "findings.json"), JSON.stringify([
+      { id: "R-1", title: "a", verdict: "product", specced: { text: "s", ref: "R1" }, observed: { text: "o", shots: ["shots/a.jpg", "shots/notes.txt", "shots/ok.jpg"], steps: [] } },
+    ]));
+    expect(Object.keys(buildRunRecord(runDir).shots)).toEqual(["shots/ok.jpg"]);
   });
 });
 
