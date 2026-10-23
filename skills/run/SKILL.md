@@ -153,7 +153,20 @@ messages short: the band above the prompt shows progress, and the report holds t
 The code-reader reports its own `read-code` percentage as it works. As each explorer returns,
 update the explore percentage (`baseline progress phase explore active <pct>`, explorers back
 out of explorers sent).
-When all are back, mark `read-code` and `explore` done.
+
+**An explorer that comes back `BLOCKED:` pauses the run, it never ends it.** Read its
+`explore/<runner>/blocker.json`, look at the screenshot, and ask the user right away with
+AskUserQuestion: name the step and quote what the site said, then offer the explorer's options
+(best first), plus "Finish with these skipped" last. Then:
+- an option the runner may already do: send the explorer the user's answer with SendMessage,
+  and it carries on from the same page (its browser is still open);
+- an option the user does themselves (add a balance, fix data): wait for them to say it's done,
+  then resume the explorer the same way;
+- a missing permission: say the run must close to change it, and on yes close it, grant it
+  (separate Bash call), and restart from step 1.5 as in the reach check.
+Only "Finish with these skipped" lets those requirements end `skipped`. Never finish a run on
+its own because a step on the main path was blocked.
+When all explorers are back and nothing is blocked, mark `read-code` and `explore` done.
 
 ## 3. Verdicts
 

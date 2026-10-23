@@ -68,6 +68,19 @@ Test data (decided, not optional):
   "needed to submit its own order (allow: create)". Never fall back to writing on someone else's
   data, and never call a requirement checked when the condition it is about wasn't there.
 
+Blocked on the main path (decided, not optional):
+- If the site, the guard or missing data stops a step on the way to what the requirements are
+  about (a greyed button, an error, an out-of-stock or no-balance message, a refused request),
+  STOP there. Don't mark the requirements skipped and finish, and don't work around it.
+- Leave the browser where it is (your runner keeps it open), take a screenshot of the block, and
+  write `<runDir>/explore/<runner>/blocker.json`:
+  `{ "step": "what you were doing", "said": "exactly what the site or guard said",
+     "shot": "shots/<file>.jpg", "requirements": ["R-01", ...],
+     "options": ["each way round it you can see, e.g. use the order the last run placed",
+                 "what the user could change, e.g. add stock / a balance / a permission"] }`
+- Your final message starts with `BLOCKED:` and the one-line reason. The orchestrator asks the
+  user and then sends you their answer: carry on from the same page with it.
+
 What to record, for every requirement your persona can reach:
 - `as-expected`, `differs`, `broken`, `not-reachable` or `skipped`, with what you saw in plain
   sentences and the steps to see it again. Use `skipped` whenever you held back because your
