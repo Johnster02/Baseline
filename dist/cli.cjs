@@ -20468,7 +20468,8 @@ function decide(req, ctx) {
     const url2 = p.urls.find((g) => globMatch(g, path));
     if (url2) return { action: "abort", category: cat, reason: `matches protected ${cat} URL pattern`, trigger: url2 };
     if (cat === "delete" && ownsRequest(u.pathname, req.body, ctx.createdPaths)) continue;
-    const word = req.clickText ? p.words.find((w) => wordHit(req.clickText, w)) : void 0;
+    const ownSite = !ctx.baseHost || u.host === ctx.baseHost;
+    const word = ownSite && req.clickText ? p.words.find((w) => wordHit(req.clickText, w)) : void 0;
     if (word) return { action: "abort", category: cat, reason: `clicked control looks like ${cat}`, trigger: word.toLowerCase() };
   }
   if (method === "DELETE" && !runner.allow.includes("delete")) {

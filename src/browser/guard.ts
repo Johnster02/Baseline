@@ -153,7 +153,11 @@ export function decide(req: GuardRequest, ctx: GuardContext): Decision {
     // A "Delete" click on a record this run created is the cleaner's job: only the word check is
     // waived, never the protected URL patterns.
     if (cat === "delete" && ownsRequest(u.pathname, req.body, ctx.createdPaths)) continue;
-    const word = req.clickText ? p.words.find((w) => wordHit(req.clickText!, w)) : undefined;
+    // A click's words judge the site's own requests only. The sign-in service refreshing its
+    // session or an error reporter firing in the same moment is not what the click did, and
+    // blocking them breaks the page. Protected URL patterns above still apply to every host.
+    const ownSite = !ctx.baseHost || u.host === ctx.baseHost;
+    const word = ownSite && req.clickText ? p.words.find((w) => wordHit(req.clickText!, w)) : undefined;
     if (word) return { action: "abort", category: cat, reason: `clicked control looks like ${cat}`, trigger: word.toLowerCase() };
   }
 

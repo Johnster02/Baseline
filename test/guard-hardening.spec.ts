@@ -132,6 +132,13 @@ describe("decide hardening", () => {
     const onTheirs = decide({ method: "POST", url: `https://staging.acme.dev/projects/${theirs}`, loading: false, clickText: "Delete project", body: JSON.stringify([mine]) }, c);
     expect(onTheirs).toMatchObject({ action: "abort", category: "delete" });
   });
+  it("a click's words don't block other services' requests made in the same moment", () => {
+    const c = ctx();
+    const at = (url: string) => decide({ method: "POST", url, loading: false, clickText: "Delete project" }, c);
+    expect(at("https://staging.acme.dev/projects")).toMatchObject({ action: "abort", category: "delete" });
+    expect(at("https://auth.example-idp.dev/v1/environment?_method=PATCH").action).toBe("continue");
+    expect(at("https://o1.ingest.sentry.io/api/1/envelope/").action).toBe("continue");
+  });
   it("never learns a request to another host", () => {
     expect(decide({ method: "POST", url: "https://analytics.example/collect", loading: true }, ctx(look))).toEqual({ action: "continue" });
   });
