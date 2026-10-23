@@ -62,6 +62,13 @@ export const requestKey = (method: string, url: string, body = "") => {
 /** Categories whose URL patterns also apply to page navigations (GETs with side effects, like /logout). */
 const GET_CATEGORIES: PatternCategory[] = ["auth", "delete"];
 
+/** Sign-in and error-reporting services: a click's words never judge their background calls. */
+const PLATFORM_HOSTS = [
+  /(^|\.)clerk\.accounts\.dev$/i, /(^|\.)clerk\.com$/i, /(^|\.)auth0\.com$/i,
+  /(^|\.)sentry\.io$/i, /(^|\.)datadoghq\.(com|eu)$/i, /(^|\.)posthog\.com$/i,
+  /(^|\.)segment\.(io|com)$/i, /(^|\.)google-analytics\.com$/i,
+];
+
 /** An id that names one record: a UUID, a ULID, or a long token with letters and digits. */
 export const UNIQUE_ID = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-hjkmnp-tv-z]{26}|(?=[a-z_-]*[0-9])(?=[0-9_-]*[a-z])[0-9a-z_-]{16,})$/i;
 
@@ -153,11 +160,12 @@ export function decide(req: GuardRequest, ctx: GuardContext): Decision {
     // A "Delete" click on a record this run created is the cleaner's job: only the word check is
     // waived, never the protected URL patterns.
     if (cat === "delete" && ownsRequest(u.pathname, req.body, ctx.createdPaths)) continue;
-    // A click's words judge the site's own requests only. The sign-in service refreshing its
-    // session or an error reporter firing in the same moment is not what the click did, and
-    // blocking them breaks the page. Protected URL patterns above still apply to every host.
-    const ownSite = !ctx.baseHost || u.host === ctx.baseHost;
-    const word = ownSite && req.clickText ? p.words.find((w) => wordHit(req.clickText!, w)) : undefined;
+    // A click's words judge every request it could have caused, on any host (an app's API can
+    // live elsewhere). Only known sign-in and error-reporting services are left out: refreshing a
+    // session or sending a report in the same moment is not what the click did, and blocking them
+    // breaks the page. Protected URL patterns above still apply to every host.
+    const infra = PLATFORM_HOSTS.some((re) => re.test(u.hostname));
+    const word = !infra && req.clickText ? p.words.find((w) => wordHit(req.clickText!, w)) : undefined;
     if (word) return { action: "abort", category: cat, reason: `clicked control looks like ${cat}`, trigger: word.toLowerCase() };
   }
 

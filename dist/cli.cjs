@@ -20397,6 +20397,16 @@ var requestKey = (method, url2, body = "") => {
   return `${method.toUpperCase()} ${u.host}${u.pathname}${h}`;
 };
 var GET_CATEGORIES = ["auth", "delete"];
+var PLATFORM_HOSTS = [
+  /(^|\.)clerk\.accounts\.dev$/i,
+  /(^|\.)clerk\.com$/i,
+  /(^|\.)auth0\.com$/i,
+  /(^|\.)sentry\.io$/i,
+  /(^|\.)datadoghq\.(com|eu)$/i,
+  /(^|\.)posthog\.com$/i,
+  /(^|\.)segment\.(io|com)$/i,
+  /(^|\.)google-analytics\.com$/i
+];
 var UNIQUE_ID = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-hjkmnp-tv-z]{26}|(?=[a-z_-]*[0-9])(?=[0-9_-]*[a-z])[0-9a-z_-]{16,})$/i;
 function rawSegments(path) {
   if (/%2f|%5c|%2e|\\/i.test(path)) return void 0;
@@ -20468,8 +20478,8 @@ function decide(req, ctx) {
     const url2 = p.urls.find((g) => globMatch(g, path));
     if (url2) return { action: "abort", category: cat, reason: `matches protected ${cat} URL pattern`, trigger: url2 };
     if (cat === "delete" && ownsRequest(u.pathname, req.body, ctx.createdPaths)) continue;
-    const ownSite = !ctx.baseHost || u.host === ctx.baseHost;
-    const word = ownSite && req.clickText ? p.words.find((w) => wordHit(req.clickText, w)) : void 0;
+    const infra = PLATFORM_HOSTS.some((re) => re.test(u.hostname));
+    const word = !infra && req.clickText ? p.words.find((w) => wordHit(req.clickText, w)) : void 0;
     if (word) return { action: "abort", category: cat, reason: `clicked control looks like ${cat}`, trigger: word.toLowerCase() };
   }
   if (method === "DELETE" && !runner.allow.includes("delete")) {
