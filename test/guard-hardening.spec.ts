@@ -141,6 +141,10 @@ describe("decide hardening", () => {
     // The app's own API on another host is still judged by the click.
     expect(at("https://api.acme.dev/projects/7")).toMatchObject({ action: "abort", category: "delete" });
     expect(at("https://unknown.example/delete-things")).toMatchObject({ action: "abort", category: "delete" });
+    // A provider's other endpoints, and the site under test on such a domain, are still judged.
+    expect(at("https://wired-buffalo-11.clerk.accounts.dev/v1/users/u_1")).toMatchObject({ action: "abort", category: "delete" });
+    const onSentry = { ...ctx(), baseHost: "o1.ingest.sentry.io" };
+    expect(decide({ method: "POST", url: "https://o1.ingest.sentry.io/api/1/envelope/", loading: false, clickText: "Delete project" }, onSentry)).toMatchObject({ action: "abort", category: "delete" });
   });
   it("never learns a request to another host", () => {
     expect(decide({ method: "POST", url: "https://analytics.example/collect", loading: true }, ctx(look))).toEqual({ action: "continue" });

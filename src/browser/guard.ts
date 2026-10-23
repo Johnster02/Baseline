@@ -62,11 +62,18 @@ export const requestKey = (method: string, url: string, body = "") => {
 /** Categories whose URL patterns also apply to page navigations (GETs with side effects, like /logout). */
 const GET_CATEGORIES: PatternCategory[] = ["auth", "delete"];
 
-/** Sign-in and error-reporting services: a click's words never judge their background calls. */
-const PLATFORM_HOSTS = [
-  /(^|\.)clerk\.accounts\.dev$/i, /(^|\.)clerk\.com$/i, /(^|\.)auth0\.com$/i,
-  /(^|\.)sentry\.io$/i, /(^|\.)datadoghq\.(com|eu)$/i, /(^|\.)posthog\.com$/i,
-  /(^|\.)segment\.(io|com)$/i, /(^|\.)google-analytics\.com$/i,
+/**
+ * Sign-in and error-reporting background calls a click's words never judge: host and path, so a
+ * provider's other endpoints are still checked. Never applied to the site under test itself.
+ */
+const PLATFORM_CALLS: { host: RegExp; path: RegExp }[] = [
+  { host: /(^|\.)clerk\.accounts\.dev$|(^|\.)clerk\.com$/i, path: /^\/v1\/(environment|client)(\/(sessions\/[^/]+\/(tokens|touch)(\/[^/]*)?)?)?$/i },
+  { host: /(^|\.)auth0\.com$/i, path: /^\/oauth\/token$/i },
+  { host: /(^|\.)sentry\.io$/i, path: /^\/api\/\d+\/(envelope|store)\/?$/i },
+  { host: /(^|\.)datadoghq\.(com|eu)$/i, path: /^\/api\/v2\/(rum|logs)$/i },
+  { host: /(^|\.)posthog\.com$/i, path: /^\/(e|batch|decide|i\/v0\/e)\/?$/i },
+  { host: /(^|\.)segment\.(io|com)$/i, path: /^\/v1\/(t|track|p|page|i|identify|batch)$/i },
+  { host: /(^|\.)google-analytics\.com$/i, path: /^\/(g\/)?collect$/i },
 ];
 
 /** An id that names one record: a UUID, a ULID, or a long token with letters and digits. */
@@ -164,7 +171,7 @@ export function decide(req: GuardRequest, ctx: GuardContext): Decision {
     // live elsewhere). Only known sign-in and error-reporting services are left out: refreshing a
     // session or sending a report in the same moment is not what the click did, and blocking them
     // breaks the page. Protected URL patterns above still apply to every host.
-    const infra = PLATFORM_HOSTS.some((re) => re.test(u.hostname));
+    const infra = !!ctx.baseHost && u.host !== ctx.baseHost && PLATFORM_CALLS.some((c) => c.host.test(u.hostname) && c.path.test(u.pathname));
     const word = !infra && req.clickText ? p.words.find((w) => wordHit(req.clickText!, w)) : undefined;
     if (word) return { action: "abort", category: cat, reason: `clicked control looks like ${cat}`, trigger: word.toLowerCase() };
   }
