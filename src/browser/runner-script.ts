@@ -69,9 +69,14 @@ register("script", "run an agent's browser script as a runner: script <runner> <
   if (data.startsWith(script) || script.startsWith(data + sep)) { err("refusing: scripts may not live in Baseline's data folder"); return 2; }
   const execArgv = [permFlag, `--require=${real(join(dataDir(), "shim", "preload.cjs"))}`, `--allow-fs-read=${real(join(dataDir(), "shim"))}`, `--allow-fs-read=${real(runDir)}`, `--allow-fs-read=${real(scriptPath)}`, `--allow-fs-read=${real(shim)}`,
     `--allow-fs-read=${real(join(pluginRoot(), "dist"))}`, `--allow-fs-write=${real(runDir)}`];
-  // The runner's browser for the whole run, kept open by a background host. Without one (it
-  // could not start, or BASELINE_SHARED_BROWSER=0), this script gets a browser of its own.
-  const host = await connectHost(projectDir, runDir, runner.key, join(pluginRoot(), "dist", "cli.cjs"));
+  // The runner's browser for the whole run, kept open by a background host, but only for the
+  // active run: a script against a finished run (a late cleanup) gets a browser of its own that
+  // closes when the script ends, so nothing is left running. Without a host (it could not start,
+  // or BASELINE_SHARED_BROWSER=0) the script also gets its own.
+  let activePointer = "";
+  try { activePointer = readFileSync(join(projectDir, ".baseline", "active-run"), "utf8").trim(); } catch { activePointer = ""; }
+  const isActive = !!activePointer && resolve(activePointer) === resolve(runDir);
+  const host = isActive ? await connectHost(projectDir, runDir, runner.key, join(pluginRoot(), "dist", "cli.cjs")) : undefined;
 
   // The report shows which runner was signed out mid-run.
   const noteSignedOut = (message: string) => {

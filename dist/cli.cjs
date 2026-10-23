@@ -21268,6 +21268,32 @@ function readInfo(key) {
     return void 0;
   }
 }
+function stopHosts(runDir) {
+  const dir = (0, import_node_path7.join)(dataDir(), "hosts");
+  let files = [];
+  try {
+    files = (0, import_node_fs8.readdirSync)(dir).filter((f) => /^[0-9a-f]{16}\.json$/.test(f));
+  } catch {
+    return 0;
+  }
+  let stopped = 0;
+  for (const f of files) {
+    let info;
+    try {
+      info = JSON.parse((0, import_node_fs8.readFileSync)((0, import_node_path7.join)(dir, f), "utf8"));
+    } catch {
+      continue;
+    }
+    if (!info || runDir && (0, import_node_path7.resolve)(info.runDir) !== (0, import_node_path7.resolve)(runDir)) continue;
+    try {
+      process.kill(info.pid, "SIGTERM");
+      stopped++;
+    } catch {
+      (0, import_node_fs8.rmSync)((0, import_node_path7.join)(dir, f), { force: true });
+    }
+  }
+  return stopped;
+}
 function request(info, msg, timeoutMs) {
   return new Promise((res, rej) => {
     const sock = (0, import_node_net.createConnection)(info.socket);
@@ -21499,7 +21525,14 @@ register("script", "run an agent's browser script as a runner: script <runner> <
     `--allow-fs-read=${real((0, import_node_path8.join)(pluginRoot(), "dist"))}`,
     `--allow-fs-write=${real(runDir)}`
   ];
-  const host = await connectHost(projectDir, runDir, runner.key, (0, import_node_path8.join)(pluginRoot(), "dist", "cli.cjs"));
+  let activePointer = "";
+  try {
+    activePointer = (0, import_node_fs9.readFileSync)((0, import_node_path8.join)(projectDir, ".baseline", "active-run"), "utf8").trim();
+  } catch {
+    activePointer = "";
+  }
+  const isActive = !!activePointer && (0, import_node_path8.resolve)(activePointer) === (0, import_node_path8.resolve)(runDir);
+  const host = isActive ? await connectHost(projectDir, runDir, runner.key, (0, import_node_path8.join)(pluginRoot(), "dist", "cli.cjs")) : void 0;
   const noteSignedOut = (message) => {
     const file7 = (0, import_node_path8.join)(runDir, "runners.json");
     let prev = [];
@@ -21928,7 +21961,14 @@ function newRun(projectDir, sessionId, meta3) {
   return { runId, runDir, sessionDir };
 }
 function finishRun(projectDir) {
+  let runDir;
+  try {
+    runDir = (0, import_node_fs16.readFileSync)((0, import_node_path15.join)(projectDir, ".baseline", "active-run"), "utf8").trim();
+  } catch {
+    runDir = void 0;
+  }
   (0, import_node_fs16.rmSync)((0, import_node_path15.join)(projectDir, ".baseline", "active-run"), { force: true });
+  if (runDir) stopHosts(runDir);
 }
 
 // src/run/progress.ts

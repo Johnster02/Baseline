@@ -7,7 +7,7 @@
 // token kept in Baseline's data folder, which the script sandbox cannot read.
 import { createHash, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection, createServer } from "node:net";
 import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
@@ -37,6 +37,21 @@ const socketPath = (key: string) => (process.platform === "win32" ? `\\\\.\\pipe
 
 function readInfo(key: string): HostInfo | undefined {
   try { return JSON.parse(readFileSync(infoPath(key), "utf8")); } catch { return undefined; }
+}
+
+/** Close every runner's browser for a run (or all of them), now. Used by `run finish`. */
+export function stopHosts(runDir?: string): number {
+  const dir = join(dataDir(), "hosts");
+  let files: string[] = [];
+  try { files = readdirSync(dir).filter((f) => /^[0-9a-f]{16}\.json$/.test(f)); } catch { return 0; }
+  let stopped = 0;
+  for (const f of files) {
+    let info: HostInfo | undefined;
+    try { info = JSON.parse(readFileSync(join(dir, f), "utf8")); } catch { continue; }
+    if (!info || (runDir && resolve(info.runDir) !== resolve(runDir))) continue;
+    try { process.kill(info.pid, "SIGTERM"); stopped++; } catch { rmSync(join(dir, f), { force: true }); }
+  }
+  return stopped;
 }
 
 /** One request over the socket. Rejects if the host is gone. */

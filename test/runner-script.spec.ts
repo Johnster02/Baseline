@@ -95,6 +95,7 @@ describe("baseline script (browser in the parent, script talks over IPC)", () =>
 
   it("keeps one browser per runner: the next script starts where the last one left off, faster", async () => {
     const p = project();
+    writeFileSync(join(p.proj, ".baseline", "active-run"), p.runDir);
     const first = Date.now();
     const a = await runScript(p, `const s = await B.open(); await s.goto("/cart"); await s.close();`);
     const firstMs = Date.now() - first;
@@ -104,6 +105,21 @@ describe("baseline script (browser in the parent, script talks over IPC)", () =>
     const secondMs = Date.now() - second;
     expect(b.stdout).toContain("AT /cart");
     expect(secondMs).toBeLessThan(firstMs);
+  });
+
+  it("run finish closes the run's browsers, and a finished run never keeps one", async () => {
+    const p = project();
+    writeFileSync(join(p.proj, ".baseline", "active-run"), p.runDir);
+    await runScript(p, `const s = await B.open(); await s.goto("/cart"); await s.close();`);
+    const hosts = () => { try { return readdirSync(join(p.env.BASELINE_DATA as string, "hosts")).filter((x) => /^[0-9a-f]{16}\.json$/.test(x)).length; } catch { return 0; } };
+    expect(hosts()).toBe(1);
+    spawnSync("node", [join(ROOT, "dist/cli.cjs"), "run", "finish"], { cwd: p.proj, env: p.env, encoding: "utf8" });
+    for (let i = 0; i < 40 && hosts() > 0; i++) await new Promise((r) => setTimeout(r, 250));
+    expect(hosts()).toBe(0);
+    // A script against the finished run gets its own browser and leaves nothing running.
+    const r = await runScript(p, `const s = await B.open(); console.log("AT " + await s.url()); await s.close();`);
+    expect(r.stdout).toContain("AT about:blank");
+    expect(hosts()).toBe(0);
   });
 
   it("falls back to a browser of its own when the shared one is turned off", async () => {

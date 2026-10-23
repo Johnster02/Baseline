@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { stopHosts } from "../browser/host";
 import { join } from "node:path";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -22,5 +23,9 @@ export function newRun(projectDir: string, sessionId: string | undefined, meta: 
 }
 
 export function finishRun(projectDir: string): void {
+  let runDir: string | undefined;
+  try { runDir = readFileSync(join(projectDir, ".baseline", "active-run"), "utf8").trim(); } catch { runDir = undefined; }
   rmSync(join(projectDir, ".baseline", "active-run"), { force: true });
+  // Never leave a browser running after the run: close every runner's browser for it now.
+  if (runDir) stopHosts(runDir);
 }
