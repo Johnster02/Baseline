@@ -25,6 +25,30 @@ const ANY_ID = /(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|
  * values. `clean` is false when something could not be decoded, and then nothing reached right
  * after this write may count as created (fail closed).
  */
+/**
+ * One canonical form for comparing ids with anything a request carried: decoded until it stops
+ * changing, HTML entities resolved, lower case, Crockford look-alikes folded (i/l to 1, o to 0),
+ * and everything but letters and digits dropped. However an id was disguised, it reduces to this.
+ */
+export function canon(s: string): string {
+  let t = s;
+  for (let i = 0; i < 5; i++) {
+    let next = t.replace(/\+/g, " ");
+    try { next = decodeURIComponent(next); } catch { /* keep what decoded */ }
+    next = next
+      .replace(/&#x([0-9a-f]+);?/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+      .replace(/&#(\d+);?/g, (_, d) => String.fromCodePoint(Number(d)))
+      .replace(/&(amp|hyphen|dash|minus);/gi, "-")
+      .replace(/\\u([0-9a-f]{4})/gi, (_, h) => String.fromCharCode(parseInt(h, 16)));
+    if (next === t) break;
+    t = next;
+  }
+  return t.toLowerCase().replace(/[il]/g, "1").replace(/o/g, "0").replace(/[^0-9a-z]/g, "");
+}
+
+/** How much of what the run sent is kept for the never-sent check. Past this, nothing new is owned. */
+const SENT_LIMIT = 8_000_000;
+
 export function requestTexts(url: string, body?: string): { texts: string[]; clean: boolean } {
   const texts: string[] = [url];
   let clean = true;
@@ -59,8 +83,11 @@ export class OwnedTracker {
   private firstSeen = new Map<string, { seq: number; reply: boolean }>();
   private lastWriteSeq = -1;
   private lastWriteAt = -Infinity;
-  /** False when the last write could not be fully decoded: nothing after it counts as created. */
-  private lastWriteClean = true;
+  /** Until this time nothing counts as created: a write that couldn't be decoded sets it. */
+  private dirtyUntil = -Infinity;
+  /** Every request this run sent, in canonical form (see canon). */
+  private sent: string[] = [];
+  private sentSize = 0;
 
   constructor(private file?: string) {
     let saved: string[] = [];
@@ -94,15 +121,34 @@ export class OwnedTracker {
    * A write about to go out: every id it names (path, query, body) came from the request, so a
    * reply that echoes one back can never make it look new.
    */
-  seeRequest(url: string, body?: string): boolean {
+  seeRequest(url: string, body?: string, write = true): boolean {
     this.seeUrl(url);
     const { texts, clean } = requestTexts(url, body);
     for (const text of texts) for (const m of text.matchAll(ANY_ID)) this.see(m[0], false);
+    // Only writes go in the never-sent record: a page load that follows the site's own redirect
+    // to a new record names it too, and must not make it look sent.
+    if (write) {
+      const c = canon(url + "\n" + (body ?? ""));
+      this.sent.push(c);
+      this.sentSize += c.length;
+    }
     return clean;
   }
 
+  /** Did any request this run sent carry this id, in any disguise? Unsure (too much sent) is yes. */
+  private everSent(id: string): boolean {
+    if (this.sentSize > SENT_LIMIT) return true;
+    const c = canon(id);
+    return this.sent.some((s) => s.includes(c));
+  }
+
   /** The guard let a write through. */
-  wrote(at = Date.now(), clean = true) { this.lastWriteSeq = ++this.seq; this.lastWriteAt = at; this.lastWriteClean = clean; }
+  wrote(at = Date.now(), clean = true) {
+    this.lastWriteSeq = ++this.seq;
+    this.lastWriteAt = at;
+    // Sticky: a later clean write never clears an earlier unclear one's window.
+    if (!clean) this.dirtyUntil = Math.max(this.dirtyUntil, at + LANDING_WINDOW_MS);
+  }
 
   /** The site said where a new record lives (201 + Location). */
   add(path: string) {
@@ -121,11 +167,11 @@ export class OwnedTracker {
     let segs: string[];
     try { segs = new URL(url).pathname.split("/").filter(Boolean); } catch { return undefined; }
     let owned: string | undefined;
-    if (!byAgent && this.lastWriteClean && at - this.lastWriteAt <= LANDING_WINDOW_MS) {
+    if (!byAgent && at > this.dirtyUntil && at - this.lastWriteAt <= LANDING_WINDOW_MS) {
       segs.forEach((seg, i) => {
         if (owned || !UNIQUE_ID.test(seg)) return;
         const first = this.firstSeen.get(seg.toLowerCase());
-        if (first && first.reply && first.seq > this.lastWriteSeq) owned = "/" + segs.slice(0, i + 1).join("/");
+        if (first && first.reply && first.seq > this.lastWriteSeq && !this.everSent(seg)) owned = "/" + segs.slice(0, i + 1).join("/");
       });
     }
     for (const seg of segs) if (UNIQUE_ID.test(seg)) this.see(seg, false);

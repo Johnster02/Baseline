@@ -17,6 +17,14 @@ describe("OwnedTracker", () => {
     expect(t.paths).toEqual([`/orders/${NEW_ID}`]);
   });
 
+  it("still owns a new record when the browser then loads its page (the real sequence)", () => {
+    const t = new OwnedTracker();
+    t.wrote(1000, t.seeRequest(`${SITE}/home`, '["new project"]'));
+    t.seeReplyPath(`/projects/${NEW_ID}`);
+    t.seeRequest(`${SITE}/projects/${NEW_ID}?brief=new`, undefined, false);
+    expect(t.landed(`${SITE}/projects/${NEW_ID}?brief=new`, 1300)).toBe(`/projects/${NEW_ID}`);
+  });
+
   it("owns an id named only in a write's reply headers (a framework redirect header)", () => {
     const t = new OwnedTracker();
     t.wrote(1000);
@@ -45,6 +53,29 @@ describe("OwnedTracker", () => {
       t.seeReplyPath(`/orders/${OLD_ID}`);
       expect(t.landed(`${SITE}/orders/${OLD_ID}`, 1200)).toBeUndefined();
     }
+  });
+
+  it("an id sent in any disguise never counts as created", () => {
+    const disguises = [
+      OLD_ID.replace(/-/g, ""),
+      encodeURIComponent(encodeURIComponent(OLD_ID)),
+      OLD_ID.replace(/-/g, "&#45;"),
+      OLD_ID.toUpperCase().replace(/1/g, "I"),
+    ];
+    for (const d of disguises) {
+      const t = new OwnedTracker();
+      t.wrote(1000, t.seeRequest(`${SITE}/orders/copy`, `ref=${d}`));
+      t.seeReplyPath(`/orders/${OLD_ID}`);
+      expect(t.landed(`${SITE}/orders/${OLD_ID}`, 1200)).toBeUndefined();
+    }
+  });
+
+  it("an unclear write keeps blocking for its whole window, even after a clean one", () => {
+    const t = new OwnedTracker();
+    t.wrote(1000, t.seeRequest(`${SITE}/orders/new`, "%E0%A4%A"));
+    t.wrote(1100, t.seeRequest(`${SITE}/orders/new`, "{}"));
+    t.seeReplyPath(`/orders/${NEW_ID}`);
+    expect(t.landed(`${SITE}/orders/${NEW_ID}`, 1200)).toBeUndefined();
   });
 
   it("a write it can't decode makes nothing after it count as created", () => {

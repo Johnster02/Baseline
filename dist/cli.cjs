@@ -20554,6 +20554,21 @@ var import_node_path4 = require("node:path");
 var LANDING_WINDOW_MS = 15e3;
 var BODY_ID = /\b(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9A-HJKMNP-TV-Z]{26})\b/gi;
 var ANY_ID = /(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9A-HJKMNP-TV-Z]{26})/gi;
+function canon(s) {
+  let t = s;
+  for (let i = 0; i < 5; i++) {
+    let next = t.replace(/\+/g, " ");
+    try {
+      next = decodeURIComponent(next);
+    } catch {
+    }
+    next = next.replace(/&#x([0-9a-f]+);?/gi, (_, h) => String.fromCodePoint(parseInt(h, 16))).replace(/&#(\d+);?/g, (_, d) => String.fromCodePoint(Number(d))).replace(/&(amp|hyphen|dash|minus);/gi, "-").replace(/\\u([0-9a-f]{4})/gi, (_, h) => String.fromCharCode(parseInt(h, 16)));
+    if (next === t) break;
+    t = next;
+  }
+  return t.toLowerCase().replace(/[il]/g, "1").replace(/o/g, "0").replace(/[^0-9a-z]/g, "");
+}
+var SENT_LIMIT = 8e6;
 function requestTexts(url2, body) {
   const texts = [url2];
   let clean2 = true;
@@ -20622,8 +20637,11 @@ var OwnedTracker = class {
   firstSeen = /* @__PURE__ */ new Map();
   lastWriteSeq = -1;
   lastWriteAt = -Infinity;
-  /** False when the last write could not be fully decoded: nothing after it counts as created. */
-  lastWriteClean = true;
+  /** Until this time nothing counts as created: a write that couldn't be decoded sets it. */
+  dirtyUntil = -Infinity;
+  /** Every request this run sent, in canonical form (see canon). */
+  sent = [];
+  sentSize = 0;
   see(id, reply) {
     const k = id.toLowerCase();
     if (!this.firstSeen.has(k)) this.firstSeen.set(k, { seq: ++this.seq, reply });
@@ -20650,17 +20668,28 @@ var OwnedTracker = class {
    * A write about to go out: every id it names (path, query, body) came from the request, so a
    * reply that echoes one back can never make it look new.
    */
-  seeRequest(url2, body) {
+  seeRequest(url2, body, write = true) {
     this.seeUrl(url2);
     const { texts, clean: clean2 } = requestTexts(url2, body);
     for (const text of texts) for (const m of text.matchAll(ANY_ID)) this.see(m[0], false);
+    if (write) {
+      const c = canon(url2 + "\n" + (body ?? ""));
+      this.sent.push(c);
+      this.sentSize += c.length;
+    }
     return clean2;
+  }
+  /** Did any request this run sent carry this id, in any disguise? Unsure (too much sent) is yes. */
+  everSent(id) {
+    if (this.sentSize > SENT_LIMIT) return true;
+    const c = canon(id);
+    return this.sent.some((s) => s.includes(c));
   }
   /** The guard let a write through. */
   wrote(at = Date.now(), clean2 = true) {
     this.lastWriteSeq = ++this.seq;
     this.lastWriteAt = at;
-    this.lastWriteClean = clean2;
+    if (!clean2) this.dirtyUntil = Math.max(this.dirtyUntil, at + LANDING_WINDOW_MS);
   }
   /** The site said where a new record lives (201 + Location). */
   add(path) {
@@ -20682,11 +20711,11 @@ var OwnedTracker = class {
       return void 0;
     }
     let owned;
-    if (!byAgent && this.lastWriteClean && at - this.lastWriteAt <= LANDING_WINDOW_MS) {
+    if (!byAgent && at > this.dirtyUntil && at - this.lastWriteAt <= LANDING_WINDOW_MS) {
       segs.forEach((seg, i) => {
         if (owned || !UNIQUE_ID.test(seg)) return;
         const first = this.firstSeen.get(seg.toLowerCase());
-        if (first && first.reply && first.seq > this.lastWriteSeq) owned = "/" + segs.slice(0, i + 1).join("/");
+        if (first && first.reply && first.seq > this.lastWriteSeq && !this.everSent(seg)) owned = "/" + segs.slice(0, i + 1).join("/");
       });
     }
     for (const seg of segs) if (UNIQUE_ID.test(seg)) this.see(seg, false);
@@ -20917,7 +20946,7 @@ async function openSession(o) {
         (0, import_node_fs7.writeFileSync)(loadPath, JSON.stringify([...learned], null, 2));
       }
       if (u.host === baseHost) {
-        const clean2 = owned.seeRequest(r.url(), r.postData() ?? void 0);
+        const clean2 = owned.seeRequest(r.url(), r.postData() ?? void 0, method !== "GET" && method !== "HEAD");
         if (method !== "GET" && method !== "HEAD" && !loading) owned.wrote(Date.now(), clean2);
       }
       if (u.host === baseHost && !STATIC.has(r.resourceType())) network.push({ at: (/* @__PURE__ */ new Date()).toISOString(), ...entry, type: r.resourceType(), outcome: "allowed" });
