@@ -17,6 +17,33 @@ import { UNIQUE_ID } from "./guard";
 export const LANDING_WINDOW_MS = 15_000;
 /** Ids worth harvesting from response bodies: UUIDs and ULIDs, the shapes apps put in URLs. */
 const BODY_ID = /\b(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9A-HJKMNP-TV-Z]{26})\b/gi;
+/** Request side: no word boundaries, so an id glued to other text is still caught. */
+const ANY_ID = /(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9A-HJKMNP-TV-Z]{26})/gi;
+
+/**
+ * Every way a server might read a request: raw, percent-decoded, form fields, JSON string
+ * values. `clean` is false when something could not be decoded, and then nothing reached right
+ * after this write may count as created (fail closed).
+ */
+export function requestTexts(url: string, body?: string): { texts: string[]; clean: boolean } {
+  const texts: string[] = [url];
+  let clean = true;
+  const dec = (s: string) => { try { return decodeURIComponent(s.replace(/\+/g, " ")); } catch { clean = false; return s; } };
+  const walk = (v: unknown): void => {
+    if (typeof v === "string") texts.push(v, dec(v));
+    else if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) { texts.push(k); walk(x); }
+  };
+  texts.push(dec(url));
+  try { for (const [k, v] of new URL(url).searchParams) texts.push(k, v, dec(v)); } catch { clean = false; }
+  if (body) {
+    texts.push(body, dec(body));
+    try { for (const [k, v] of new URLSearchParams(body)) texts.push(k, v); } catch { /* not a form */ }
+    const t = body.trim();
+    if (t.startsWith("{") || t.startsWith("[")) { try { walk(JSON.parse(t)); } catch { clean = false; } }
+  }
+  return { texts, clean };
+}
 
 export function ownedFile(runDir: string): string {
   const key = createHash("sha256").update(resolve(runDir)).digest("hex").slice(0, 16);
@@ -32,6 +59,8 @@ export class OwnedTracker {
   private firstSeen = new Map<string, { seq: number; reply: boolean }>();
   private lastWriteSeq = -1;
   private lastWriteAt = -Infinity;
+  /** False when the last write could not be fully decoded: nothing after it counts as created. */
+  private lastWriteClean = true;
 
   constructor(private file?: string) {
     let saved: string[] = [];
@@ -65,15 +94,15 @@ export class OwnedTracker {
    * A write about to go out: every id it names (path, query, body) came from the request, so a
    * reply that echoes one back can never make it look new.
    */
-  seeRequest(url: string, body?: string) {
+  seeRequest(url: string, body?: string): boolean {
     this.seeUrl(url);
-    let query = "";
-    try { query = decodeURIComponent(new URL(url).search); } catch { query = ""; }
-    for (const text of [query, body ?? ""]) for (const m of text.matchAll(BODY_ID)) this.see(m[0], false);
+    const { texts, clean } = requestTexts(url, body);
+    for (const text of texts) for (const m of text.matchAll(ANY_ID)) this.see(m[0], false);
+    return clean;
   }
 
   /** The guard let a write through. */
-  wrote(at = Date.now()) { this.lastWriteSeq = ++this.seq; this.lastWriteAt = at; }
+  wrote(at = Date.now(), clean = true) { this.lastWriteSeq = ++this.seq; this.lastWriteAt = at; this.lastWriteClean = clean; }
 
   /** The site said where a new record lives (201 + Location). */
   add(path: string) {
@@ -92,7 +121,7 @@ export class OwnedTracker {
     let segs: string[];
     try { segs = new URL(url).pathname.split("/").filter(Boolean); } catch { return undefined; }
     let owned: string | undefined;
-    if (!byAgent && at - this.lastWriteAt <= LANDING_WINDOW_MS) {
+    if (!byAgent && this.lastWriteClean && at - this.lastWriteAt <= LANDING_WINDOW_MS) {
       segs.forEach((seg, i) => {
         if (owned || !UNIQUE_ID.test(seg)) return;
         const first = this.firstSeen.get(seg.toLowerCase());

@@ -20553,6 +20553,49 @@ var import_node_fs5 = require("node:fs");
 var import_node_path4 = require("node:path");
 var LANDING_WINDOW_MS = 15e3;
 var BODY_ID = /\b(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9A-HJKMNP-TV-Z]{26})\b/gi;
+var ANY_ID = /(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9A-HJKMNP-TV-Z]{26})/gi;
+function requestTexts(url2, body) {
+  const texts = [url2];
+  let clean2 = true;
+  const dec = (s) => {
+    try {
+      return decodeURIComponent(s.replace(/\+/g, " "));
+    } catch {
+      clean2 = false;
+      return s;
+    }
+  };
+  const walk = (v) => {
+    if (typeof v === "string") texts.push(v, dec(v));
+    else if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) {
+      texts.push(k);
+      walk(x);
+    }
+  };
+  texts.push(dec(url2));
+  try {
+    for (const [k, v] of new URL(url2).searchParams) texts.push(k, v, dec(v));
+  } catch {
+    clean2 = false;
+  }
+  if (body) {
+    texts.push(body, dec(body));
+    try {
+      for (const [k, v] of new URLSearchParams(body)) texts.push(k, v);
+    } catch {
+    }
+    const t = body.trim();
+    if (t.startsWith("{") || t.startsWith("[")) {
+      try {
+        walk(JSON.parse(t));
+      } catch {
+        clean2 = false;
+      }
+    }
+  }
+  return { texts, clean: clean2 };
+}
 function ownedFile(runDir) {
   const key = (0, import_node_crypto4.createHash)("sha256").update((0, import_node_path4.resolve)(runDir)).digest("hex").slice(0, 16);
   return (0, import_node_path4.join)(dataDir(), "hosts", `owned-${key}.json`);
@@ -20579,6 +20622,8 @@ var OwnedTracker = class {
   firstSeen = /* @__PURE__ */ new Map();
   lastWriteSeq = -1;
   lastWriteAt = -Infinity;
+  /** False when the last write could not be fully decoded: nothing after it counts as created. */
+  lastWriteClean = true;
   see(id, reply) {
     const k = id.toLowerCase();
     if (!this.firstSeen.has(k)) this.firstSeen.set(k, { seq: ++this.seq, reply });
@@ -20607,18 +20652,15 @@ var OwnedTracker = class {
    */
   seeRequest(url2, body) {
     this.seeUrl(url2);
-    let query = "";
-    try {
-      query = decodeURIComponent(new URL(url2).search);
-    } catch {
-      query = "";
-    }
-    for (const text of [query, body ?? ""]) for (const m of text.matchAll(BODY_ID)) this.see(m[0], false);
+    const { texts, clean: clean2 } = requestTexts(url2, body);
+    for (const text of texts) for (const m of text.matchAll(ANY_ID)) this.see(m[0], false);
+    return clean2;
   }
   /** The guard let a write through. */
-  wrote(at = Date.now()) {
+  wrote(at = Date.now(), clean2 = true) {
     this.lastWriteSeq = ++this.seq;
     this.lastWriteAt = at;
+    this.lastWriteClean = clean2;
   }
   /** The site said where a new record lives (201 + Location). */
   add(path) {
@@ -20640,7 +20682,7 @@ var OwnedTracker = class {
       return void 0;
     }
     let owned;
-    if (!byAgent && at - this.lastWriteAt <= LANDING_WINDOW_MS) {
+    if (!byAgent && this.lastWriteClean && at - this.lastWriteAt <= LANDING_WINDOW_MS) {
       segs.forEach((seg, i) => {
         if (owned || !UNIQUE_ID.test(seg)) return;
         const first = this.firstSeen.get(seg.toLowerCase());
@@ -20875,8 +20917,8 @@ async function openSession(o) {
         (0, import_node_fs7.writeFileSync)(loadPath, JSON.stringify([...learned], null, 2));
       }
       if (u.host === baseHost) {
-        owned.seeRequest(r.url(), r.postData() ?? void 0);
-        if (method !== "GET" && method !== "HEAD" && !loading) owned.wrote();
+        const clean2 = owned.seeRequest(r.url(), r.postData() ?? void 0);
+        if (method !== "GET" && method !== "HEAD" && !loading) owned.wrote(Date.now(), clean2);
       }
       if (u.host === baseHost && !STATIC.has(r.resourceType())) network.push({ at: (/* @__PURE__ */ new Date()).toISOString(), ...entry, type: r.resourceType(), outcome: "allowed" });
       return await route.continue();

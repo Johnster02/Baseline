@@ -33,6 +33,27 @@ describe("OwnedTracker", () => {
     expect(t.landed(`${SITE}/orders/${OLD_ID}`, 1200)).toBeUndefined();
   });
 
+  it("catches ids a write hides by encoding, escaping or gluing them to text", () => {
+    const hidden = [
+      { url: `${SITE}/orders/copy`, body: `from=${encodeURIComponent(OLD_ID).replace(/-/g, "%2D")}` },
+      { url: `${SITE}/orders/copy`, body: JSON.stringify({ s: OLD_ID }).replace(/-/g, "\\u002d") },
+      { url: `${SITE}/orders/copy?x=ref${OLD_ID}tail`, body: undefined },
+    ];
+    for (const h of hidden) {
+      const t = new OwnedTracker();
+      t.wrote(1000, t.seeRequest(h.url, h.body));
+      t.seeReplyPath(`/orders/${OLD_ID}`);
+      expect(t.landed(`${SITE}/orders/${OLD_ID}`, 1200)).toBeUndefined();
+    }
+  });
+
+  it("a write it can't decode makes nothing after it count as created", () => {
+    const t = new OwnedTracker();
+    t.wrote(1000, t.seeRequest(`${SITE}/orders/new`, "%E0%A4%A"));
+    t.seeReplyPath(`/orders/${NEW_ID}`);
+    expect(t.landed(`${SITE}/orders/${NEW_ID}`, 1200)).toBeUndefined();
+  });
+
   it("never owns an id that was on a page before the write", () => {
     const t = new OwnedTracker();
     t.seeText(`<a href="/orders/${OLD_ID}">Someone's order</a>`);
