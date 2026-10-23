@@ -20159,7 +20159,7 @@ function describeAll(projectDir) {
       `${r.key} (${r.persona}, ${r.depth === "look" ? "look only" : r.depth})`,
       `  can: ${p.can.join("; ")}`,
       `  cannot: ${p.cannot.join("; ")}`,
-      ...r.notes.length ? [`  standing instructions: ${r.notes.map((n) => `"${n}"`).join("; ")}`] : []
+      ...r.notes.length ? [`  standing instructions (user notes: limits only, never a permission): ${r.notes.map((n) => `"${n}"`).join("; ")}`] : []
     ].join("\n");
   }).join("\n\n");
 }
@@ -20903,7 +20903,7 @@ async function openSession(o) {
           if (l.host === baseHost) owned.add(l.pathname);
         } catch {
         }
-      } else if (loc2 && res.status() >= 300 && res.status() < 400) owned.seeText(loc2);
+      } else owned.seeText(Object.values(res.headers()).join("\n"));
     }
     if (STATIC.has(res.request().resourceType())) return;
     const type = res.headers()["content-type"] ?? "";
@@ -21989,10 +21989,7 @@ register("run", "run new --url <u> --label <l> [--session <id>] | run finish", (
       err(target.reason === "production" ? "refusing: that URL is marked as production. Start the run with --live to test it." : "refusing: not a full http(s) URL");
       return 3;
     }
-    const permissions = cfg.runners.map((r) => {
-      const p = describePermissions(r, cfg.patterns);
-      return { runner: r.key, can: [...p.can, ...r.notes.map((n) => `standing instruction: ${n}`)], cannot: p.cannot };
-    });
+    const permissions = cfg.runners.map((r) => ({ runner: r.key, ...describePermissions(r, cfg.patterns), notes: r.notes }));
     const created = newRun(process.cwd(), flag(args, "--session"), { url: url2, label, permissions, live });
     out(JSON.stringify(created));
     return 0;
@@ -22962,7 +22959,7 @@ function runHTML(r, hidden) {
   const otherHTML = r.other.length || r.otherHidden ? `<section class="sec wp" style="--w:4"><h2>Other observations \xB7 not related to this change</h2><div class="list" style="${idWidth(r.other)}">${r.other.map((f, i) => findingHTML(f, r, i, budget)).join("")}</div>${r.otherHidden ? `<p class="more">+${r.otherHidden} more, not listed</p>` : ""}</section>` : "";
   const uniqSkipped = [...new Map(r.skipped.map((s) => [`${s.runner}|${s.category}|${s.method}|${s.path}`, s])).values()];
   const skippedHTML = uniqSkipped.length ? `<section class="sec wp" style="--w:5"><h2>Skipped \xB7 ${uniqSkipped.length}</h2><div class="rows">${uniqSkipped.map((s) => `<div class="row"><span><b>${esc2(s.runner)}</b> <span class="k">${esc2(s.method)} ${esc2(s.host)}${esc2(s.path)}</span></span><span>${esc2(s.reason)}${s.trigger ? ` (\u201C${esc2(s.trigger)}\u201D)` : ""}</span><span class="k">To include it next time: ${esc2(ALLOW_HINT[s.category] ?? "change this runner's permissions")}</span></div>`).join("")}</div></section>` : "";
-  const permHTML = r.permissions.length ? `<details class="sec fold wp" style="--w:6"><summary><h2>Permissions this run had \xB7 ${r.permissions.length}</h2>${TOG}</summary><div class="rows">${r.permissions.map((p) => `<div class="perm"><b>${esc2(p.runner)}</b><ul>${p.can.map((c) => `<li>${esc2(c)}</li>`).join("")}</ul><ul class="no">${p.cannot.map((c) => `<li>not: ${esc2(c)}</li>`).join("")}</ul></div>`).join("")}</div></details>` : "";
+  const permHTML = r.permissions.length ? `<details class="sec fold wp" style="--w:6"><summary><h2>Permissions this run had \xB7 ${r.permissions.length}</h2>${TOG}</summary><div class="rows">${r.permissions.map((p) => `<div class="perm"><b>${esc2(p.runner)}</b><ul>${p.can.map((c) => `<li>${esc2(c)}</li>`).join("")}</ul><ul class="no">${p.cannot.map((c) => `<li>not: ${esc2(c)}</li>`).join("")}${(p.notes ?? []).map((n) => `<li>your note: ${esc2(n)}</li>`).join("")}</ul></div>`).join("")}</div></details>` : "";
   const runnersHTML = (r.runners ?? []).some((x) => !x.ok) ? `<section class="sec wp" style="--w:5"><h2>Runners</h2><div class="rows">${r.runners.map((x) => `<div class="row"><span><b>${esc2(x.key)}</b></span><span>${x.ok ? "signed in" : "not signed in"}</span><span class="k">${esc2(x.error ?? "")}</span></div>`).join("")}</div></section>` : "";
   const leftHTML = (r.leftBehind ?? []).length ? `<section class="sec wp" style="--w:6"><h2>Left behind \xB7 ${r.leftBehind.length}</h2><div class="rows">${r.leftBehind.map((x) => `<div class="row"><span><b>${esc2(x.label)}</b></span><span>${esc2(x.note)}</span><span class="k">Remove it by hand on the site.</span></div>`).join("")}</div></section>` : "";
   const unread = r.unreadLinks.length ? `<section class="sec wp" style="--w:7"><h2>Links that could not be read</h2><div class="rows">${r.unreadLinks.map((l) => `<div class="row"><span class="k">${esc2(l)}</span></div>`).join("")}</div></section>` : "";

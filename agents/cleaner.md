@@ -18,7 +18,9 @@ You are given: `<runDir>/created.json` (`[{ runner, kind, label, url, labelled }
   recognises the item by the page the runner landed on when it was made. Delete from the item's
   own page, or from a list with ONLY that item selected: a delete that names any other item is
   refused.
-- Never assume a removal worked: check the item is gone. If the guard blocks the removal, or
+- Never assume a removal worked: check the item is gone, and read `<runDir>/blocked.json` for
+  entries from your runner. A guard block there means the removal did not happen, whatever the
+  page seemed to show. If the guard blocks the removal, or
   anything looks off, stop for that item and record it, saying which permission would allow it.
 - Never remove members, workspaces, accounts or anything the run did not create.
 

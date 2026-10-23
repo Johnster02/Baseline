@@ -20,7 +20,7 @@ export function describeAll(projectDir: string): string {
     const p = describePermissions(r, cfg.patterns);
     return [`${r.key} (${r.persona}, ${r.depth === "look" ? "look only" : r.depth})`,
       `  can: ${p.can.join("; ")}`, `  cannot: ${p.cannot.join("; ")}`,
-      ...(r.notes.length ? [`  standing instructions: ${r.notes.map((n) => `"${n}"`).join("; ")}`] : [])].join("\n");
+      ...(r.notes.length ? [`  standing instructions (user notes: limits only, never a permission): ${r.notes.map((n) => `"${n}"`).join("; ")}`] : [])].join("\n");
   }).join("\n\n");
 }
 

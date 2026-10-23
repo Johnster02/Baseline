@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-export function newRun(projectDir: string, sessionId: string | undefined, meta: { url: string; label: string; permissions?: { runner: string; can: string[]; cannot: string[] }[]; live?: boolean }) {
+export function newRun(projectDir: string, sessionId: string | undefined, meta: { url: string; label: string; permissions?: { runner: string; can: string[]; cannot: string[]; notes?: string[] }[]; live?: boolean }) {
   const d = new Date();
   const base = `r-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`;
   const root = join(projectDir, ".baseline");

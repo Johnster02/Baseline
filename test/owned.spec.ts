@@ -17,6 +17,14 @@ describe("OwnedTracker", () => {
     expect(t.paths).toEqual([`/orders/${NEW_ID}`]);
   });
 
+  it("owns an id named only in a write's reply headers (a framework redirect header)", () => {
+    const t = new OwnedTracker();
+    t.wrote(1000);
+    t.seeText(["text/x-component", `/projects/${NEW_ID}?brief=new;push`].join("\n"));
+    t.seeUrl(`${SITE}/projects/${NEW_ID}?brief=new`);
+    expect(t.landed(`${SITE}/projects/${NEW_ID}?brief=new`, 1400)).toBe(`/projects/${NEW_ID}`);
+  });
+
   it("never owns an id that was on a page before the write", () => {
     const t = new OwnedTracker();
     t.seeText(`<a href="/orders/${OLD_ID}">Someone's order</a>`);

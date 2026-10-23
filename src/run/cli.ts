@@ -28,11 +28,8 @@ register("run", "run new --url <u> --label <l> [--session <id>] | run finish", (
     const live = args.includes("--live");
     const target = checkTarget(url, cfg, live);
     if (!target.ok) { err(target.reason === "production" ? "refusing: that URL is marked as production. Start the run with --live to test it." : "refusing: not a full http(s) URL"); return 3; }
-    // Standing instructions ride along with the permissions, so the report shows what each run followed.
-    const permissions = cfg.runners.map((r) => {
-      const p = describePermissions(r, cfg.patterns);
-      return { runner: r.key, can: [...p.can, ...r.notes.map((n) => `standing instruction: ${n}`)], cannot: p.cannot };
-    });
+    // Notes travel in their own field: they are the user's words, never part of what a runner may do.
+    const permissions = cfg.runners.map((r) => ({ runner: r.key, ...describePermissions(r, cfg.patterns), notes: r.notes }));
     const created = newRun(process.cwd(), flag(args, "--session"), { url, label, permissions, live });
     out(JSON.stringify(created));
     return 0;

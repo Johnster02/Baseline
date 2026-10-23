@@ -185,8 +185,9 @@ export async function openSession(o: OpenOptions): Promise<Session> {
     if (m !== "GET" && m !== "HEAD") {
       const loc = res.headers()["location"];
       if (loc && res.status() === 201) { try { const l = new URL(loc, res.url()); if (l.host === baseHost) owned.add(l.pathname); } catch { /* ignore */ } }
-      // A write answered with a redirect: where it sends the browser is the site's reply too.
-      else if (loc && res.status() >= 300 && res.status() < 400) owned.seeText(loc);
+      // Where the site sends the browser after a write is its reply too: a redirect's Location,
+      // or a framework's own header (Next.js x-action-redirect, htmx HX-Redirect...). Read them all.
+      else owned.seeText(Object.values(res.headers()).join("\n"));
     }
     if (STATIC.has(res.request().resourceType())) return;
     const type = res.headers()["content-type"] ?? "";

@@ -29,6 +29,23 @@ describe("config cli", () => {
     expect(out).toMatch(/can: .*send email/is);
   });
 
+  it("remembers a runner's standing instructions, shows them, and clears them", async () => {
+    await main(["config", "add-runner", "customer", "customer", "session"]);
+    expect(await main(["config", "note", "customer", "may submit the order, never pay"])).toBe(0);
+    await main(["config", "note", "customer", "may submit the order, never pay"]);
+    await main(["config", "note", "customer", "only in the test workspace"]);
+    expect(loadConfig(cwd).runners[0].notes).toEqual(["may submit the order, never pay", "only in the test workspace"]);
+    out = "";
+    await main(["config", "describe"]);
+    expect(out).toMatch(/never a permission\): "may submit the order, never pay"; "only in the test workspace"/);
+    expect(out).not.toMatch(/can: [^\n]*never pay/);
+    expect(await main(["config", "note", "customer", "--clear", "1"])).toBe(0);
+    expect(loadConfig(cwd).runners[0].notes).toEqual(["only in the test workspace"]);
+    expect(await main(["config", "note", "customer", "--clear", "9"])).toBe(2);
+    await main(["config", "note", "customer", "--clear"]);
+    expect(loadConfig(cwd).runners[0].notes).toEqual([]);
+  });
+
   it("rejects an unknown category", async () => {
     await main(["config", "add-runner", "customer", "customer", "session"]);
     expect(await main(["config", "allow", "customer", "nukes"])).toBe(2);

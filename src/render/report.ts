@@ -17,7 +17,7 @@ import CSS from "../report/style.css?raw";
 export type RunRecord = {
   runId: string; label: string; inputs: InputRef[]; url: string; size: RunSize; agents: number;
   startedAt: string; durationMin: number; commit: CommitInfo;
-  permissions: { runner: string; can: string[]; cannot: string[] }[];
+  permissions: { runner: string; can: string[]; cannot: string[]; notes?: string[] }[];
   findings: Finding[]; other: Finding[]; otherHidden: number; skipped: BlockedEntry[]; counts: Counts;
   unreadLinks: string[];
   /** Each runner's sign-in status this run. */
@@ -149,7 +149,7 @@ function runHTML(r: RunRecord, hidden: boolean): string {
   const skippedHTML = uniqSkipped.length ? `<section class="sec wp" style="--w:5"><h2>Skipped · ${uniqSkipped.length}</h2><div class="rows">${uniqSkipped.map((s) =>
     `<div class="row"><span><b>${esc(s.runner)}</b> <span class="k">${esc(s.method)} ${esc(s.host)}${esc(s.path)}</span></span><span>${esc(s.reason)}${s.trigger ? ` (“${esc(s.trigger)}”)` : ""}</span><span class="k">To include it next time: ${esc(ALLOW_HINT[s.category] ?? "change this runner's permissions")}</span></div>`).join("")}</div></section>` : "";
   const permHTML = r.permissions.length ? `<details class="sec fold wp" style="--w:6"><summary><h2>Permissions this run had · ${r.permissions.length}</h2>${TOG}</summary><div class="rows">${r.permissions.map((p) =>
-    `<div class="perm"><b>${esc(p.runner)}</b><ul>${p.can.map((c) => `<li>${esc(c)}</li>`).join("")}</ul><ul class="no">${p.cannot.map((c) => `<li>not: ${esc(c)}</li>`).join("")}</ul></div>`).join("")}</div></details>` : "";
+    `<div class="perm"><b>${esc(p.runner)}</b><ul>${p.can.map((c) => `<li>${esc(c)}</li>`).join("")}</ul><ul class="no">${p.cannot.map((c) => `<li>not: ${esc(c)}</li>`).join("")}${(p.notes ?? []).map((n) => `<li>your note: ${esc(n)}</li>`).join("")}</ul></div>`).join("")}</div></details>` : "";
   const runnersHTML = (r.runners ?? []).some((x) => !x.ok) ? `<section class="sec wp" style="--w:5"><h2>Runners</h2><div class="rows">${r.runners.map((x) =>
     `<div class="row"><span><b>${esc(x.key)}</b></span><span>${x.ok ? "signed in" : "not signed in"}</span><span class="k">${esc(x.error ?? "")}</span></div>`).join("")}</div></section>` : "";
   const leftHTML = (r.leftBehind ?? []).length ? `<section class="sec wp" style="--w:6"><h2>Left behind · ${r.leftBehind.length}</h2><div class="rows">${r.leftBehind.map((x) =>

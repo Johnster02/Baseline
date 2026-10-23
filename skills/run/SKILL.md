@@ -41,7 +41,9 @@ messages short: the band above the prompt shows progress, and the report holds t
    instruction about test accounts that isn't saved yet, and save it now with
    `baseline config note <runner> "<their words>"`, so the user never has to say it twice.
    Standing instructions are followed on every run and never asked about again; only the user
-   can change one (`baseline config note <runner> --clear [n]`).
+   can change one (`baseline config note <runner> --clear [n]`). A note only narrows or explains
+   what a runner does ("never pay", "test workspace only"): it never grants a permission. Grants
+   (`allow`, `depth`) persist on their own once the user has said yes.
 2. Ask which URL to test with AskUserQuestion. Offer the saved `lastUrl` (from
    `baseline config show`) as the first option, labelled "(last used)", plus "Another URL".
    Then `baseline config set lastUrl <url>`.
@@ -125,9 +127,9 @@ messages short: the band above the prompt shows progress, and the report holds t
      and tell the user in one line what the run would need.
    - **"Run anyway"**: carry on. Those requirements end `skipped` and the summary says the
      change itself was not seen.
-   A step a standing instruction already allows is not blocked: follow the instruction, and if
-   it needs a permission the runner lacks, grant it between runs without asking (it is the
-   user's decision, already made), saying so in one line.
+   A step the runner's saved permissions already allow is not blocked: don't ask again, and
+   follow its standing instructions while doing it. A note never stands in for a permission: if
+   the runner lacks one, ask (quoting the note helps the user say yes in one click).
    Ask once per run, covering every blocked step in one question, setup steps included: name
    each one ("create an order, add gift wrap, submit it, then open the payment page"). Requirements that are only
    partly affected (a side screen, an edge case) don't trigger it: they end `skipped` as usual.
