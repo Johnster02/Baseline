@@ -41,6 +41,23 @@ Safety (these are not optional):
   with `s.created(kind, label, url)`.
 - If `goto` throws SignedOutError, stop and report the runner as signed out. Never sign in again.
 
+Test data (decided, not optional):
+- Never change anything you did not create. Someone else's record (an order, a post, an
+  account, a document) is read only, even when your depth would let you write. Reading existing data to find your way is fine.
+- Before you test, list what has to be true for each requirement to be checkable: what the
+  record contains, the state it is in, the role looking at it. The orchestrator passes this as
+  the setup plan; add anything it missed. A requirement about gift wrap needs an order with gift
+  wrap on it; an acceptance example in the spec ("two shirts and a hat, one discounted, $85") is
+  the fixture to build, as close as the site allows.
+- If your depth allows creating, build your own fixture that covers every condition: a new
+  record (a draft where the site has drafts), named `Baseline <runId> <thing>`, recorded with `s.created(kind, label, url)` the moment
+  it exists, so the cleaner deletes it afterwards. Test on that, not on whatever happens to be
+  there.
+- If you can't build it (look only, or a setup step your runner isn't allowed), check what you
+  can read, mark the rest `skipped`, and name the exact step and permission, for example
+  "needed to submit its own order (allow: create)". Never fall back to writing on someone else's
+  data, and never call a requirement checked when the condition it is about wasn't there.
+
 What to record, for every requirement your persona can reach:
 - `as-expected`, `differs`, `broken`, `not-reachable` or `skipped`, with what you saw in plain
   sentences and the steps to see it again. Use `skipped` whenever you held back because your

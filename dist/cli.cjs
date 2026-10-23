@@ -20370,6 +20370,15 @@ var requestKey = (method, url2, body = "") => {
   return `${method.toUpperCase()} ${u.host}${u.pathname}${h}`;
 };
 var GET_CATEGORIES = ["auth", "delete"];
+function ownsPath(path, created = []) {
+  const p = normalizePath(path);
+  return created.some((c) => {
+    const n = normalizePath(c);
+    if (p === n || p.startsWith(n + "/")) return true;
+    const id = n.split("/").filter(Boolean).pop() ?? "";
+    return id.length >= 8 && p.split("/").includes(id);
+  });
+}
 function decide(req, ctx) {
   const { runner, cfg } = ctx;
   const method = req.method.toUpperCase();
@@ -20390,6 +20399,7 @@ function decide(req, ctx) {
   }
   for (const cat of PATTERN_ORDER) {
     if (runner.allow.includes(cat)) continue;
+    if (cat === "delete" && ownsPath(path, ctx.createdPaths)) continue;
     const p = cfg.patterns[cat];
     const url2 = p.urls.find((g) => globMatch(g, path));
     if (url2) return { action: "abort", category: cat, reason: `matches protected ${cat} URL pattern`, trigger: url2 };
@@ -20397,8 +20407,7 @@ function decide(req, ctx) {
     if (word) return { action: "abort", category: cat, reason: `clicked control looks like ${cat}`, trigger: word.toLowerCase() };
   }
   if (method === "DELETE" && !runner.allow.includes("delete")) {
-    const own2 = (ctx.createdPaths ?? []).some((c) => normalizePath(c) === normalizePath(path));
-    if (!own2) return { action: "abort", category: "delete", reason: "DELETE request, and this runner may not delete" };
+    if (!ownsPath(path, ctx.createdPaths)) return { action: "abort", category: "delete", reason: "DELETE request, and this runner may not delete" };
   }
   const key = requestKey(method, req.url, req.body);
   const sameHost = !ctx.baseHost || u.host === ctx.baseHost;
@@ -21923,6 +21932,16 @@ $$(".run").forEach(run => {
     $$("[data-filter]", run).forEach(x => x.setAttribute("aria-pressed", x.dataset.filter === st.v)); apply(); });
   $$("[data-persona]", run).forEach(b => b.onclick = () => { st.p = st.p === b.dataset.persona ? null : b.dataset.persona;
     $$("[data-persona]", run).forEach(x => x.setAttribute("aria-pressed", x.dataset.persona === st.p)); apply(); });
+  $$("[data-passes]", run).forEach(b => b.onclick = () => { const p = $(".passes", run); if (!p) return;
+    p.open = true; p.scrollIntoView({ behavior: "smooth", block: "start" }); });
+  $$("[data-goto]", run).forEach(b => b.onclick = () => {
+    const f = $$(".f", run).find(x => x.dataset.fid === b.dataset.goto); if (!f) return;
+    const fold = f.closest(".passes"); if (fold) fold.open = true;
+    if (f.classList.contains("gone")) { st.v = "all"; st.p = null; st.q = ""; const s = $(".search", run); if (s) s.value = "";
+      $$("[data-filter]", run).forEach(x => x.setAttribute("aria-pressed", x.dataset.filter === "all"));
+      $$("[data-persona]", run).forEach(x => x.setAttribute("aria-pressed", false)); apply(); }
+    f.open = true; f.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
   const q = $(".search", run); if (q) { let t; q.oninput = () => { clearTimeout(t); t = setTimeout(() => { st.q = q.value.trim().toLowerCase(); apply(); }, 180); }; }
 });
 
@@ -22030,6 +22049,13 @@ button:focus-visible,input:focus-visible,summary:focus-visible{outline:1px solid
 .count b{font-family:var(--font-data);font-weight:400;font-size:56px;line-height:1;color:var(--v-specbuilt);font-variant-numeric:tabular-nums;
   text-shadow:2px 0 rgba(208,84,74,.25)}
 .count span{color:var(--ink-2)}
+.count.clear b{font-size:40px;color:var(--v-match);text-shadow:var(--glow-phos,none)}
+.plist{display:flex;flex-direction:column}
+.passes .f .ttl{color:var(--ink-2)}
+.passes .f .mk{opacity:.6}
+.unchecked{margin:-6px 0 16px;color:var(--ink-3);font-size:13px}
+.goto{font:inherit;font-family:var(--font-data);color:var(--ink);background:none;border:0;border-bottom:1px dotted var(--ink-3);padding:0;cursor:pointer}
+.goto:hover{color:var(--phos);border-bottom-color:var(--phos)}
 .tally{display:flex;flex-wrap:wrap;gap:3px;margin-bottom:16px}
 .tally i{width:22px;height:30px;background:var(--c);opacity:.85}
 .tally i.ok{opacity:.35}
@@ -22117,7 +22143,7 @@ mark{background:none;color:var(--ink);border-bottom:1px solid var(--dust);paddin
 
 /* ---------- terminal glow ---------- */
 .case h1{text-shadow:var(--glow-ink),1.5px 0 rgba(255,106,92,.35),-1.5px 0 rgba(150,201,218,.3)}
-.count b{text-shadow:var(--glow-red)}
+.count:not(.clear) b{text-shadow:var(--glow-red)}
 .brand b{text-shadow:var(--glow-ink)}
 .feat[aria-current="true"] .nm,.lg[aria-pressed="true"] .t::before,.person[aria-pressed="true"] .nm::before,
 .seg button[aria-pressed="true"],.newrun input,.search,.log,.tri,.copied,.newrun code{text-shadow:var(--glow-phos)}
@@ -22416,7 +22442,10 @@ html.dark .tally i{border-radius:2px}
 var SHOT_BUDGET = 13 * 1024 * 1024;
 var esc2 = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 var group = (v) => isConflict(v) ? "conflict" : v;
-var needsAttention = (f) => f.verdict !== "match" && f.verdict !== "skipped";
+var needsAttention = (f) => isConflict(f.verdict) || f.verdict === "product" || f.verdict === "unspecced";
+var notChecked = (f) => f.verdict === "unverified" || f.verdict === "skipped";
+var TOG = `<span class="tog" aria-hidden="true"><span class="sh">Show</span><span class="hd">Hide</span></span>`;
+var gotoIds = (fs) => fs.map((f) => `<button class="goto" type="button" data-goto="${esc2(f.id)}">${esc2(f.id)}</button>`).join(" ");
 var ALLOW_HINT = {
   email: "allow email",
   auth: "allow auth and accounts",
@@ -22508,9 +22537,9 @@ function findingHTML(f, r, i, budget) {
     `<div class="col${conflictCol("observed")}"><div class="lbl">Observed</div><p>${esc2(f.observed?.text ?? "Not seen on the site.")}</p></div>`
   ].join("");
   const steps = f.observed?.steps.length ? `<ol class="steps">${f.observed.steps.map((s) => `<li>${esc2(s)}</li>`).join("")}</ol>` : "";
-  return `<details class="f" style="--c:${c};--i:${i}" data-group="${group(f.verdict)}" data-personas="${esc2(f.personas.join(","))}" data-text="${esc2((f.title + " " + f.specced.text + " " + (f.observed?.text ?? "")).toLowerCase())}">
+  return `<details class="f" style="--c:${c};--i:${i}" data-fid="${esc2(f.id)}" data-group="${group(f.verdict)}" data-personas="${esc2(f.personas.join(","))}" data-text="${esc2((f.title + " " + f.specced.text + " " + (f.observed?.text ?? "")).toLowerCase())}">
 <summary><i class="mk"></i><span class="rid">${esc2(f.id)}</span><span class="ttl">${esc2(f.title)}<small>${esc2(f.personas.join(", "))}${f.route ? " \xB7 " + esc2(f.route) : ""}</small></span>
-<span class="right"><span class="tag">${esc2(VERDICT_LABEL[f.verdict] ?? f.verdict)}</span><span class="sev${f.severity === "critical" ? " crit" : ""}">${esc2(f.severity)}</span></span></summary>
+<span class="right"><span class="tag">${esc2(VERDICT_LABEL[f.verdict] ?? f.verdict)}</span>${needsAttention(f) ? `<span class="sev${f.severity === "critical" ? " crit" : ""}">${esc2(f.severity)}</span>` : ""}</span></summary>
 <div class="body"><div class="chips">${f.checklistItem ? `<span>checklist ${esc2(f.checklistItem)}</span>` : ""}${f.scope === "unrelated" ? "<span>not related to this change</span>" : ""}</div>
 <div class="cols">${cols}</div>${!r.commit.codeRead ? `<div class="nobuilt">Code was not read for this run.</div>` : ""}
 ${shots && steps ? `<div class="evidence"><div>${shots}</div><div>${steps}</div></div>` : shots || steps}
@@ -22523,13 +22552,17 @@ var idWidth = (fs) => {
 };
 function runHTML(r, hidden) {
   const budget = { left: SHOT_BUDGET };
-  const attention = r.findings.filter(needsAttention).length;
+  const issues = r.findings.filter(needsAttention);
+  const attention = issues.length;
+  const unchecked = r.findings.filter(notChecked);
+  const open2 = r.findings.filter((f) => f.verdict !== "match");
+  const passes = r.findings.filter((f) => f.verdict === "match");
   const personas = [...new Set(r.findings.flatMap((f) => f.personas))];
-  const groups = [["all", "All"], ["conflict", "Conflicts"], ["product", "Product"], ["unspecced", "Unspecced"], ["unverified", "Unverified"], ["match", "Match"]];
+  const groups = [["all", "All"], ["conflict", "Conflicts"], ["product", "Product"], ["unspecced", "Unspecced"], ["unverified", "Unverified"]];
   const legend = ["conflict", "product", "unspecced", "unverified", "match"].map((g) => {
     const n = r.findings.filter((f) => group(f.verdict) === g).length;
     const v = g === "conflict" ? "--v-specbuilt" : VERDICT_VAR[g];
-    return `<button class="lg${n ? "" : " zero"}" type="button" data-filter="${g}" aria-pressed="false" style="--c:var(${v})"><i class="sw"></i><span class="t">${g === "conflict" ? "Conflicts" : g[0].toUpperCase() + g.slice(1)}</span><span class="n">${n}</span></button>`;
+    return `<button class="lg${n ? "" : " zero"}" type="button" ${g === "match" ? "data-passes" : `data-filter="${g}"`} aria-pressed="false" style="--c:var(${v})"><i class="sw"></i><span class="t">${g === "conflict" ? "Conflicts" : g[0].toUpperCase() + g.slice(1)}</span><span class="n">${n}</span></button>`;
   }).join("");
   const warn = [
     !r.commit.codeRead ? `<p class="warn">Code was not read for this run: findings compare the spec with the site only.</p>` : "",
@@ -22538,24 +22571,26 @@ function runHTML(r, hidden) {
   const otherHTML = r.other.length || r.otherHidden ? `<section class="sec wp" style="--w:4"><h2>Other observations \xB7 not related to this change</h2><div class="list" style="${idWidth(r.other)}">${r.other.map((f, i) => findingHTML(f, r, i, budget)).join("")}</div>${r.otherHidden ? `<p class="more">+${r.otherHidden} more, not listed</p>` : ""}</section>` : "";
   const uniqSkipped = [...new Map(r.skipped.map((s) => [`${s.runner}|${s.category}|${s.method}|${s.path}`, s])).values()];
   const skippedHTML = uniqSkipped.length ? `<section class="sec wp" style="--w:5"><h2>Skipped \xB7 ${uniqSkipped.length}</h2><div class="rows">${uniqSkipped.map((s) => `<div class="row"><span><b>${esc2(s.runner)}</b> <span class="k">${esc2(s.method)} ${esc2(s.host)}${esc2(s.path)}</span></span><span>${esc2(s.reason)}${s.trigger ? ` (\u201C${esc2(s.trigger)}\u201D)` : ""}</span><span class="k">To include it next time: ${esc2(ALLOW_HINT[s.category] ?? "change this runner's permissions")}</span></div>`).join("")}</div></section>` : "";
-  const permHTML = r.permissions.length ? `<details class="sec fold wp" style="--w:6"><summary><h2>Permissions this run had \xB7 ${r.permissions.length}</h2><span class="tog" aria-hidden="true"><span class="sh">Show</span><span class="hd">Hide</span></span></summary><div class="rows">${r.permissions.map((p) => `<div class="perm"><b>${esc2(p.runner)}</b><ul>${p.can.map((c) => `<li>${esc2(c)}</li>`).join("")}</ul><ul class="no">${p.cannot.map((c) => `<li>not: ${esc2(c)}</li>`).join("")}</ul></div>`).join("")}</div></details>` : "";
+  const permHTML = r.permissions.length ? `<details class="sec fold wp" style="--w:6"><summary><h2>Permissions this run had \xB7 ${r.permissions.length}</h2>${TOG}</summary><div class="rows">${r.permissions.map((p) => `<div class="perm"><b>${esc2(p.runner)}</b><ul>${p.can.map((c) => `<li>${esc2(c)}</li>`).join("")}</ul><ul class="no">${p.cannot.map((c) => `<li>not: ${esc2(c)}</li>`).join("")}</ul></div>`).join("")}</div></details>` : "";
   const runnersHTML = (r.runners ?? []).some((x) => !x.ok) ? `<section class="sec wp" style="--w:5"><h2>Runners</h2><div class="rows">${r.runners.map((x) => `<div class="row"><span><b>${esc2(x.key)}</b></span><span>${x.ok ? "signed in" : "not signed in"}</span><span class="k">${esc2(x.error ?? "")}</span></div>`).join("")}</div></section>` : "";
   const leftHTML = (r.leftBehind ?? []).length ? `<section class="sec wp" style="--w:6"><h2>Left behind \xB7 ${r.leftBehind.length}</h2><div class="rows">${r.leftBehind.map((x) => `<div class="row"><span><b>${esc2(x.label)}</b></span><span>${esc2(x.note)}</span><span class="k">Remove it by hand on the site.</span></div>`).join("")}</div></section>` : "";
   const unread = r.unreadLinks.length ? `<section class="sec wp" style="--w:7"><h2>Links that could not be read</h2><div class="rows">${r.unreadLinks.map((l) => `<div class="row"><span class="k">${esc2(l)}</span></div>`).join("")}</div></section>` : "";
   return `<section class="run" data-run="${esc2(r.runId)}"${hidden ? " hidden" : ""}>
 <header class="case wp" style="--w:0"><div><h1>${esc2(r.label)}</h1><div class="tele"><span>run <b>${esc2(r.runId)}</b></span><span>${esc2(r.size)} \xB7 <b>${esc2(Number(r.agents) || 0)} agents</b></span><span>${r.durationMin}m</span><span>${esc2(r.url)}${r.commit.commitRead ? ` @ <b>${esc2(r.commit.commitRead)}</b>` : ""}</span></div></div><span class="result">Complete</span></header>
 ${warn}
-<div class="summary wp" style="--w:1"><div class="block"><div class="count"><b>${attention}</b><span>need a look \xB7 ${r.counts.passRate === null ? "nothing verified yet" : `${r.counts.passRate}% pass \xB7 ${r.counts.checked} verified`}${r.counts.unverified ? ` \xB7 ${r.counts.unverified} unverified` : ""}</span></div>
+<div class="summary wp" style="--w:1"><div class="block">${attention ? `<div class="count"><b>${attention}</b><span>need a look: ${gotoIds(issues)}<br>${r.counts.passRate === null ? "nothing verified yet" : `${r.counts.passRate}% pass \xB7 ${r.counts.checked} verified`}</span></div>` : `<div class="count clear"><b>All clear</b><span>no issues found \xB7 ${r.counts.passRate === null ? "nothing verified on the site" : `${r.counts.passed} of ${r.counts.checked} checked on the site passed`}</span></div>`}
+${unchecked.length ? `<p class="unchecked">${unchecked.length} not checked on the site: ${gotoIds(unchecked)}</p>` : ""}
 <div class="tally">${r.findings.map((f, i) => `<i class="${f.verdict === "match" ? "ok" : ""}" data-group="${group(f.verdict)}" style="--c:var(${VERDICT_VAR[f.verdict]});--i:${i}"></i>`).join("")}</div>
 <div class="legend">${legend}</div></div>
 <div class="block"><div class="block-h"><span class="lbl">People</span></div><div class="people">${personas.map((p) => {
     const mine = r.findings.filter((f) => f.personas.includes(p));
     const bad = mine.filter(needsAttention).length;
-    return `<button class="person" type="button" data-persona="${esc2(p)}" aria-pressed="false"><span class="nm">${esc2(p)}</span><span class="dots">${mine.map((f, i) => `<i style="--c:var(${VERDICT_VAR[f.verdict]});--i:${i}"></i>`).join("")}</span><span class="ct${bad ? " has" : ""}">${bad} to look at</span></button>`;
+    return `<button class="person" type="button" data-persona="${esc2(p)}" aria-pressed="false"><span class="nm">${esc2(p)}</span><span class="dots">${mine.map((f, i) => `<i style="--c:var(${VERDICT_VAR[f.verdict]});--i:${i}"></i>`).join("")}</span><span class="ct${bad ? " has" : ""}">${bad ? `${bad} to look at` : "all clear"}</span></button>`;
   }).join("")}</div></div></div>
 <div class="toolbar wp" style="--w:2"><div class="seg" role="group" aria-label="Filter">${groups.map(([g, l]) => `<button type="button" data-filter="${g}" aria-pressed="${g === "all"}">${l}</button>`).join("")}</div>
-<div class="tools-r"><span class="readout data"><b>${r.findings.length}</b> shown</span><input class="search" type="search" placeholder="Search findings" aria-label="Search findings"></div></div>
-<div class="list wp" style="--w:3;${idWidth(r.findings)}">${r.findings.length ? r.findings.map((f, i) => findingHTML(f, r, i, budget)).join("") : `<p class="empty">No findings for this run.</p>`}</div>
+<div class="tools-r"><span class="readout data"><b>${open2.length}</b> shown</span><input class="search" type="search" placeholder="Search findings" aria-label="Search findings"></div></div>
+<div class="list wp" style="--w:3;${idWidth(r.findings)}">${open2.length ? open2.map((f, i) => findingHTML(f, r, i, budget)).join("") : `<p class="empty">${passes.length ? "No issues found." : "No findings for this run."}</p>`}</div>
+${passes.length ? `<details class="sec fold passes wp" style="--w:4"><summary><h2>Passed \xB7 ${passes.length}</h2>${TOG}</summary><div class="plist" style="${idWidth(r.findings)}">${passes.map((f, i) => findingHTML(f, r, i, budget)).join("")}</div></details>` : ""}
 ${runnersHTML}${leftHTML}${otherHTML}${skippedHTML}${permHTML}${unread}
 </section>`;
 }

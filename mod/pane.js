@@ -213,19 +213,32 @@ function fitRows(lines, maxRows, isKey) {
   for (let i = 0; i < lines.length && keep.size < maxRows; i++) keep.add(i);
   return lines.filter((_, i) => keep.has(i));
 }
+var plain = (l) => l.replace(/\x1b\[[0-9;]*m/g, "");
+function fitProgress(lines, maxRows) {
+  if (lines.length <= maxRows) return lines;
+  let out = lines.filter((l) => !/^─+$/.test(plain(l).trim()));
+  if (out.length > maxRows) {
+    let seen = false;
+    out = out.filter((l) => !/^\s+›/.test(plain(l)) || !seen && (seen = true));
+  }
+  if (out.length > maxRows) out = out.filter((l) => !/^elapsed\b/.test(plain(l).trim()));
+  if (out.length > maxRows) {
+    const last = out.length - 1;
+    out = fitRows(out, maxRows, (l, i) => i === 0 || i === last || /%|›/.test(plain(l)));
+  }
+  return out;
+}
 function frame(s, theme2, width, maxRows) {
   const opts = { color: "truecolor", width, now: s.now };
   let lines = [];
   const live = s.progress && !s.progress.finishedAt;
   if (live) {
-    lines = renderProgress(s.progress, theme2, opts);
-    const last = lines.length - 1;
-    lines = fitRows(lines, maxRows, (l, i) => i === 0 || i === last || /%|›/.test(l.replace(/\x1b\[[0-9;]*m/g, "")));
+    lines = fitProgress(renderProgress(s.progress, theme2, opts), maxRows);
   } else if (s.summary && s.now - Date.parse(s.summary.finishedAt) <= SUMMARY_MS) {
     lines = renderSummary(s.summary, theme2, { ...opts, link: s.summary.link, localPath: s.summary.localPath });
     lines = fitRows(lines.filter((l) => l !== ""), maxRows, (l, i) => i === 0 || /pass rate|result|report/i.test(l.replace(/\x1b\[[0-9;]*m/g, "")));
   } else if (s.progress?.finishedAt && s.now - Date.parse(s.progress.finishedAt) <= SUMMARY_MS) {
-    lines = renderProgress(s.progress, theme2, opts).slice(0, maxRows);
+    lines = fitProgress(renderProgress(s.progress, theme2, opts), maxRows);
   }
   return lines.map(toSegments);
 }

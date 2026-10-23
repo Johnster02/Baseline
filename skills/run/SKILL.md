@@ -89,20 +89,28 @@ messages short: the band above the prompt shows progress, and the report holds t
    visible on the site, or you are unsure, explore as normal.
    Say in one line: "PR run, N agents" (add "code only" when it is), "Quick run, N agents" or
    "Full run, N agents", then carry on without waiting.
-6. **Reach check, before any agent runs.** For each requirement, ask how a user would see it
-   on the site, and whether getting there needs an action the chosen runners can't do: a
-   category in their `cannot` list (finance, email, auth, delete), or any write when their depth
-   is `look`. Pressing a button that starts a payment, sends an invite or saves a form counts,
-   even when the thing to check is only on the page after it. Read each runner's `can` and
-   `cannot` from `baseline config describe`.
+6. **Setup plan and reach check, before any agent runs.** For each requirement, write down the
+   setup it needs to be checkable: the data that must exist (an order with a discounted item and
+   a full-price one, gift wrap, the spec's acceptance example item for item) and every step to
+   get it there and see it (create the order, add the items, submit it, go to checkout). Runners
+   always build this on records they create, never on an existing record someone else made, so
+   plan for create-and-delete; the cleaner removes it at the end. Then ask whether any of those steps
+   needs an action the chosen runners can't do: a category in their `cannot` list (finance,
+   email, auth, delete), or any write when their depth is `look` (creating the record counts).
+   Pressing a button that starts a payment, sends an invite, submits work or saves a form
+   counts, even when the thing to check is only on the page after it. Read each runner's `can`
+   and `cannot` from `baseline config describe`.
    If the requirements this change is about (the bug it fixes, the headline behaviour) can only
    be seen past such an action, do not run on and report them skipped: that run tests nothing
    the change is about. Stop and ask with AskUserQuestion, naming the action and the runner,
-   for example "The fix only shows on the Stripe page, which needs 'Pay by card' (finance).
-   test-admin is look only." Offer:
+   for example "The fix only shows on the payment page, which needs 'Pay now' (finance).
+   customer is look only." Offer:
    - **"Allow <runner>: <category> and restart (Recommended)"**: `baseline progress done`,
-     `baseline run finish`, then `baseline config allow <runner> <category>` (for any write at
-     depth `look`, `baseline config depth <runner> create`). Start a new run (step 0.4, same
+     `baseline run finish`, then, in a separate Bash call (the guard reads the whole command
+     before any of it runs, so chaining it after `run finish` is refused),
+     `baseline config allow <runner> <category>` (for any write at depth `look`, also
+     `baseline config depth <runner> create`). If the user narrows the grant ("open the payment page
+     but don't pay"), pass that limit to the explorer word for word. Start a new run (step 0.4, same
      URL and label), copy `inputs.json`, `linked/`, `requirements.json` and `commit.json` from
      the old run folder into the new one, delete the old run folder (it is inside `.baseline/`
      and never reached the site), and carry on from step 1.5 with the new `runDir`.
@@ -110,7 +118,8 @@ messages short: the band above the prompt shows progress, and the report holds t
      and tell the user in one line what the run would need.
    - **"Run anyway"**: carry on. Those requirements end `skipped` and the summary says the
      change itself was not seen.
-   Ask once per run, covering every blocked action in one question. Requirements that are only
+   Ask once per run, covering every blocked step in one question, setup steps included: name
+   each one ("create an order, add gift wrap, submit it, then open the payment page"). Requirements that are only
    partly affected (a side screen, an edge case) don't trigger it: they end `skipped` as usual.
 7. `baseline progress start <pr|quick|full> <agents>` and `baseline progress phase gather done`.
 
@@ -123,6 +132,7 @@ messages short: the band above the prompt shows progress, and the report holds t
   `inputs.json`, or `git diff --name-only` against the base branch).
 - **explorer**, one per runner in the size plan (max 2 pr and quick, 4 full, none code-only): its
   runner key, persona, depth and the `can` / `cannot` lists from `baseline config describe`, the
+  setup plan from step 1.6, any limit the user put on a grant (word for word), the
   run folder, the run id, the run size, and the product checklist at
   `${CLAUDE_PLUGIN_ROOT}/checklists/product.md` plus any `checklistExtra` from the config.
 - **guide-reader** (full runs with a guide).

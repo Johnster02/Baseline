@@ -33,20 +33,41 @@ function fitRows(lines: string[], maxRows: number, isKey: (l: string, i: number)
   return lines.filter((_, i) => keep.has(i));
 }
 
+const plain = (l: string) => l.replace(/\x1b\[[0-9;]*m/g, "");
+
+/**
+ * Progress has to fit the rows the band is given, but every phase row stays: a phase that
+ * vanishes reads as a step the run skipped. Drop the divider rules first, then all but the
+ * first agent line, then the elapsed line. Only a band too short for the phases themselves
+ * falls back to keeping the key rows.
+ */
+function fitProgress(lines: string[], maxRows: number): string[] {
+  if (lines.length <= maxRows) return lines;
+  let out = lines.filter((l) => !/^─+$/.test(plain(l).trim()));
+  if (out.length > maxRows) {
+    let seen = false;
+    out = out.filter((l) => !/^\s+›/.test(plain(l)) || (!seen && (seen = true)));
+  }
+  if (out.length > maxRows) out = out.filter((l) => !/^elapsed\b/.test(plain(l).trim()));
+  if (out.length > maxRows) {
+    const last = out.length - 1;
+    out = fitRows(out, maxRows, (l, i) => i === 0 || i === last || /%|›/.test(plain(l)));
+  }
+  return out;
+}
+
 export function frame(s: FrameState, theme: ThemeName, width: number, maxRows: number): Segment[][] {
   const opts = { color: "truecolor" as const, width, now: s.now };
   let lines: string[] = [];
   const live = s.progress && !s.progress.finishedAt;
   if (live) {
-    lines = renderProgress(s.progress!, theme, opts);
-    const last = lines.length - 1;
-    lines = fitRows(lines, maxRows, (l, i) => i === 0 || i === last || /%|›/.test(l.replace(/\x1b\[[0-9;]*m/g, "")));
+    lines = fitProgress(renderProgress(s.progress!, theme, opts), maxRows);
   } else if (s.summary && s.now - Date.parse(s.summary.finishedAt) <= SUMMARY_MS) {
     lines = renderSummary(s.summary, theme, { ...opts, link: s.summary.link, localPath: s.summary.localPath });
     lines = fitRows(lines.filter((l) => l !== ""), maxRows, (l, i) => i === 0 || /pass rate|result|report/i.test(l.replace(/\x1b\[[0-9;]*m/g, "")));
   } else if (s.progress?.finishedAt && s.now - Date.parse(s.progress.finishedAt) <= SUMMARY_MS) {
     // Finished, summary not written yet: keep showing where it ended.
-    lines = renderProgress(s.progress, theme, opts).slice(0, maxRows);
+    lines = fitProgress(renderProgress(s.progress, theme, opts), maxRows);
   }
   return lines.map(toSegments);
 }

@@ -97,6 +97,17 @@ describe("decide hardening", () => {
     const c = { ...ctx(), createdPaths: ["/api/orders/9"] };
     expect(decide({ method: "DELETE", url: "https://staging.acme.dev/api/orders/9", loading: false }, c).action).toBe("continue");
   });
+  it("a delete-word click on the run's own draft is allowed, on anyone else's it is not", () => {
+    const id = "15f1b5d3-9d93-46bb-bdcc-9dc439525f60";
+    const c = { ...ctx(), createdPaths: [`/projects/${id}`] };
+    const click = (path: string) => decide({ method: "POST", url: `https://staging.acme.dev${path}`, loading: false, clickText: "Delete project" }, c);
+    expect(click(`/projects/${id}`).action).toBe("continue");
+    expect(click(`/projects/${id}/summary`).action).toBe("continue");
+    expect(click(`/api/projects/${id}`).action).toBe("continue");
+    expect(click("/projects/aaaaaaaa-0000-0000-0000-000000000000")).toMatchObject({ action: "abort", category: "delete" });
+    const short = { ...ctx(), createdPaths: ["/projects/1"] };
+    expect(decide({ method: "POST", url: "https://staging.acme.dev/x/1", loading: false, clickText: "Delete project" }, short)).toMatchObject({ action: "abort", category: "delete" });
+  });
   it("never learns a request to another host", () => {
     expect(decide({ method: "POST", url: "https://analytics.example/collect", loading: true }, ctx(look))).toEqual({ action: "continue" });
   });

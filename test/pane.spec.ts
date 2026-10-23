@@ -37,6 +37,12 @@ describe("frame", () => {
     expect(rows.length).toBeLessThanOrEqual(4);
     expect(text(rows)).toContain("62%");
   });
+  it("keeps every phase, refute and clean up included, when rows are tight", () => {
+    for (const p of [progress(), progress({ finishedAt: "2026-10-22T09:58:00Z" })]) {
+      const t = text(frame({ progress: p, now }, "dark", 80, 8));
+      for (const name of ["Gather", "Read code", "Explore", "Verdicts", "Refute", "Clean up"]) expect(t).toContain(name);
+    }
+  });
   it("segments carry the theme's hex colours", () => {
     const segs = frame({ progress: progress(), now }, "dark", 80, 20).flat();
     expect(segs.some((s) => s.color === "#7aa7ff")).toBe(true);

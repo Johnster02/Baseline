@@ -66,6 +66,21 @@ const GET_CATEGORIES: PatternCategory[] = ["auth", "delete"];
  * The look-only and protected-area rules, in order. Pure so it can be tested without a browser.
  * Protected areas are checked before anything that would allow a write, including writes learned on load.
  */
+/**
+ * Is this request about something the run created? The same path, a path under it, or a path
+ * carrying its id (a server action posts to the page, an API call names the id). Only an id
+ * long enough to be unique (8+ characters) counts, so "/projects/1" never matches "/x/1".
+ */
+function ownsPath(path: string, created: string[] = []): boolean {
+  const p = normalizePath(path);
+  return created.some((c) => {
+    const n = normalizePath(c);
+    if (p === n || p.startsWith(n + "/")) return true;
+    const id = n.split("/").filter(Boolean).pop() ?? "";
+    return id.length >= 8 && p.split("/").includes(id);
+  });
+}
+
 export function decide(req: GuardRequest, ctx: GuardContext): Decision {
   const { runner, cfg } = ctx;
   const method = req.method.toUpperCase();
@@ -87,6 +102,8 @@ export function decide(req: GuardRequest, ctx: GuardContext): Decision {
 
   for (const cat of PATTERN_ORDER) {
     if (runner.allow.includes(cat)) continue;
+    // Deleting what this run created is the cleaner's job, not a protected delete.
+    if (cat === "delete" && ownsPath(path, ctx.createdPaths)) continue;
     const p = cfg.patterns[cat];
     const url = p.urls.find((g) => globMatch(g, path));
     if (url) return { action: "abort", category: cat, reason: `matches protected ${cat} URL pattern`, trigger: url };
@@ -95,8 +112,7 @@ export function decide(req: GuardRequest, ctx: GuardContext): Decision {
   }
 
   if (method === "DELETE" && !runner.allow.includes("delete")) {
-    const own = (ctx.createdPaths ?? []).some((c) => normalizePath(c) === normalizePath(path));
-    if (!own) return { action: "abort", category: "delete", reason: "DELETE request, and this runner may not delete" };
+    if (!ownsPath(path, ctx.createdPaths)) return { action: "abort", category: "delete", reason: "DELETE request, and this runner may not delete" };
   }
 
   const key = requestKey(method, req.url, req.body);

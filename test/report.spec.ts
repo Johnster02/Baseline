@@ -35,6 +35,26 @@ describe("renderSessionReport", () => {
     expect(html).toMatch(/class="list wp" style="--w:3;--idw:\d+px"/);
   });
 
+  it("says All clear when nothing needs a look, folds the passes away and names what was not checked", () => {
+    const pass = (id: string) => finding({ id, verdict: "match", severity: "low" });
+    const html = renderSessionReport([record({
+      findings: [pass("R-01"), pass("R-02"), finding({ id: "R-03", verdict: "unverified", severity: "low" })],
+      counts: { checked: 2, passed: 2, passRate: 100, conflicts: 0, product: 0, unspecced: 0, unverified: 1, skipped: 0 },
+    })], "br2049");
+    expect(html).toContain("All clear");
+    expect(html).not.toMatch(/need a look/);
+    expect(html).toMatch(/1 not checked on the site: <button class="goto"[^>]*data-goto="R-03"/);
+    expect(html).toMatch(/<details class="sec fold passes[^"]*"[^>]*><summary><h2>Passed · 2<\/h2>/);
+    const main = html.slice(html.indexOf('<div class="list'), html.indexOf("fold passes"));
+    expect(main).toContain('data-fid="R-03"');
+    expect(main).not.toContain('data-fid="R-01"');
+    const passRow = /data-fid="R-01"[\s\S]*?<\/summary>/.exec(html)![0];
+    expect(passRow).not.toContain('class="sev');
+  });
+  it("names the findings behind the need-a-look count", () => {
+    const html = renderSessionReport([record()], "br2049");
+    expect(html).toMatch(/need a look: <button class="goto"[^>]*data-goto="R-01"/);
+  });
   it("says Complete and never pass/fail wording", () => {
     const html = renderSessionReport([record()], "br2049");
     expect(html).toContain("Complete");

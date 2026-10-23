@@ -40,6 +40,16 @@ $$(".run").forEach(run => {
     $$("[data-filter]", run).forEach(x => x.setAttribute("aria-pressed", x.dataset.filter === st.v)); apply(); });
   $$("[data-persona]", run).forEach(b => b.onclick = () => { st.p = st.p === b.dataset.persona ? null : b.dataset.persona;
     $$("[data-persona]", run).forEach(x => x.setAttribute("aria-pressed", x.dataset.persona === st.p)); apply(); });
+  $$("[data-passes]", run).forEach(b => b.onclick = () => { const p = $(".passes", run); if (!p) return;
+    p.open = true; p.scrollIntoView({ behavior: "smooth", block: "start" }); });
+  $$("[data-goto]", run).forEach(b => b.onclick = () => {
+    const f = $$(".f", run).find(x => x.dataset.fid === b.dataset.goto); if (!f) return;
+    const fold = f.closest(".passes"); if (fold) fold.open = true;
+    if (f.classList.contains("gone")) { st.v = "all"; st.p = null; st.q = ""; const s = $(".search", run); if (s) s.value = "";
+      $$("[data-filter]", run).forEach(x => x.setAttribute("aria-pressed", x.dataset.filter === "all"));
+      $$("[data-persona]", run).forEach(x => x.setAttribute("aria-pressed", false)); apply(); }
+    f.open = true; f.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
   const q = $(".search", run); if (q) { let t; q.oninput = () => { clearTimeout(t); t = setTimeout(() => { st.q = q.value.trim().toLowerCase(); apply(); }, 180); }; }
 });
 

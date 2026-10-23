@@ -31,7 +31,12 @@ export type RunRecord = {
 const SHOT_BUDGET = 13 * 1024 * 1024;
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 const group = (v: string) => (isConflict(v as Finding["verdict"]) ? "conflict" : v);
-const needsAttention = (f: Finding) => f.verdict !== "match" && f.verdict !== "skipped";
+/** A problem someone should act on. Unverified and skipped are gaps in the run, not problems. */
+const needsAttention = (f: Finding) => isConflict(f.verdict) || f.verdict === "product" || f.verdict === "unspecced";
+const notChecked = (f: Finding) => f.verdict === "unverified" || f.verdict === "skipped";
+/** Finding ids as buttons that open that finding, so a count always says which ones it means. */
+const TOG = `<span class="tog" aria-hidden="true"><span class="sh">Show</span><span class="hd">Hide</span></span>`;
+const gotoIds = (fs: Finding[]) => fs.map((f) => `<button class="goto" type="button" data-goto="${esc(f.id)}">${esc(f.id)}</button>`).join(" ");
 const ALLOW_HINT: Record<string, string> = {
   email: "allow email", auth: "allow auth and accounts", delete: "allow deleting", finance: "allow payments and finance",
   live: "allow live testing", "unknown-write": "give this runner create depth, or list the path as a read-only POST",
@@ -104,9 +109,9 @@ function findingHTML(f: Finding, r: RunRecord, i: number, budget: { left: number
     `<div class="col${conflictCol("observed")}"><div class="lbl">Observed</div><p>${esc(f.observed?.text ?? "Not seen on the site.")}</p></div>`,
   ].join("");
   const steps = f.observed?.steps.length ? `<ol class="steps">${f.observed.steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>` : "";
-  return `<details class="f" style="--c:${c};--i:${i}" data-group="${group(f.verdict)}" data-personas="${esc(f.personas.join(","))}" data-text="${esc((f.title + " " + f.specced.text + " " + (f.observed?.text ?? "")).toLowerCase())}">
+  return `<details class="f" style="--c:${c};--i:${i}" data-fid="${esc(f.id)}" data-group="${group(f.verdict)}" data-personas="${esc(f.personas.join(","))}" data-text="${esc((f.title + " " + f.specced.text + " " + (f.observed?.text ?? "")).toLowerCase())}">
 <summary><i class="mk"></i><span class="rid">${esc(f.id)}</span><span class="ttl">${esc(f.title)}<small>${esc(f.personas.join(", "))}${f.route ? " · " + esc(f.route) : ""}</small></span>
-<span class="right"><span class="tag">${esc(VERDICT_LABEL[f.verdict] ?? f.verdict)}</span><span class="sev${f.severity === "critical" ? " crit" : ""}">${esc(f.severity)}</span></span></summary>
+<span class="right"><span class="tag">${esc(VERDICT_LABEL[f.verdict] ?? f.verdict)}</span>${needsAttention(f) ? `<span class="sev${f.severity === "critical" ? " crit" : ""}">${esc(f.severity)}</span>` : ""}</span></summary>
 <div class="body"><div class="chips">${f.checklistItem ? `<span>checklist ${esc(f.checklistItem)}</span>` : ""}${f.scope === "unrelated" ? "<span>not related to this change</span>" : ""}</div>
 <div class="cols">${cols}</div>${!r.commit.codeRead ? `<div class="nobuilt">Code was not read for this run.</div>` : ""}
 ${shots && steps ? `<div class="evidence"><div>${shots}</div><div>${steps}</div></div>` : shots || steps}
@@ -122,13 +127,18 @@ const idWidth = (fs: Finding[]) => {
 
 function runHTML(r: RunRecord, hidden: boolean): string {
   const budget = { left: SHOT_BUDGET };
-  const attention = r.findings.filter(needsAttention).length;
+  const issues = r.findings.filter(needsAttention);
+  const attention = issues.length;
+  const unchecked = r.findings.filter(notChecked);
+  // Passes are not issues: they live in their own folded list under the issues.
+  const open = r.findings.filter((f) => f.verdict !== "match");
+  const passes = r.findings.filter((f) => f.verdict === "match");
   const personas = [...new Set(r.findings.flatMap((f) => f.personas))];
-  const groups: [string, string][] = [["all", "All"], ["conflict", "Conflicts"], ["product", "Product"], ["unspecced", "Unspecced"], ["unverified", "Unverified"], ["match", "Match"]];
+  const groups: [string, string][] = [["all", "All"], ["conflict", "Conflicts"], ["product", "Product"], ["unspecced", "Unspecced"], ["unverified", "Unverified"]];
   const legend = (["conflict", "product", "unspecced", "unverified", "match"] as const).map((g) => {
     const n = r.findings.filter((f) => group(f.verdict) === g).length;
     const v = g === "conflict" ? "--v-specbuilt" : VERDICT_VAR[g];
-    return `<button class="lg${n ? "" : " zero"}" type="button" data-filter="${g}" aria-pressed="false" style="--c:var(${v})"><i class="sw"></i><span class="t">${g === "conflict" ? "Conflicts" : g[0]!.toUpperCase() + g.slice(1)}</span><span class="n">${n}</span></button>`;
+    return `<button class="lg${n ? "" : " zero"}" type="button" ${g === "match" ? "data-passes" : `data-filter="${g}"`} aria-pressed="false" style="--c:var(${v})"><i class="sw"></i><span class="t">${g === "conflict" ? "Conflicts" : g[0]!.toUpperCase() + g.slice(1)}</span><span class="n">${n}</span></button>`;
   }).join("");
   const warn = [
     !r.commit.codeRead ? `<p class="warn">Code was not read for this run: findings compare the spec with the site only.</p>` : "",
@@ -138,7 +148,7 @@ function runHTML(r: RunRecord, hidden: boolean): string {
   const uniqSkipped = [...new Map(r.skipped.map((s) => [`${s.runner}|${s.category}|${s.method}|${s.path}`, s])).values()];
   const skippedHTML = uniqSkipped.length ? `<section class="sec wp" style="--w:5"><h2>Skipped · ${uniqSkipped.length}</h2><div class="rows">${uniqSkipped.map((s) =>
     `<div class="row"><span><b>${esc(s.runner)}</b> <span class="k">${esc(s.method)} ${esc(s.host)}${esc(s.path)}</span></span><span>${esc(s.reason)}${s.trigger ? ` (“${esc(s.trigger)}”)` : ""}</span><span class="k">To include it next time: ${esc(ALLOW_HINT[s.category] ?? "change this runner's permissions")}</span></div>`).join("")}</div></section>` : "";
-  const permHTML = r.permissions.length ? `<details class="sec fold wp" style="--w:6"><summary><h2>Permissions this run had · ${r.permissions.length}</h2><span class="tog" aria-hidden="true"><span class="sh">Show</span><span class="hd">Hide</span></span></summary><div class="rows">${r.permissions.map((p) =>
+  const permHTML = r.permissions.length ? `<details class="sec fold wp" style="--w:6"><summary><h2>Permissions this run had · ${r.permissions.length}</h2>${TOG}</summary><div class="rows">${r.permissions.map((p) =>
     `<div class="perm"><b>${esc(p.runner)}</b><ul>${p.can.map((c) => `<li>${esc(c)}</li>`).join("")}</ul><ul class="no">${p.cannot.map((c) => `<li>not: ${esc(c)}</li>`).join("")}</ul></div>`).join("")}</div></details>` : "";
   const runnersHTML = (r.runners ?? []).some((x) => !x.ok) ? `<section class="sec wp" style="--w:5"><h2>Runners</h2><div class="rows">${r.runners.map((x) =>
     `<div class="row"><span><b>${esc(x.key)}</b></span><span>${x.ok ? "signed in" : "not signed in"}</span><span class="k">${esc(x.error ?? "")}</span></div>`).join("")}</div></section>` : "";
@@ -148,17 +158,21 @@ function runHTML(r: RunRecord, hidden: boolean): string {
   return `<section class="run" data-run="${esc(r.runId)}"${hidden ? " hidden" : ""}>
 <header class="case wp" style="--w:0"><div><h1>${esc(r.label)}</h1><div class="tele"><span>run <b>${esc(r.runId)}</b></span><span>${esc(r.size)} · <b>${esc(Number(r.agents) || 0)} agents</b></span><span>${r.durationMin}m</span><span>${esc(r.url)}${r.commit.commitRead ? ` @ <b>${esc(r.commit.commitRead)}</b>` : ""}</span></div></div><span class="result">Complete</span></header>
 ${warn}
-<div class="summary wp" style="--w:1"><div class="block"><div class="count"><b>${attention}</b><span>need a look · ${r.counts.passRate === null ? "nothing verified yet" : `${r.counts.passRate}% pass · ${r.counts.checked} verified`}${r.counts.unverified ? ` · ${r.counts.unverified} unverified` : ""}</span></div>
+<div class="summary wp" style="--w:1"><div class="block">${attention
+    ? `<div class="count"><b>${attention}</b><span>need a look: ${gotoIds(issues)}<br>${r.counts.passRate === null ? "nothing verified yet" : `${r.counts.passRate}% pass · ${r.counts.checked} verified`}</span></div>`
+    : `<div class="count clear"><b>All clear</b><span>no issues found · ${r.counts.passRate === null ? "nothing verified on the site" : `${r.counts.passed} of ${r.counts.checked} checked on the site passed`}</span></div>`}
+${unchecked.length ? `<p class="unchecked">${unchecked.length} not checked on the site: ${gotoIds(unchecked)}</p>` : ""}
 <div class="tally">${r.findings.map((f, i) => `<i class="${f.verdict === "match" ? "ok" : ""}" data-group="${group(f.verdict)}" style="--c:var(${VERDICT_VAR[f.verdict]});--i:${i}"></i>`).join("")}</div>
 <div class="legend">${legend}</div></div>
 <div class="block"><div class="block-h"><span class="lbl">People</span></div><div class="people">${personas.map((p) => {
     const mine = r.findings.filter((f) => f.personas.includes(p));
     const bad = mine.filter(needsAttention).length;
-    return `<button class="person" type="button" data-persona="${esc(p)}" aria-pressed="false"><span class="nm">${esc(p)}</span><span class="dots">${mine.map((f, i) => `<i style="--c:var(${VERDICT_VAR[f.verdict]});--i:${i}"></i>`).join("")}</span><span class="ct${bad ? " has" : ""}">${bad} to look at</span></button>`;
+    return `<button class="person" type="button" data-persona="${esc(p)}" aria-pressed="false"><span class="nm">${esc(p)}</span><span class="dots">${mine.map((f, i) => `<i style="--c:var(${VERDICT_VAR[f.verdict]});--i:${i}"></i>`).join("")}</span><span class="ct${bad ? " has" : ""}">${bad ? `${bad} to look at` : "all clear"}</span></button>`;
   }).join("")}</div></div></div>
 <div class="toolbar wp" style="--w:2"><div class="seg" role="group" aria-label="Filter">${groups.map(([g, l]) => `<button type="button" data-filter="${g}" aria-pressed="${g === "all"}">${l}</button>`).join("")}</div>
-<div class="tools-r"><span class="readout data"><b>${r.findings.length}</b> shown</span><input class="search" type="search" placeholder="Search findings" aria-label="Search findings"></div></div>
-<div class="list wp" style="--w:3;${idWidth(r.findings)}">${r.findings.length ? r.findings.map((f, i) => findingHTML(f, r, i, budget)).join("") : `<p class="empty">No findings for this run.</p>`}</div>
+<div class="tools-r"><span class="readout data"><b>${open.length}</b> shown</span><input class="search" type="search" placeholder="Search findings" aria-label="Search findings"></div></div>
+<div class="list wp" style="--w:3;${idWidth(r.findings)}">${open.length ? open.map((f, i) => findingHTML(f, r, i, budget)).join("") : `<p class="empty">${passes.length ? "No issues found." : "No findings for this run."}</p>`}</div>
+${passes.length ? `<details class="sec fold passes wp" style="--w:4"><summary><h2>Passed · ${passes.length}</h2>${TOG}</summary><div class="plist" style="${idWidth(r.findings)}">${passes.map((f, i) => findingHTML(f, r, i, budget)).join("")}</div></details>` : ""}
 ${runnersHTML}${leftHTML}${otherHTML}${skippedHTML}${permHTML}${unread}
 </section>`;
 }

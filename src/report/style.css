@@ -87,6 +87,13 @@ button:focus-visible,input:focus-visible,summary:focus-visible{outline:1px solid
 .count b{font-family:var(--font-data);font-weight:400;font-size:56px;line-height:1;color:var(--v-specbuilt);font-variant-numeric:tabular-nums;
   text-shadow:2px 0 rgba(208,84,74,.25)}
 .count span{color:var(--ink-2)}
+.count.clear b{font-size:40px;color:var(--v-match);text-shadow:var(--glow-phos,none)}
+.plist{display:flex;flex-direction:column}
+.passes .f .ttl{color:var(--ink-2)}
+.passes .f .mk{opacity:.6}
+.unchecked{margin:-6px 0 16px;color:var(--ink-3);font-size:13px}
+.goto{font:inherit;font-family:var(--font-data);color:var(--ink);background:none;border:0;border-bottom:1px dotted var(--ink-3);padding:0;cursor:pointer}
+.goto:hover{color:var(--phos);border-bottom-color:var(--phos)}
 .tally{display:flex;flex-wrap:wrap;gap:3px;margin-bottom:16px}
 .tally i{width:22px;height:30px;background:var(--c);opacity:.85}
 .tally i.ok{opacity:.35}
@@ -174,7 +181,7 @@ mark{background:none;color:var(--ink);border-bottom:1px solid var(--dust);paddin
 
 /* ---------- terminal glow ---------- */
 .case h1{text-shadow:var(--glow-ink),1.5px 0 rgba(255,106,92,.35),-1.5px 0 rgba(150,201,218,.3)}
-.count b{text-shadow:var(--glow-red)}
+.count:not(.clear) b{text-shadow:var(--glow-red)}
 .brand b{text-shadow:var(--glow-ink)}
 .feat[aria-current="true"] .nm,.lg[aria-pressed="true"] .t::before,.person[aria-pressed="true"] .nm::before,
 .seg button[aria-pressed="true"],.newrun input,.search,.log,.tri,.copied,.newrun code{text-shadow:var(--glow-phos)}
