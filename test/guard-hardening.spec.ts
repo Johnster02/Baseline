@@ -126,6 +126,9 @@ describe("decide hardening", () => {
     expect(bulk(JSON.stringify([{ all: true }]))).toMatchObject({ action: "abort", category: "delete" });
     expect(bulk(JSON.stringify([{ ids: [mine, 42] }]))).toMatchObject({ action: "abort", category: "delete" });
     expect(bulk(`ids=${mine}`)).toMatchObject({ action: "abort", category: "delete" });
+    expect(bulk(JSON.stringify([{ ids: [mine], scope: "all" }]))).toMatchObject({ action: "abort", category: "delete" });
+    expect(bulk(JSON.stringify([{ ids: [mine], [theirs]: null }]))).toMatchObject({ action: "abort", category: "delete" });
+    expect(bulk(JSON.stringify([mine, "$undefined"])).action).toBe("continue");
     const onTheirs = decide({ method: "POST", url: `https://staging.acme.dev/projects/${theirs}`, loading: false, clickText: "Delete project", body: JSON.stringify([mine]) }, c);
     expect(onTheirs).toMatchObject({ action: "abort", category: "delete" });
   });

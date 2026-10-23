@@ -20409,10 +20409,10 @@ function ownsRequest(path, body, created = []) {
         named++;
         return true;
       }
-      return /^[a-z_$.:-]{0,40}$/i.test(v);
+      return v === "$undefined";
     }
     if (Array.isArray(v)) return v.every(ok);
-    if (typeof v === "object") return Object.values(v).every(ok);
+    if (typeof v === "object") return Object.entries(v).every(([k, x]) => /^[a-z_$]{1,40}$/i.test(k) && ok(x));
     return false;
   };
   return ok(parsed) && named > 0;

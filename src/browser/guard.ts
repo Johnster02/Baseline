@@ -95,8 +95,8 @@ function ownsPath(path: string, created: string[] = []): boolean {
 /**
  * A request about records the run created: its path is one (ownsPath), or it goes to a list
  * (a path naming no record) with a JSON body that names only the run's records. A list page's
- * "delete selected" posts like that. Every value in the body must be one of the run's ids or a
- * plain word label: a number, `true`, another id or anything unparsable means it is not ours.
+ * "delete selected" posts like that. Every key must be a plain field name and every value one
+ * of the run's ids: a number, `true`, a word, another id or anything unparsable means not ours.
  */
 function ownsRequest(path: string, body: string | undefined, created: string[] = []): boolean {
   if (ownsPath(path, created)) return true;
@@ -107,14 +107,16 @@ function ownsRequest(path: string, body: string | undefined, created: string[] =
   let parsed: unknown;
   try { parsed = JSON.parse(body); } catch { return false; }
   let named = 0;
+  // Strict: keys are plain field names, strings are the run's own ids (or the framework's
+  // "$undefined" placeholder). Any other word, including a scope like "all", is not ours.
   const ok = (v: unknown): boolean => {
     if (v === null || v === false) return true;
     if (typeof v === "string") {
       if (mine.has(v.toLowerCase())) { named++; return true; }
-      return /^[a-z_$.:-]{0,40}$/i.test(v);
+      return v === "$undefined";
     }
     if (Array.isArray(v)) return v.every(ok);
-    if (typeof v === "object") return Object.values(v as object).every(ok);
+    if (typeof v === "object") return Object.entries(v as object).every(([k, x]) => /^[a-z_$]{1,40}$/i.test(k) && ok(x));
     return false;
   };
   return ok(parsed) && named > 0;
