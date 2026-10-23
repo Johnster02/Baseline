@@ -20630,9 +20630,12 @@ function requestTexts(url2, body) {
   }
   return { texts, clean: clean2 };
 }
+var runKey = (runDir) => (0, import_node_crypto4.createHash)("sha256").update((0, import_node_path4.resolve)(runDir)).digest("hex").slice(0, 16);
 function ownedFile(runDir) {
-  const key = (0, import_node_crypto4.createHash)("sha256").update((0, import_node_path4.resolve)(runDir)).digest("hex").slice(0, 16);
-  return (0, import_node_path4.join)(dataDir(), "hosts", `owned-${key}.json`);
+  return (0, import_node_path4.join)(dataDir(), "hosts", `owned-${runKey(runDir)}.json`);
+}
+function createdFile(runDir) {
+  return (0, import_node_path4.join)(dataDir(), "hosts", `created-${runKey(runDir)}.json`);
 }
 var OwnedTracker = class {
   constructor(file6) {
@@ -20661,6 +20664,8 @@ var OwnedTracker = class {
   /** Every request this run sent, in canonical form (see canon). */
   sent = [];
   sentSize = 0;
+  /** Canonical paths the site's replies redirected to: loading exactly one of these is following it. */
+  replyTargets = /* @__PURE__ */ new Set();
   see(id, reply) {
     const k = id.toLowerCase();
     if (!this.firstSeen.has(k)) this.firstSeen.set(k, { seq: ++this.seq, reply });
@@ -20682,6 +20687,11 @@ var OwnedTracker = class {
   /** A same-site path the site's reply redirects to: its UUIDs and ULIDs count as the reply's. */
   seeReplyPath(path) {
     for (const m of path.matchAll(BODY_ID)) this.see(m[0], true);
+    this.replyTargets.add(canon(path));
+  }
+  /** A request that couldn't be decoded: nothing reached in the next window counts as created. */
+  markUnclear(at = Date.now()) {
+    this.dirtyUntil = Math.max(this.dirtyUntil, at + LANDING_WINDOW_MS);
   }
   /**
    * A write about to go out: every id it names (path, query, body) came from the request, so a
@@ -20689,13 +20699,24 @@ var OwnedTracker = class {
    */
   seeRequest(url2, body, write = true) {
     const { texts, clean: clean2 } = requestTexts(url2, body);
-    const ids = [...url2.matchAll(ANY_ID)].map((m) => m[0].toLowerCase());
-    const followsReply = !write && ids.length > 0 && ids.every((id) => {
-      const f = this.firstSeen.get(id);
-      return !!f && f.reply && f.seq > this.lastWriteSeq;
-    });
+    let path = "", search = "";
+    try {
+      const u = new URL(url2);
+      path = u.pathname;
+      search = u.search;
+    } catch {
+      path = url2;
+    }
+    const followsReply = !write && this.replyTargets.has(canon(path));
     let settled = true;
-    if (!followsReply) {
+    if (followsReply) {
+      if (search) {
+        const d = canonDeep(search);
+        if (!d.settled) settled = false;
+        this.sent.push(d.text);
+        this.sentSize += d.text.length;
+      }
+    } else {
       for (const t of [url2 + "\n" + (body ?? ""), ...texts]) {
         const d = canonDeep(t);
         if (!d.settled) settled = false;
@@ -20975,8 +20996,12 @@ async function openSession(o) {
       }
       if (u.host === baseHost) {
         const isWrite = method !== "GET" && method !== "HEAD";
-        const clean2 = isWrite || !STATIC.has(r.resourceType()) ? owned.seeRequest(r.url(), r.postData() ?? void 0, isWrite) : true;
-        if (isWrite && !loading) owned.wrote(Date.now(), clean2);
+        if (!isWrite && STATIC.has(r.resourceType())) owned.seeUrl(r.url());
+        else {
+          const clean2 = owned.seeRequest(r.url(), r.postData() ?? void 0, isWrite);
+          if (isWrite && !loading) owned.wrote(Date.now(), clean2);
+          else if (!clean2) owned.markUnclear();
+        }
       }
       if (u.host === baseHost && !STATIC.has(r.resourceType())) network.push({ at: (/* @__PURE__ */ new Date()).toISOString(), ...entry, type: r.resourceType(), outcome: "allowed" });
       return await route.continue();
@@ -21053,6 +21078,7 @@ async function openSession(o) {
   page = await context.newPage();
   page.on("framenavigated", (f) => {
     if (f !== page.mainFrame()) return;
+    clicks.length = 0;
     try {
       if (new URL(f.url()).host === baseHost) owned.landed(f.url(), Date.now(), state.agentNav);
     } catch {
@@ -21181,14 +21207,11 @@ async function openSession(o) {
       return rel;
     },
     created(kind, label, url2) {
-      appendJson((0, import_node_path6.join)(o.runDir, "created.json"), {
-        runner: o.runner.key,
-        kind,
-        label,
-        url: url2,
-        labelled: label.includes(`Baseline ${o.runId}`),
-        at: (/* @__PURE__ */ new Date()).toISOString()
-      });
+      const entry = { runner: o.runner.key, kind, label, url: url2, labelled: label.includes(`Baseline ${o.runId}`), at: (/* @__PURE__ */ new Date()).toISOString() };
+      appendJson((0, import_node_path6.join)(o.runDir, "created.json"), entry);
+      const trusted = createdFile(o.runDir);
+      (0, import_node_fs7.mkdirSync)((0, import_node_path6.join)(trusted, ".."), { recursive: true, mode: 448 });
+      appendJson(trusted, entry);
     },
     async close() {
       (0, import_node_fs7.writeFileSync)((0, import_node_path6.join)(o.runDir, "logs", `${o.runner.key}-network.json`), JSON.stringify(network, null, 2));
@@ -22112,6 +22135,18 @@ function needRun(args) {
   if (!d) err("no active run. Start one with: baseline run new --url <url> --label <label>");
   return d;
 }
+register("created", "what the run created, from Baseline's own record (agents can't edit it): created [--run <dir>]", (args) => {
+  const runDir = needRun(args);
+  if (!runDir) return 2;
+  let list = [];
+  try {
+    list = JSON.parse((0, import_node_fs19.readFileSync)(createdFile(runDir), "utf8"));
+  } catch {
+    list = [];
+  }
+  out(JSON.stringify(list, null, 2));
+  return 0;
+});
 register("run", "run new --url <u> --label <l> [--session <id>] | run finish", (args) => {
   if (args[0] === "new") {
     const url2 = flag(args, "--url"), label = flag(args, "--label");

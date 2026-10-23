@@ -63,6 +63,10 @@ Test data (decided, not optional):
   record (a draft where the site has drafts), named `Baseline <runId> <thing>`, recorded with `s.created(kind, label, url)` the moment
   it exists, so the cleaner deletes it afterwards. Test on that, not on whatever happens to be
   there.
+- Build the test data ONCE. Record each record with `s.created` the moment it exists. If a
+  script fails part-way through creating, look for the record (by its label on the list page)
+  and record it, rather than creating another. Never make throwaway records to probe a form:
+  read the form with `snapshot()` instead. `<runDir>/created.json` is Baseline's: never edit it.
 - If you can't build it (look only, or a setup step your runner isn't allowed), check what you
   can read, mark the rest `skipped`, and name the exact step and permission, for example
   "needed to submit its own order (allow: create)". Never fall back to writing on someone else's

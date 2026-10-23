@@ -212,7 +212,7 @@ or `verdict`, and write the result to `<runDir>/findings.json`. Do not filter he
 
 ## 5. Clean up
 
-If `<runDir>/created.json` has entries: `baseline progress phase clean-up active`, dispatch the
+If `baseline created --run <runDir>` lists anything: `baseline progress phase clean-up active`, dispatch the
 **cleaner**, then mark it done. Otherwise mark `clean-up skipped`.
 
 ## 6. Report

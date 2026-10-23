@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { OwnedTracker, LANDING_WINDOW_MS } from "../src/browser/owned";
 
 const SITE = "https://app.example.test";
-const NEW_ID = "f764b3d9-2ed5-4d46-af8f-63171fd88b4c";
-const OLD_ID = "15f1b5d3-9d93-46bb-bdcc-9dc439525f60";
+const NEW_ID = "7c9e1b42-5a3f-4d68-b2e1-9f0a6c3d8e25";
+const OLD_ID = "3f2a6c1e-8b4d-4e7a-9c15-2d6b8e0f4a71";
 
 describe("OwnedTracker", () => {
   it("owns a new id the site's reply sends the browser to right after a write", () => {
@@ -23,6 +23,26 @@ describe("OwnedTracker", () => {
     t.seeReplyPath(`/projects/${NEW_ID}`);
     t.seeRequest(`${SITE}/projects/${NEW_ID}?brief=new`, undefined, false);
     expect(t.landed(`${SITE}/projects/${NEW_ID}?brief=new`, 1300)).toBe(`/projects/${NEW_ID}`);
+  });
+
+  it("a page load is only 'following the reply' at the exact redirect target, and its query still counts", () => {
+    const t = new OwnedTracker();
+    t.wrote(1000, t.seeRequest(`${SITE}/orders`, "{}"));
+    t.seeReplyPath(`/orders/${NEW_ID}`);
+    // Same path, but a disguised other id in the query: the query goes in the sent log.
+    t.seeRequest(`${SITE}/orders/${NEW_ID}?also=${OLD_ID.replace(/-/g, "")}`, undefined, false);
+    expect(t.landed(`${SITE}/orders/${NEW_ID}`, 1200)).toBe(`/orders/${NEW_ID}`);
+    t.wrote(1300, t.seeRequest(`${SITE}/orders`, "{}"));
+    t.seeReplyPath(`/orders/${OLD_ID}`);
+    expect(t.landed(`${SITE}/orders/${OLD_ID}`, 1400)).toBeUndefined();
+  });
+
+  it("a page load that can't be decoded blocks ownership for the window", () => {
+    const t = new OwnedTracker();
+    t.wrote(1000, t.seeRequest(`${SITE}/orders`, "{}"));
+    t.markUnclear(1050);
+    t.seeReplyPath(`/orders/${NEW_ID}`);
+    expect(t.landed(`${SITE}/orders/${NEW_ID}`, 1200)).toBeUndefined();
   });
 
   it("owns an id named only in a write's reply headers (a framework redirect header)", () => {

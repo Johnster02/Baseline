@@ -77,9 +77,15 @@ export function requestTexts(url: string, body?: string): { texts: string[]; cle
   return { texts, clean };
 }
 
+const runKey = (runDir: string) => createHash("sha256").update(resolve(runDir)).digest("hex").slice(0, 16);
+
 export function ownedFile(runDir: string): string {
-  const key = createHash("sha256").update(resolve(runDir)).digest("hex").slice(0, 16);
-  return join(dataDir(), "hosts", `owned-${key}.json`);
+  return join(dataDir(), "hosts", `owned-${runKey(runDir)}.json`);
+}
+
+/** Baseline's own record of what the run said it created: agents can't edit it (data folder). */
+export function createdFile(runDir: string): string {
+  return join(dataDir(), "hosts", `created-${runKey(runDir)}.json`);
 }
 
 export class OwnedTracker {
@@ -96,6 +102,8 @@ export class OwnedTracker {
   /** Every request this run sent, in canonical form (see canon). */
   private sent: string[] = [];
   private sentSize = 0;
+  /** Canonical paths the site's replies redirected to: loading exactly one of these is following it. */
+  private replyTargets = new Set<string>();
 
   constructor(private file?: string) {
     let saved: string[] = [];
@@ -123,7 +131,11 @@ export class OwnedTracker {
   /** A same-site path the site's reply redirects to: its UUIDs and ULIDs count as the reply's. */
   seeReplyPath(path: string) {
     for (const m of path.matchAll(BODY_ID)) this.see(m[0], true);
+    this.replyTargets.add(canon(path));
   }
+
+  /** A request that couldn't be decoded: nothing reached in the next window counts as created. */
+  markUnclear(at = Date.now()) { this.dirtyUntil = Math.max(this.dirtyUntil, at + LANDING_WINDOW_MS); }
 
   /**
    * A write about to go out: every id it names (path, query, body) came from the request, so a
@@ -131,12 +143,16 @@ export class OwnedTracker {
    */
   seeRequest(url: string, body?: string, write = true): boolean {
     const { texts, clean } = requestTexts(url, body);
-    // Every request goes in the never-sent record, except a page load that only follows the
-    // site's own redirect: every id it names first appeared in a reply after the last write.
-    const ids = [...url.matchAll(ANY_ID)].map((m) => m[0].toLowerCase());
-    const followsReply = !write && ids.length > 0 && ids.every((id) => { const f = this.firstSeen.get(id); return !!f && f.reply && f.seq > this.lastWriteSeq; });
+    // Every request goes in the never-sent record, except the path of a page load that is exactly
+    // where the site's reply redirected (compared in canonical form, so a disguised id can't pass
+    // as one). Its query string is still recorded.
+    let path = "", search = "";
+    try { const u = new URL(url); path = u.pathname; search = u.search; } catch { path = url; }
+    const followsReply = !write && this.replyTargets.has(canon(path));
     let settled = true;
-    if (!followsReply) {
+    if (followsReply) {
+      if (search) { const d = canonDeep(search); if (!d.settled) settled = false; this.sent.push(d.text); this.sentSize += d.text.length; }
+    } else {
       // The whole request, and each field value on its own, so neighbours can't hide an id.
       for (const t of [url + "\n" + (body ?? ""), ...texts]) {
         const d = canonDeep(t);

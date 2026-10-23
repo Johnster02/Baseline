@@ -98,7 +98,7 @@ describe("decide hardening", () => {
     expect(decide({ method: "DELETE", url: "https://staging.acme.dev/api/orders/9", loading: false }, c).action).toBe("continue");
   });
   it("a delete-word click on the run's own draft is allowed, on anyone else's it is not", () => {
-    const id = "15f1b5d3-9d93-46bb-bdcc-9dc439525f60";
+    const id = "3f2a6c1e-8b4d-4e7a-9c15-2d6b8e0f4a71";
     const c = { ...ctx(), createdPaths: [`/projects/${id}`] };
     const click = (path: string) => decide({ method: "POST", url: `https://staging.acme.dev${path}`, loading: false, clickText: "Delete project" }, c);
     expect(click(`/projects/${id}`).action).toBe("continue");
@@ -109,7 +109,7 @@ describe("decide hardening", () => {
     expect(decide({ method: "POST", url: "https://staging.acme.dev/x/1", loading: false, clickText: "Delete project" }, short)).toMatchObject({ action: "abort", category: "delete" });
   });
   it("owning a record is strict: real ids only, no collections, no encoded tricks, URL patterns still apply", () => {
-    const id = "15f1b5d3-9d93-46bb-bdcc-9dc439525f60";
+    const id = "3f2a6c1e-8b4d-4e7a-9c15-2d6b8e0f4a71";
     const del = (created: string[], path: string) => decide({ method: "POST", url: `https://staging.acme.dev${path}`, loading: false, clickText: "Delete project" }, { ...ctx(), createdPaths: created });
     expect(del([`/projects/${id}/summary`], "/settings/summary")).toMatchObject({ action: "abort" });
     expect(del(["/projects"], "/projects/aaaaaaaa-0000-0000-0000-000000000000")).toMatchObject({ action: "abort" });
@@ -118,7 +118,7 @@ describe("decide hardening", () => {
     expect(del([`/projects/${id}`], `/projects/${id}/delete`)).toMatchObject({ action: "abort", category: "delete" });
   });
   it("a list page's delete-selected is ours only when every id it names is one the run created", () => {
-    const mine = "15f1b5d3-9d93-46bb-bdcc-9dc439525f60", theirs = "aaaaaaaa-0000-4000-8000-000000000000";
+    const mine = "3f2a6c1e-8b4d-4e7a-9c15-2d6b8e0f4a71", theirs = "aaaaaaaa-0000-4000-8000-000000000000";
     const c = { ...ctx(), createdPaths: [`/projects/${mine}`] };
     const bulk = (body: string) => decide({ method: "POST", url: "https://staging.acme.dev/projects", loading: false, clickText: "Delete project", body }, c);
     expect(bulk(JSON.stringify([{ ids: [mine] }])).action).toBe("continue");
@@ -136,13 +136,13 @@ describe("decide hardening", () => {
     const c = ctx();
     const at = (url: string) => decide({ method: "POST", url, loading: false, clickText: "Delete project" }, c);
     expect(at("https://staging.acme.dev/projects")).toMatchObject({ action: "abort", category: "delete" });
-    expect(at("https://wired-buffalo-11.clerk.accounts.dev/v1/environment?_method=PATCH").action).toBe("continue");
+    expect(at("https://example-app-1.clerk.accounts.dev/v1/environment?_method=PATCH").action).toBe("continue");
     expect(at("https://o1.ingest.us.sentry.io/api/1/envelope/").action).toBe("continue");
     // The app's own API on another host is still judged by the click.
     expect(at("https://api.acme.dev/projects/7")).toMatchObject({ action: "abort", category: "delete" });
     expect(at("https://unknown.example/delete-things")).toMatchObject({ action: "abort", category: "delete" });
     // A provider's other endpoints, and the site under test on such a domain, are still judged.
-    expect(at("https://wired-buffalo-11.clerk.accounts.dev/v1/users/u_1")).toMatchObject({ action: "abort", category: "delete" });
+    expect(at("https://example-app-1.clerk.accounts.dev/v1/users/u_1")).toMatchObject({ action: "abort", category: "delete" });
     const onSentry = { ...ctx(), baseHost: "o1.ingest.sentry.io" };
     expect(decide({ method: "POST", url: "https://o1.ingest.sentry.io/api/1/envelope/", loading: false, clickText: "Delete project" }, onSentry)).toMatchObject({ action: "abort", category: "delete" });
   });

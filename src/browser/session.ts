@@ -5,7 +5,7 @@ import type { Browser, BrowserContext, Locator, Page } from "playwright";
 import type { ProjectConfig, Runner } from "../config/schema";
 import { dataDir } from "../config/secrets";
 import { decide, redactUrl, wsDecide } from "./guard";
-import { OwnedTracker, ownedFile } from "./owned";
+import { OwnedTracker, createdFile, ownedFile } from "./owned";
 import { isSignedOut, SignedOutError } from "./signin";
 
 export type BlockedEntry = {
@@ -150,9 +150,13 @@ export async function openSession(o: OpenOptions): Promise<Session> {
       if (d.learn) { learned.add(d.learn); writeFileSync(loadPath, JSON.stringify([...learned], null, 2)); }
       if (u.host === baseHost) {
         const isWrite = method !== "GET" && method !== "HEAD";
-        // Scripts, styles, images and fonts never name a record: keep them out of the sent log.
-        const clean = isWrite || !STATIC.has(r.resourceType()) ? owned.seeRequest(r.url(), r.postData() ?? undefined, isWrite) : true;
-        if (isWrite && !loading) owned.wrote(Date.now(), clean);
+        // Static files still count as places an id was seen; only the sent log leaves them out.
+        if (!isWrite && STATIC.has(r.resourceType())) owned.seeUrl(r.url());
+        else {
+          const clean = owned.seeRequest(r.url(), r.postData() ?? undefined, isWrite);
+          if (isWrite && !loading) owned.wrote(Date.now(), clean);
+          else if (!clean) owned.markUnclear();
+        }
       }
       if (u.host === baseHost && !STATIC.has(r.resourceType())) network.push({ at: new Date().toISOString(), ...entry, type: r.resourceType(), outcome: "allowed" });
       return await route.continue();
@@ -217,6 +221,9 @@ export async function openSession(o: OpenOptions): Promise<Session> {
   // Where the browser lands right after a write: a new id there is a record this run created.
   page.on("framenavigated", (f) => {
     if (f !== page.mainFrame()) return;
+    // A click's intent ends once the page has moved on: requests after this (a list refreshing
+    // after a redirect) are the new page's own, not the click's.
+    clicks.length = 0;
     try { if (new URL(f.url()).host === baseHost) owned.landed(f.url(), Date.now(), state.agentNav); } catch { /* ignore */ }
   });
   const deny = async () => { throw new Error("Baseline: direct API requests are not allowed. Drive the page instead."); };
@@ -301,9 +308,12 @@ export async function openSession(o: OpenOptions): Promise<Session> {
       return rel;
     },
     created(kind: string, label: string, url?: string) {
-      appendJson(join(o.runDir, "created.json"), {
-        runner: o.runner.key, kind, label, url, labelled: label.includes(`Baseline ${o.runId}`), at: new Date().toISOString(),
-      });
+      const entry = { runner: o.runner.key, kind, label, url, labelled: label.includes(`Baseline ${o.runId}`), at: new Date().toISOString() };
+      appendJson(join(o.runDir, "created.json"), entry);
+      // Baseline's own copy, out of agents' reach: `baseline created` reads this one.
+      const trusted = createdFile(o.runDir);
+      mkdirSync(join(trusted, ".."), { recursive: true, mode: 0o700 });
+      appendJson(trusted, entry);
     },
     async close() {
       writeFileSync(join(o.runDir, "logs", `${o.runner.key}-network.json`), JSON.stringify(network, null, 2));

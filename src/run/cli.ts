@@ -10,6 +10,7 @@ import { sizeRun, SIZES } from "./sizing";
 import type { RunSize } from "./sizing";
 import { commitInfo } from "./commit";
 import { mergeSiteMap, readSiteMap } from "./sitemap";
+import { createdFile } from "../browser/owned";
 
 const flag = (args: string[], name: string) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
 const STATUSES = ["pending", "active", "done", "skipped"] as const;
@@ -19,6 +20,15 @@ function needRun(args: string[]): string | undefined {
   if (!d) err("no active run. Start one with: baseline run new --url <url> --label <label>");
   return d;
 }
+
+register("created", "what the run created, from Baseline's own record (agents can't edit it): created [--run <dir>]", (args) => {
+  const runDir = needRun(args);
+  if (!runDir) return 2;
+  let list: unknown = [];
+  try { list = JSON.parse(readFileSync(createdFile(runDir), "utf8")); } catch { list = []; }
+  out(JSON.stringify(list, null, 2));
+  return 0;
+});
 
 register("run", "run new --url <u> --label <l> [--session <id>] | run finish", (args) => {
   if (args[0] === "new") {
