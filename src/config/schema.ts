@@ -19,6 +19,8 @@ export const runnerSchema = z.object({
   persona: z.string().min(1),
   depth: z.enum(DEPTHS).default("look"),
   allow: z.array(z.enum(CATEGORIES)).default([]),
+  /** Standing instructions from the user, kept so nobody has to repeat them every run. */
+  notes: z.array(z.string().min(1).max(300)).max(20).default([]),
   auth,
 });
 export type Runner = z.infer<typeof runnerSchema>;

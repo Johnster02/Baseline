@@ -34,7 +34,7 @@ function hostAliases(runUrl: string): string[] {
 
 const SEGMENT_SPLIT = /;|&&|\|\||\||\n|`|\$\(/;
 const SHELL_META = /[;&|`$()<>\n]/;
-const MUTATING = /^baseline\s+(config\s+(allow|deny|depth|set|secret|add-runner|remove-runner)\b|.*\s--live\b)/;
+const MUTATING = /^baseline\s+(config\s+(allow|deny|depth|note|set|secret|add-runner|remove-runner)\b|.*\s--live\b)/;
 /** A run started with --live may sign its runners in and check its own target with --live. */
 const LIVE_OK = /^baseline\s+(signin|target-check)\s/;
 const BEFORE = String.raw`(^|[\s;&|(\x60'"/])`;

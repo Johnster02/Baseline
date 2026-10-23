@@ -19847,6 +19847,8 @@ var runnerSchema = external_exports.object({
   persona: external_exports.string().min(1),
   depth: external_exports.enum(DEPTHS).default("look"),
   allow: external_exports.array(external_exports.enum(CATEGORIES)).default([]),
+  /** Standing instructions from the user, kept so nobody has to repeat them every run. */
+  notes: external_exports.array(external_exports.string().min(1).max(300)).max(20).default([]),
   auth
 });
 var patternSet = external_exports.object({ urls: external_exports.array(external_exports.string()).default([]), words: external_exports.array(external_exports.string()).default([]) });
@@ -20156,11 +20158,12 @@ function describeAll(projectDir) {
     return [
       `${r.key} (${r.persona}, ${r.depth === "look" ? "look only" : r.depth})`,
       `  can: ${p.can.join("; ")}`,
-      `  cannot: ${p.cannot.join("; ")}`
+      `  cannot: ${p.cannot.join("; ")}`,
+      ...r.notes.length ? [`  standing instructions: ${r.notes.map((n) => `"${n}"`).join("; ")}`] : []
     ].join("\n");
   }).join("\n\n");
 }
-register("config", "show | describe | add-runner | remove-runner | depth | allow | deny | set | secret", async (args) => {
+register("config", "show | describe | add-runner | remove-runner | depth | allow | deny | note | set | secret", async (args) => {
   const [sub, ...a] = args;
   const dir = process.cwd();
   const cfg = loadConfig(dir);
@@ -20223,6 +20226,30 @@ register("config", "show | describe | add-runner | remove-runner | depth | allow
       r.allow = sub === "allow" ? [.../* @__PURE__ */ new Set([...r.allow, c])] : r.allow.filter((x) => x !== c);
       saveConfig(dir, cfg);
       out(`${r.key} ${sub === "allow" ? "may now" : "may no longer"}: ${c}`);
+      return 0;
+    }
+    case "note": {
+      const r = runnerOr(cfg, a[0]);
+      if (!r) return 2;
+      if (a[1] === "--clear") {
+        const n = a[2] === void 0 ? void 0 : Number(a[2]);
+        if (n !== void 0 && !(Number.isInteger(n) && n >= 1 && n <= r.notes.length)) {
+          err(`no note ${a[2]} for ${r.key}`);
+          return 2;
+        }
+        r.notes = n === void 0 ? [] : r.notes.filter((_, i) => i !== n - 1);
+        saveConfig(dir, cfg);
+        out(`${r.key} notes: ${r.notes.length}`);
+        return 0;
+      }
+      const text = a.slice(1).join(" ").trim();
+      if (!text) {
+        err('usage: baseline config note <runner> "<instruction>" | --clear [n]');
+        return 2;
+      }
+      if (!r.notes.includes(text)) r.notes = [...r.notes, text.slice(0, 300)];
+      saveConfig(dir, cfg);
+      out(`${r.key} will remember: "${text.slice(0, 300)}"`);
       return 0;
     }
     case "set": {
@@ -21445,7 +21472,7 @@ function hostAliases(runUrl) {
 }
 var SEGMENT_SPLIT = /;|&&|\|\||\||\n|`|\$\(/;
 var SHELL_META = /[;&|`$()<>\n]/;
-var MUTATING = /^baseline\s+(config\s+(allow|deny|depth|set|secret|add-runner|remove-runner)\b|.*\s--live\b)/;
+var MUTATING = /^baseline\s+(config\s+(allow|deny|depth|note|set|secret|add-runner|remove-runner)\b|.*\s--live\b)/;
 var LIVE_OK = /^baseline\s+(signin|target-check)\s/;
 var BEFORE = String.raw`(^|[\s;&|(\x60'"/])`;
 var HTTP_TOOL = new RegExp(BEFORE + String.raw`(curl|wget|http|https|xh|httpie)['"]?(\s|$)`, "i");
@@ -21962,7 +21989,10 @@ register("run", "run new --url <u> --label <l> [--session <id>] | run finish", (
       err(target.reason === "production" ? "refusing: that URL is marked as production. Start the run with --live to test it." : "refusing: not a full http(s) URL");
       return 3;
     }
-    const permissions = cfg.runners.map((r) => ({ runner: r.key, ...describePermissions(r, cfg.patterns) }));
+    const permissions = cfg.runners.map((r) => {
+      const p = describePermissions(r, cfg.patterns);
+      return { runner: r.key, can: [...p.can, ...r.notes.map((n) => `standing instruction: ${n}`)], cannot: p.cannot };
+    });
     const created = newRun(process.cwd(), flag(args, "--session"), { url: url2, label, permissions, live });
     out(JSON.stringify(created));
     return 0;

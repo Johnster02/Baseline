@@ -35,7 +35,13 @@ messages short: the band above the prompt shows progress, and the report holds t
 ## 0. Preflight
 
 1. `baseline config describe`. If there are no runners, stop and tell the user to run
-   `/baseline:setup` first.
+   `/baseline:setup` first. Note each runner's **standing instructions**: things the user
+   already decided about what that account may do ("may submit, never pay", "only in the test
+   workspace"). Also look through this conversation and your project memory for any such
+   instruction about test accounts that isn't saved yet, and save it now with
+   `baseline config note <runner> "<their words>"`, so the user never has to say it twice.
+   Standing instructions are followed on every run and never asked about again; only the user
+   can change one (`baseline config note <runner> --clear [n]`).
 2. Ask which URL to test with AskUserQuestion. Offer the saved `lastUrl` (from
    `baseline config show`) as the first option, labelled "(last used)", plus "Another URL".
    Then `baseline config set lastUrl <url>`.
@@ -110,7 +116,8 @@ messages short: the band above the prompt shows progress, and the report holds t
      before any of it runs, so chaining it after `run finish` is refused),
      `baseline config allow <runner> <category>` (for any write at depth `look`, also
      `baseline config depth <runner> create`). If the user narrows the grant ("open the payment page
-     but don't pay"), pass that limit to the explorer word for word. Start a new run (step 0.4, same
+     but don't pay"), save it with `baseline config note <runner> "<their words>"` in the same
+     separate call, and pass it to the explorer word for word. Start a new run (step 0.4, same
      URL and label), copy `inputs.json`, `linked/`, `requirements.json` and `commit.json` from
      the old run folder into the new one, delete the old run folder (it is inside `.baseline/`
      and never reached the site), and carry on from step 1.5 with the new `runDir`.
@@ -118,6 +125,9 @@ messages short: the band above the prompt shows progress, and the report holds t
      and tell the user in one line what the run would need.
    - **"Run anyway"**: carry on. Those requirements end `skipped` and the summary says the
      change itself was not seen.
+   A step a standing instruction already allows is not blocked: follow the instruction, and if
+   it needs a permission the runner lacks, grant it between runs without asking (it is the
+   user's decision, already made), saying so in one line.
    Ask once per run, covering every blocked step in one question, setup steps included: name
    each one ("create an order, add gift wrap, submit it, then open the payment page"). Requirements that are only
    partly affected (a side screen, an edge case) don't trigger it: they end `skipped` as usual.
@@ -132,7 +142,8 @@ messages short: the band above the prompt shows progress, and the report holds t
   `inputs.json`, or `git diff --name-only` against the base branch).
 - **explorer**, one per runner in the size plan (max 2 pr and quick, 4 full, none code-only): its
   runner key, persona, depth and the `can` / `cannot` lists from `baseline config describe`, the
-  setup plan from step 1.6, any limit the user put on a grant (word for word), the
+  setup plan from step 1.6, the runner's standing instructions and any limit the user put on a
+  grant (word for word), the
   run folder, the run id, the run size, and the product checklist at
   `${CLAUDE_PLUGIN_ROOT}/checklists/product.md` plus any `checklistExtra` from the config.
 - **guide-reader** (full runs with a guide).

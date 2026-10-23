@@ -19,11 +19,12 @@ export function describeAll(projectDir: string): string {
   return cfg.runners.map((r) => {
     const p = describePermissions(r, cfg.patterns);
     return [`${r.key} (${r.persona}, ${r.depth === "look" ? "look only" : r.depth})`,
-      `  can: ${p.can.join("; ")}`, `  cannot: ${p.cannot.join("; ")}`].join("\n");
+      `  can: ${p.can.join("; ")}`, `  cannot: ${p.cannot.join("; ")}`,
+      ...(r.notes.length ? [`  standing instructions: ${r.notes.map((n) => `"${n}"`).join("; ")}`] : [])].join("\n");
   }).join("\n\n");
 }
 
-register("config", "show | describe | add-runner | remove-runner | depth | allow | deny | set | secret", async (args) => {
+register("config", "show | describe | add-runner | remove-runner | depth | allow | deny | note | set | secret", async (args) => {
   const [sub, ...a] = args;
   const dir = process.cwd();
   const cfg = loadConfig(dir);
@@ -74,6 +75,25 @@ register("config", "show | describe | add-runner | remove-runner | depth | allow
       r.allow = sub === "allow" ? [...new Set([...r.allow, c])] : r.allow.filter((x) => x !== c);
       saveConfig(dir, cfg);
       out(`${r.key} ${sub === "allow" ? "may now" : "may no longer"}: ${c}`);
+      return 0;
+    }
+    case "note": {
+      // note <runner> "<text>" saves a standing instruction; note <runner> --clear [n] removes one or all.
+      const r = runnerOr(cfg, a[0]);
+      if (!r) return 2;
+      if (a[1] === "--clear") {
+        const n = a[2] === undefined ? undefined : Number(a[2]);
+        if (n !== undefined && !(Number.isInteger(n) && n >= 1 && n <= r.notes.length)) { err(`no note ${a[2]} for ${r.key}`); return 2; }
+        r.notes = n === undefined ? [] : r.notes.filter((_, i) => i !== n - 1);
+        saveConfig(dir, cfg);
+        out(`${r.key} notes: ${r.notes.length}`);
+        return 0;
+      }
+      const text = a.slice(1).join(" ").trim();
+      if (!text) { err('usage: baseline config note <runner> "<instruction>" | --clear [n]'); return 2; }
+      if (!r.notes.includes(text)) r.notes = [...r.notes, text.slice(0, 300)];
+      saveConfig(dir, cfg);
+      out(`${r.key} will remember: "${text.slice(0, 300)}"`);
       return 0;
     }
     case "set": {
