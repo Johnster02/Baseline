@@ -247,12 +247,13 @@ describe("Baseline's data folder is off limits at all times", () => {
   });
   it("bash: doubled slashes, ./ segments, globs and variables near .config or .claude are refused", () => {
     for (const c of ["cat ~//.config/./baseline/secrets/a.json", "cat ~/.config/basel?ne/trackers.json", "cat ~/.config/{baseline,x}/trackers.json",
-      "D=baseline; cat ~/.config/$D/trackers.json", "ls ~/.claude/plugins/data/*"]) {
+      "D=baseline; cat ~/.config/$D/trackers.json", "ls ~/.claude/plugins/data/*",
+      "cat ~/x/../.config/baseline/trackers.json", "cat $HOME/a/b/../../.config/baseline/secrets/s.json", "ls ~/*", "cat ~/.c*/basel*/t.json"]) {
       expect(mentionsDataDir(c, dirs), c).toBe(true);
     }
   });
-  it("bash: lookalike folders are fine", () => {
-    for (const c of ["ls ~/.config/baseline-private", "cat ~/.config/baselinex/a", "baseline config show"]) expect(mentionsDataDir(c, dirs), c).toBe(false);
+  it("bash: lookalike folders and ordinary globs are fine", () => {
+    for (const c of ["ls ~/.config/baseline-private", "cat ~/.config/baselinex/a", "baseline config show", "ls ~/code/*.ts", "cat src/**/*.ts", "rm -rf /tmp/x/*"]) expect(mentionsDataDir(c, dirs), c).toBe(false);
   });
   it("read, grep and glob can't look inside", () => {
     const ctx = { cwd: "/tmp", protectedDirs: dirs };

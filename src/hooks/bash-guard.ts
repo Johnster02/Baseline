@@ -4,7 +4,7 @@
 // Kept free of heavy imports: these run on every tool call from dist/hook.cjs.
 import { homedir } from "node:os";
 import { realpathSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, posix, resolve } from "node:path";
 import { isInside, pluginDataRoots } from "../core/paths";
 
 export { activeRun } from "./active-run";
@@ -74,34 +74,31 @@ export type GuardResult = { allow: true } | { deny: string };
 
 const DATA_DENY = "Baseline's data folder holds passwords, saved sessions and tracker tokens: tools can't read or change it. Use `baseline` commands instead.";
 
-/** Spellings of the data folders a command might use: absolute, ~/…, $HOME/…, ${HOME}/…. */
-function dataSpellings(dirs: string[]): string[] {
-  const home = resolve(process.env.HOME || homedir());
-  const out = new Set<string>();
-  for (const d of dirs) {
-    out.add(d);
-    if (isInside(home, d) && d !== home) {
-      const rest = d.slice(home.length);
-      for (const h of ["~", "$HOME", "${HOME}"]) out.add(h + rest);
-    }
-  }
-  return [...out].map((s) => s.toLowerCase());
-}
-
 /** True when a command names one of Baseline's data folders. */
 export function mentionsDataDir(command: string, dirs: string[]): boolean {
-  // Collapse // and /./ so `~//.config/./baseline` reads like `~/.config/baseline`.
-  const lower = command.replace(/['"\\]/g, "").toLowerCase().replace(/\/(\.\/)+/g, "/").replace(/\/{2,}/g, "/");
-  // A glob or variable in a path that goes through .config or .claude could expand to the data folder.
-  if (lower.split(/[\s;&|()<>]+/).some((t) => /(^|\/)\.(config|claude)(\/|$)/.test(t) && /[*?[{$]/.test(t))) return true;
+  const home = resolve(process.env.HOME || homedir()).toLowerCase();
+  const prot = dirs.map((d) => resolve(d).toLowerCase());
+  const lower = command.replace(/['"\\]/g, "").toLowerCase();
   if (/\$\{?claude_plugin_data\b/.test(lower)) return true;
-  if (/\.config\/baseline(?=$|[/\s;&|)])/.test(lower)) return true;
-  return dataSpellings(dirs).some((d) => {
-    const i = lower.indexOf(d);
-    if (i < 0) return false;
-    const next = lower[i + d.length];
-    return next === undefined || /[/\s;&|)]/.test(next);
-  });
+  for (const raw of lower.split(/[\s;&|()<>=]+/)) {
+    if (!raw.includes("/")) continue;
+    // Expand ~ and $HOME, then normalise (//, /./ and ..) the way the shell's path lookup will.
+    const expanded = raw.replace(/^(~|\$home|\$\{home\})(?=\/|$)/, home);
+    const t = posix.normalize(expanded);
+    const wild = t.search(/[*?[{$`]/);
+    if (wild >= 0) {
+      // A glob or variable could expand anywhere under its fixed prefix: refuse when that prefix
+      // holds a data folder, or the path goes through .config or .claude.
+      const fixed = t.slice(0, wild);
+      const root = fixed.slice(0, fixed.lastIndexOf("/") + 1) || "/";
+      if (/(^|\/)\.(config|claude)(\/|$)/.test(t)) return true;
+      if (root.startsWith("/") && prot.some((d) => isInside(posix.normalize(root), d) || isInside(d, posix.normalize(root)))) return true;
+      continue;
+    }
+    if (/(^|\/)\.config\/baseline(\/|$)/.test(t)) return true;
+    if (t.startsWith("/") && prot.some((d) => isInside(d, t))) return true;
+  }
+  return false;
 }
 
 /**
