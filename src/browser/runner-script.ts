@@ -7,6 +7,8 @@ import { dataDir, sessionPath } from "../config/secrets";
 import { openSession } from "./session";
 import type { Session } from "./session";
 import { isCommand } from "./rpc";
+import { connectHost } from "./host";
+import type { HostReply } from "./host";
 
 /** The plugin root: dist/cli.cjs lives in <root>/dist. */
 function pluginRoot(): string {
@@ -67,6 +69,18 @@ register("script", "run an agent's browser script as a runner: script <runner> <
   if (data.startsWith(script) || script.startsWith(data + sep)) { err("refusing: scripts may not live in Baseline's data folder"); return 2; }
   const execArgv = [permFlag, `--require=${real(join(dataDir(), "shim", "preload.cjs"))}`, `--allow-fs-read=${real(join(dataDir(), "shim"))}`, `--allow-fs-read=${real(runDir)}`, `--allow-fs-read=${real(scriptPath)}`, `--allow-fs-read=${real(shim)}`,
     `--allow-fs-read=${real(join(pluginRoot(), "dist"))}`, `--allow-fs-write=${real(runDir)}`];
+  // The runner's browser for the whole run, kept open by a background host. Without one (it
+  // could not start, or BASELINE_SHARED_BROWSER=0), this script gets a browser of its own.
+  const host = await connectHost(projectDir, runDir, runner.key, join(pluginRoot(), "dist", "cli.cjs"));
+
+  // The report shows which runner was signed out mid-run.
+  const noteSignedOut = (message: string) => {
+    const file = join(runDir, "runners.json");
+    let prev: { key: string }[] = [];
+    try { prev = JSON.parse(readFileSync(file, "utf8")); } catch { prev = []; }
+    writeFileSync(file, JSON.stringify([...prev.filter((p) => p.key !== runner.key), { key: runner.key, ok: false, error: message }], null, 2));
+  };
+
   const child = fork(real(scriptPath), [], {
     cwd: runDir,
     execArgv,
@@ -80,6 +94,11 @@ register("script", "run an agent's browser script as a runner: script <runner> <
     chain = chain.then(async () => {
       const reply = (ok: boolean, value?: unknown, error?: string) => { if (child.connected) child.send({ id: m.id, ok, value, error }); };
       if (!isCommand(m.method)) return reply(false, undefined, `"${String(m.method)}" is not an allowed command`);
+      if (host) {
+        const r: HostReply = await host({ id: m.id, method: m.method, args: m.args }).catch((e: Error) => ({ id: m.id, ok: false, error: `HostError: ${e.message}` }));
+        if (!r.ok && r.error?.startsWith("SignedOutError:")) noteSignedOut(r.error.slice("SignedOutError: ".length));
+        return reply(r.ok, r.value, r.error);
+      }
       try {
         if (m.method === "open") {
           session ??= await openSession({ runDir, runId: run.runId, runner, cfg, baseUrl: run.url, storageState: sessionPath(dataDir(), projectDir, runner.key) });
@@ -90,13 +109,7 @@ register("script", "run an agent's browser script as a runner: script <runner> <
         const fn = (session as unknown as Record<string, (...a: unknown[]) => unknown>)[m.method]!;
         return reply(true, await fn(...(m.args ?? [])));
       } catch (e) {
-        if ((e as Error).name === "SignedOutError") {
-          // The report shows which runner was signed out mid-run.
-          const file = join(runDir, "runners.json");
-          let prev: { key: string }[] = [];
-          try { prev = JSON.parse(readFileSync(file, "utf8")); } catch { prev = []; }
-          writeFileSync(file, JSON.stringify([...prev.filter((p) => p.key !== runner.key), { key: runner.key, ok: false, error: (e as Error).message }], null, 2));
-        }
+        if ((e as Error).name === "SignedOutError") noteSignedOut((e as Error).message);
         return reply(false, undefined, `${(e as Error).name}: ${(e as Error).message.split("\n")[0]}`);
       }
     });

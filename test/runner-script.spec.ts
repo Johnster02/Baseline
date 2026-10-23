@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { startFixture } from "./fixture-app/server";
@@ -12,11 +12,21 @@ beforeAll(async () => {
   execFileSync("node", ["scripts/build.mjs"], { cwd: ROOT });
   f = await startFixture();
 });
-afterAll(() => f.stop());
+// Every project's shared-browser hosts, so none outlive the tests.
+const dataDirs: string[] = [];
+afterAll(() => {
+  for (const d of dataDirs) {
+    let files: string[] = [];
+    try { files = readdirSync(join(d, "hosts")).filter((x) => /^[0-9a-f]{16}\.json$/.test(x)); } catch { files = []; }
+    for (const x of files) { try { process.kill(JSON.parse(readFileSync(join(d, "hosts", x), "utf8")).pid, "SIGTERM"); } catch { /* gone */ } }
+  }
+  f.stop();
+});
 
 function project() {
   const proj = mkdtempSync(join(tmpdir(), "proj-"));
   const data = mkdtempSync(join(tmpdir(), "data-"));
+  dataDirs.push(data);
   const env = { ...process.env, BASELINE_DATA: data };
   const cli = (args: string[]) => spawnSync("node", [join(ROOT, "dist/cli.cjs"), ...args], { cwd: proj, env, encoding: "utf8" });
   cli(["config", "add-runner", "customer", "customer", "session"]);
@@ -81,6 +91,27 @@ describe("baseline script (browser in the parent, script talks over IPC)", () =>
     writeFileSync(join(p.proj, ".baseline", "active-run"), p.runDir);
     const r = await runScript(p, `const s = await B.open(); console.log("OK"); await s.close();`, []);
     expect(r.stdout).toContain("OK");
+  });
+
+  it("keeps one browser per runner: the next script starts where the last one left off, faster", async () => {
+    const p = project();
+    const first = Date.now();
+    const a = await runScript(p, `const s = await B.open(); await s.goto("/cart"); await s.close();`);
+    const firstMs = Date.now() - first;
+    expect(a.stderr).toBe("");
+    const second = Date.now();
+    const b = await runScript(p, `const s = await B.open(); console.log("AT " + new URL(await s.url()).pathname); await s.close();`);
+    const secondMs = Date.now() - second;
+    expect(b.stdout).toContain("AT /cart");
+    expect(secondMs).toBeLessThan(firstMs);
+  });
+
+  it("falls back to a browser of its own when the shared one is turned off", async () => {
+    const p = project();
+    const env = { ...p.env, BASELINE_SHARED_BROWSER: "0" };
+    await runScript({ ...p, env }, `const s = await B.open(); await s.goto("/cart"); await s.close();`);
+    const r = await runScript({ ...p, env }, `const s = await B.open(); console.log("AT " + await s.url()); await s.close();`);
+    expect(r.stdout).toContain("AT about:blank");
   });
 
   it("refuses an unknown runner", () => {

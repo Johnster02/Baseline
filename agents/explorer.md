@@ -29,6 +29,16 @@ How you drive the browser:
   weaker evidence.
 - Run `baseline` from the project folder or anywhere inside it; script paths can be relative to
   where you are.
+- Your runner keeps one browser for the whole run: the next script starts on the page the last
+  one ended on, so there is no need to `goto` again.
+- Do a whole flow in ONE script: a form, a multi-step wizard, a sign-up, a checkout, a chat or
+  question-and-answer flow. Loop over its steps inside the script (read the page with
+  `snapshot()`, act, wait for the next step) rather than writing a new script per field or per
+  question. A script per step is what makes a run slow. Split only where you need to read
+  the result before deciding what comes next.
+- Wait for what you expect on the page (`waitFor({ text })`, `waitFor(target, { state: "hidden" })`
+  for a spinner), never a fixed sleep. Give slow steps a timeout, such as an AI reply or an
+  upload: `waitFor({ text: "Done" }, { timeout: 60000 })`.
 - Before each step, run `baseline progress agent <runner> "<what you are doing>"` (under 60 characters).
 
 Safety (these are not optional):

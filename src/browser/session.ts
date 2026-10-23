@@ -5,6 +5,7 @@ import type { Browser, BrowserContext, Locator, Page } from "playwright";
 import type { ProjectConfig, Runner } from "../config/schema";
 import { dataDir } from "../config/secrets";
 import { decide, redactUrl, wsDecide } from "./guard";
+import { OwnedTracker, ownedFile } from "./owned";
 import { isSignedOut, SignedOutError } from "./signin";
 
 export type BlockedEntry = {
@@ -74,6 +75,8 @@ export function appendJson(p: string, item: unknown): void {
 const STATIC = new Set(["script", "stylesheet", "image", "font", "media", "manifest"]);
 const CLICK_WINDOW_MS = 4000;
 const SNAPSHOT_LIMIT = 12000;
+/** Bodies bigger than this are not scanned for ids. */
+const ID_SCAN_LIMIT = 3_000_000;
 
 const LABEL_JS = `(el) => {
   const svgTitle = el.querySelector && el.querySelector('svg title');
@@ -94,7 +97,9 @@ export async function openSession(o: OpenOptions): Promise<Session> {
   const clicks: { text: string; at: number }[] = [];
   const state = { loading: false };
   const network: { at: string; method: string; host: string; path: string; type: string; outcome: string }[] = [];
-  const createdPaths: string[] = [];
+  // What this run created, shared by every runner in the run (see owned.ts).
+  const owned = new OwnedTracker(ownedFile(o.runDir));
+  const createdPaths = owned.paths;
   const baseHost = new URL(o.baseUrl).host;
 
   const recentClicks = () => {
@@ -141,6 +146,10 @@ export async function openSession(o: OpenOptions): Promise<Session> {
         return await route.abort("blockedbyclient");
       }
       if (d.learn) { learned.add(d.learn); writeFileSync(loadPath, JSON.stringify([...learned], null, 2)); }
+      if (u.host === baseHost) {
+        owned.seeUrl(r.url());
+        if (method !== "GET" && method !== "HEAD" && !loading) owned.wrote();
+      }
       if (u.host === baseHost && !STATIC.has(r.resourceType())) network.push({ at: new Date().toISOString(), ...entry, type: r.resourceType(), outcome: "allowed" });
       return await route.continue();
     } catch {
@@ -167,18 +176,31 @@ export async function openSession(o: OpenOptions): Promise<Session> {
 
   // What this run created, as the site itself reported it: the Location of a 201 Created answer to a
   // write the guard allowed. Agents can't add to this; created() is only metadata for the report.
-  context.on("response", (res) => {
+  // Every other same-site response is read for ids, so an id already on a page is never "new".
+  context.on("response", async (res) => {
+    let u: URL;
+    try { u = new URL(res.url()); } catch { return; }
+    if (u.host !== baseHost) return;
     const m = res.request().method();
-    if (m === "GET" || m === "HEAD" || res.status() !== 201) return;
-    const loc = res.headers()["location"];
-    if (!loc) return;
-    try {
-      const u = new URL(loc, res.url());
-      if (u.host === baseHost) createdPaths.push(u.pathname);
-    } catch { /* ignore */ }
+    if (m !== "GET" && m !== "HEAD" && res.status() === 201) {
+      const loc = res.headers()["location"];
+      if (loc) { try { const l = new URL(loc, res.url()); if (l.host === baseHost) owned.add(l.pathname); } catch { /* ignore */ } }
+    }
+    if (STATIC.has(res.request().resourceType())) return;
+    const type = res.headers()["content-type"] ?? "";
+    if (!/text|json|javascript|x-component/i.test(type)) return;
+    const size = Number(res.headers()["content-length"] ?? 0);
+    if (size > ID_SCAN_LIMIT) return;
+    const body = await res.text().catch(() => "");
+    if (body.length <= ID_SCAN_LIMIT) owned.seeText(body);
   });
 
   page = await context.newPage();
+  // Where the browser lands right after a write: a new id there is a record this run created.
+  page.on("framenavigated", (f) => {
+    if (f !== page.mainFrame()) return;
+    try { if (new URL(f.url()).host === baseHost) owned.landed(f.url()); } catch { /* ignore */ }
+  });
   const deny = async () => { throw new Error("Baseline: direct API requests are not allowed. Drive the page instead."); };
   for (const api of new Set([context.request, page.request])) {
     for (const m of ["fetch", "get", "post", "put", "patch", "delete", "head"] as const) (api as any)[m] = deny;

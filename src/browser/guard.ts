@@ -62,12 +62,8 @@ export const requestKey = (method: string, url: string, body = "") => {
 /** Categories whose URL patterns also apply to page navigations (GETs with side effects, like /logout). */
 const GET_CATEGORIES: PatternCategory[] = ["auth", "delete"];
 
-/**
- * The look-only and protected-area rules, in order. Pure so it can be tested without a browser.
- * Protected areas are checked before anything that would allow a write, including writes learned on load.
- */
 /** An id that names one record: a UUID, a ULID, or a long token with letters and digits. */
-const UNIQUE_ID = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-hjkmnp-tv-z]{26}|(?=[a-z_-]*[0-9])(?=[0-9_-]*[a-z])[0-9a-z_-]{16,})$/i;
+export const UNIQUE_ID = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-hjkmnp-tv-z]{26}|(?=[a-z_-]*[0-9])(?=[0-9_-]*[a-z])[0-9a-z_-]{16,})$/i;
 
 /** Literal path segments, ;params dropped. Undefined when the raw path hides a slash, a backslash or a dot segment. */
 function rawSegments(path: string): string[] | undefined {
@@ -96,6 +92,25 @@ function ownsPath(path: string, created: string[] = []): boolean {
   });
 }
 
+const BODY_ID = /\b(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-hjkmnp-tv-z]{26})\b/gi;
+
+/**
+ * A request about records the run created: its path is one (ownsPath), or its body names at
+ * least one record id and every id in it is one the run created. A list page's "delete selected"
+ * posts to the list, with the chosen ids in the body; one id of anyone else's and it is not ours.
+ */
+function ownsRequest(path: string, body: string | undefined, created: string[] = []): boolean {
+  if (ownsPath(path, created)) return true;
+  if (!body || !created.length) return false;
+  const mine = new Set(created.map((c) => (rawSegments(c) ?? []).pop()?.toLowerCase()).filter((id): id is string => !!id && UNIQUE_ID.test(id)));
+  const named = [...new Set([...body.matchAll(BODY_ID)].map((m) => m[0].toLowerCase()))];
+  return named.length > 0 && named.every((id) => mine.has(id));
+}
+
+/**
+ * The look-only and protected-area rules, in order. Pure so it can be tested without a browser.
+ * Protected areas are checked before anything that would allow a write, including writes learned on load.
+ */
 export function decide(req: GuardRequest, ctx: GuardContext): Decision {
   const { runner, cfg } = ctx;
   const method = req.method.toUpperCase();
@@ -122,13 +137,13 @@ export function decide(req: GuardRequest, ctx: GuardContext): Decision {
     if (url) return { action: "abort", category: cat, reason: `matches protected ${cat} URL pattern`, trigger: url };
     // A "Delete" click on a record this run created is the cleaner's job: only the word check is
     // waived, never the protected URL patterns.
-    if (cat === "delete" && ownsPath(u.pathname, ctx.createdPaths)) continue;
+    if (cat === "delete" && ownsRequest(u.pathname, req.body, ctx.createdPaths)) continue;
     const word = req.clickText ? p.words.find((w) => wordHit(req.clickText!, w)) : undefined;
     if (word) return { action: "abort", category: cat, reason: `clicked control looks like ${cat}`, trigger: word.toLowerCase() };
   }
 
   if (method === "DELETE" && !runner.allow.includes("delete")) {
-    if (!ownsPath(u.pathname, ctx.createdPaths)) return { action: "abort", category: "delete", reason: "DELETE request, and this runner may not delete" };
+    if (!ownsRequest(u.pathname, req.body, ctx.createdPaths)) return { action: "abort", category: "delete", reason: "DELETE request, and this runner may not delete" };
   }
 
   const key = requestKey(method, req.url, req.body);

@@ -117,6 +117,14 @@ describe("decide hardening", () => {
     expect(del([`/projects/${id}`], `/projects/${id}/a/b/c`)).toMatchObject({ action: "abort" });
     expect(del([`/projects/${id}`], `/projects/${id}/delete`)).toMatchObject({ action: "abort", category: "delete" });
   });
+  it("a list page's delete-selected is ours only when every id it names is one the run created", () => {
+    const mine = "15f1b5d3-9d93-46bb-bdcc-9dc439525f60", theirs = "aaaaaaaa-0000-4000-8000-000000000000";
+    const c = { ...ctx(), createdPaths: [`/projects/${mine}`] };
+    const bulk = (body: string) => decide({ method: "POST", url: "https://staging.acme.dev/projects", loading: false, clickText: "Delete project", body }, c);
+    expect(bulk(JSON.stringify([{ ids: [mine] }])).action).toBe("continue");
+    expect(bulk(JSON.stringify([{ ids: [mine, theirs] }]))).toMatchObject({ action: "abort", category: "delete" });
+    expect(bulk(JSON.stringify([{ all: true }]))).toMatchObject({ action: "abort", category: "delete" });
+  });
   it("never learns a request to another host", () => {
     expect(decide({ method: "POST", url: "https://analytics.example/collect", loading: true }, ctx(look))).toEqual({ action: "continue" });
   });
