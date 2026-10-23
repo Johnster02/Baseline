@@ -105,6 +105,9 @@ export function mentionsDataDir(command: string, dirs: string[]): boolean {
   if (/\.config\/baseline(?![a-z0-9._-])/.test(flat)) return true;
   for (const word of lower.split(/[\s;&|()<>=]+/)) {
     // A path can start partway into a word (`@/x`, `file:///x`, `-o~/x`): check from there.
+    // Any word, relative or not: a glob or variable in a path through .config or .claude could
+    // expand to a data folder.
+    if (/[*?[{$`]/.test(word) && /(^|\/)\.(config|claude)(\/|$)/.test(posix.normalize(word))) return true;
     const w = word.replace(/^-{1,2}[a-z]+(?=[~/$])/, "");
     const at = w.search(/~\/|~$|\$\{?home\b|\//);
     // Mid-word only after a separator (`@`, `:`): `src/x` is a relative path, not `/x`.
