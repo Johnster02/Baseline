@@ -108,6 +108,15 @@ describe("decide hardening", () => {
     const short = { ...ctx(), createdPaths: ["/projects/1"] };
     expect(decide({ method: "POST", url: "https://staging.acme.dev/x/1", loading: false, clickText: "Delete project" }, short)).toMatchObject({ action: "abort", category: "delete" });
   });
+  it("owning a record is strict: real ids only, no collections, no encoded tricks, URL patterns still apply", () => {
+    const id = "15f1b5d3-9d93-46bb-bdcc-9dc439525f60";
+    const del = (created: string[], path: string) => decide({ method: "POST", url: `https://staging.acme.dev${path}`, loading: false, clickText: "Delete project" }, { ...ctx(), createdPaths: created });
+    expect(del([`/projects/${id}/summary`], "/settings/summary")).toMatchObject({ action: "abort" });
+    expect(del(["/projects"], "/projects/aaaaaaaa-0000-0000-0000-000000000000")).toMatchObject({ action: "abort" });
+    expect(del([`/projects/${id}`], `/projects/${id}/..%2f..%2fusers%2f7`)).toMatchObject({ action: "abort" });
+    expect(del([`/projects/${id}`], `/projects/${id}/a/b/c`)).toMatchObject({ action: "abort" });
+    expect(del([`/projects/${id}`], `/projects/${id}/delete`)).toMatchObject({ action: "abort", category: "delete" });
+  });
   it("never learns a request to another host", () => {
     expect(decide({ method: "POST", url: "https://analytics.example/collect", loading: true }, ctx(look))).toEqual({ action: "continue" });
   });

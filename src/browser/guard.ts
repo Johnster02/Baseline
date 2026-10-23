@@ -66,18 +66,33 @@ const GET_CATEGORIES: PatternCategory[] = ["auth", "delete"];
  * The look-only and protected-area rules, in order. Pure so it can be tested without a browser.
  * Protected areas are checked before anything that would allow a write, including writes learned on load.
  */
+/** An id that names one record: a UUID, a ULID, or a long token with letters and digits. */
+const UNIQUE_ID = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-hjkmnp-tv-z]{26}|(?=[a-z_-]*[0-9])(?=[0-9_-]*[a-z])[0-9a-z_-]{16,})$/i;
+
+/** Literal path segments, ;params dropped. Undefined when the raw path hides a slash, a backslash or a dot segment. */
+function rawSegments(path: string): string[] | undefined {
+  if (/%2f|%5c|%2e|\\/i.test(path)) return undefined;
+  const segs = path.split("/").filter(Boolean).map((x) => x.split(";")[0]!);
+  return segs.some((x) => x === "." || x === "..") ? undefined : segs;
+}
+
 /**
- * Is this request about something the run created? The same path, a path under it, or a path
- * carrying its id (a server action posts to the page, an API call names the id). Only an id
- * long enough to be unique (8+ characters) counts, so "/projects/1" never matches "/x/1".
+ * Is this request about a record the run created? Exactly its path, or (when the created path
+ * ends in a unique id) the id followed by at most one action segment, anywhere in the path:
+ * a server action posts to the record's page, an API call names its id. Compared on the raw
+ * path, so encoded slashes and dot segments never count as owned.
  */
 function ownsPath(path: string, created: string[] = []): boolean {
-  const p = normalizePath(path);
+  const p = rawSegments(path);
+  if (!p) return false;
   return created.some((c) => {
-    const n = normalizePath(c);
-    if (p === n || p.startsWith(n + "/")) return true;
-    const id = n.split("/").filter(Boolean).pop() ?? "";
-    return id.length >= 8 && p.split("/").includes(id);
+    const n = rawSegments(c);
+    if (!n || !n.length) return false;
+    if (p.join("/") === n.join("/")) return true;
+    const id = n[n.length - 1]!;
+    if (!UNIQUE_ID.test(id)) return false;
+    const at = p.lastIndexOf(id);
+    return at >= 0 && p.length - at <= 2;
   });
 }
 
@@ -102,17 +117,18 @@ export function decide(req: GuardRequest, ctx: GuardContext): Decision {
 
   for (const cat of PATTERN_ORDER) {
     if (runner.allow.includes(cat)) continue;
-    // Deleting what this run created is the cleaner's job, not a protected delete.
-    if (cat === "delete" && ownsPath(path, ctx.createdPaths)) continue;
     const p = cfg.patterns[cat];
     const url = p.urls.find((g) => globMatch(g, path));
     if (url) return { action: "abort", category: cat, reason: `matches protected ${cat} URL pattern`, trigger: url };
+    // A "Delete" click on a record this run created is the cleaner's job: only the word check is
+    // waived, never the protected URL patterns.
+    if (cat === "delete" && ownsPath(u.pathname, ctx.createdPaths)) continue;
     const word = req.clickText ? p.words.find((w) => wordHit(req.clickText!, w)) : undefined;
     if (word) return { action: "abort", category: cat, reason: `clicked control looks like ${cat}`, trigger: word.toLowerCase() };
   }
 
   if (method === "DELETE" && !runner.allow.includes("delete")) {
-    if (!ownsPath(path, ctx.createdPaths)) return { action: "abort", category: "delete", reason: "DELETE request, and this runner may not delete" };
+    if (!ownsPath(u.pathname, ctx.createdPaths)) return { action: "abort", category: "delete", reason: "DELETE request, and this runner may not delete" };
   }
 
   const key = requestKey(method, req.url, req.body);

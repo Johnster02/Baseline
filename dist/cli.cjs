@@ -20370,13 +20370,23 @@ var requestKey = (method, url2, body = "") => {
   return `${method.toUpperCase()} ${u.host}${u.pathname}${h}`;
 };
 var GET_CATEGORIES = ["auth", "delete"];
+var UNIQUE_ID = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-hjkmnp-tv-z]{26}|(?=[a-z_-]*[0-9])(?=[0-9_-]*[a-z])[0-9a-z_-]{16,})$/i;
+function rawSegments(path) {
+  if (/%2f|%5c|%2e|\\/i.test(path)) return void 0;
+  const segs = path.split("/").filter(Boolean).map((x) => x.split(";")[0]);
+  return segs.some((x) => x === "." || x === "..") ? void 0 : segs;
+}
 function ownsPath(path, created = []) {
-  const p = normalizePath(path);
+  const p = rawSegments(path);
+  if (!p) return false;
   return created.some((c) => {
-    const n = normalizePath(c);
-    if (p === n || p.startsWith(n + "/")) return true;
-    const id = n.split("/").filter(Boolean).pop() ?? "";
-    return id.length >= 8 && p.split("/").includes(id);
+    const n = rawSegments(c);
+    if (!n || !n.length) return false;
+    if (p.join("/") === n.join("/")) return true;
+    const id = n[n.length - 1];
+    if (!UNIQUE_ID.test(id)) return false;
+    const at = p.lastIndexOf(id);
+    return at >= 0 && p.length - at <= 2;
   });
 }
 function decide(req, ctx) {
@@ -20399,15 +20409,15 @@ function decide(req, ctx) {
   }
   for (const cat of PATTERN_ORDER) {
     if (runner.allow.includes(cat)) continue;
-    if (cat === "delete" && ownsPath(path, ctx.createdPaths)) continue;
     const p = cfg.patterns[cat];
     const url2 = p.urls.find((g) => globMatch(g, path));
     if (url2) return { action: "abort", category: cat, reason: `matches protected ${cat} URL pattern`, trigger: url2 };
+    if (cat === "delete" && ownsPath(u.pathname, ctx.createdPaths)) continue;
     const word = req.clickText ? p.words.find((w) => wordHit(req.clickText, w)) : void 0;
     if (word) return { action: "abort", category: cat, reason: `clicked control looks like ${cat}`, trigger: word.toLowerCase() };
   }
   if (method === "DELETE" && !runner.allow.includes("delete")) {
-    if (!ownsPath(path, ctx.createdPaths)) return { action: "abort", category: "delete", reason: "DELETE request, and this runner may not delete" };
+    if (!ownsPath(u.pathname, ctx.createdPaths)) return { action: "abort", category: "delete", reason: "DELETE request, and this runner may not delete" };
   }
   const key = requestKey(method, req.url, req.body);
   const sameHost = !ctx.baseHost || u.host === ctx.baseHost;
