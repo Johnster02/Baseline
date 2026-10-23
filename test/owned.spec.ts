@@ -70,6 +70,21 @@ describe("OwnedTracker", () => {
     }
   });
 
+  it("an id the agent loaded in a page before never counts, even if a reply names it later", () => {
+    const t = new OwnedTracker();
+    t.seeRequest(`${SITE}/search?q=${OLD_ID.replace(/-/g, "")}`, undefined, false);
+    t.wrote(1000, t.seeRequest(`${SITE}/orders/new`, "{}"));
+    t.seeReplyPath(`/orders/${OLD_ID}`);
+    expect(t.landed(`${SITE}/orders/${OLD_ID}`, 1200)).toBeUndefined();
+  });
+
+  it("a write still encoded after five rounds of decoding is unclear", () => {
+    let deep = OLD_ID;
+    for (let i = 0; i < 7; i++) deep = encodeURIComponent(deep).replace(/-/g, "%2D");
+    const t = new OwnedTracker();
+    expect(t.seeRequest(`${SITE}/orders/copy`, `ref=${deep}`)).toBe(false);
+  });
+
   it("an unclear write keeps blocking for its whole window, even after a clean one", () => {
     const t = new OwnedTracker();
     t.wrote(1000, t.seeRequest(`${SITE}/orders/new`, "%E0%A4%A"));

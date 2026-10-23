@@ -149,8 +149,10 @@ export async function openSession(o: OpenOptions): Promise<Session> {
       }
       if (d.learn) { learned.add(d.learn); writeFileSync(loadPath, JSON.stringify([...learned], null, 2)); }
       if (u.host === baseHost) {
-        const clean = owned.seeRequest(r.url(), r.postData() ?? undefined, method !== "GET" && method !== "HEAD");
-        if (method !== "GET" && method !== "HEAD" && !loading) owned.wrote(Date.now(), clean);
+        const isWrite = method !== "GET" && method !== "HEAD";
+        // Scripts, styles, images and fonts never name a record: keep them out of the sent log.
+        const clean = isWrite || !STATIC.has(r.resourceType()) ? owned.seeRequest(r.url(), r.postData() ?? undefined, isWrite) : true;
+        if (isWrite && !loading) owned.wrote(Date.now(), clean);
       }
       if (u.host === baseHost && !STATIC.has(r.resourceType())) network.push({ at: new Date().toISOString(), ...entry, type: r.resourceType(), outcome: "allowed" });
       return await route.continue();

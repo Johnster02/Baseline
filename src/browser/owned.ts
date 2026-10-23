@@ -31,7 +31,13 @@ const ANY_ID = /(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|
  * and everything but letters and digits dropped. However an id was disguised, it reduces to this.
  */
 export function canon(s: string): string {
+  return canonDeep(s).text;
+}
+
+/** canon, plus whether decoding settled: still-encoded text after five rounds is "unclear". */
+function canonDeep(s: string): { text: string; settled: boolean } {
   let t = s;
+  let settled = false;
   for (let i = 0; i < 5; i++) {
     let next = t.replace(/\+/g, " ");
     try { next = decodeURIComponent(next); } catch { /* keep what decoded */ }
@@ -40,10 +46,12 @@ export function canon(s: string): string {
       .replace(/&#(\d+);?/g, (_, d) => String.fromCodePoint(Number(d)))
       .replace(/&(amp|hyphen|dash|minus);/gi, "-")
       .replace(/\\u([0-9a-f]{4})/gi, (_, h) => String.fromCharCode(parseInt(h, 16)));
-    if (next === t) break;
+    if (next === t) { settled = true; break; }
     t = next;
   }
-  return t.toLowerCase().replace(/[il]/g, "1").replace(/o/g, "0").replace(/[^0-9a-z]/g, "");
+  if (!settled && /%[0-9a-f]{2}|&#|\\u[0-9a-f]{4}/i.test(t)) settled = false;
+  else settled = true;
+  return { text: t.toLowerCase().replace(/[il]/g, "1").replace(/o/g, "0").replace(/[^0-9a-z]/g, ""), settled };
 }
 
 /** How much of what the run sent is kept for the never-sent check. Past this, nothing new is owned. */
@@ -122,17 +130,24 @@ export class OwnedTracker {
    * reply that echoes one back can never make it look new.
    */
   seeRequest(url: string, body?: string, write = true): boolean {
-    this.seeUrl(url);
     const { texts, clean } = requestTexts(url, body);
-    for (const text of texts) for (const m of text.matchAll(ANY_ID)) this.see(m[0], false);
-    // Only writes go in the never-sent record: a page load that follows the site's own redirect
-    // to a new record names it too, and must not make it look sent.
-    if (write) {
-      const c = canon(url + "\n" + (body ?? ""));
-      this.sent.push(c);
-      this.sentSize += c.length;
+    // Every request goes in the never-sent record, except a page load that only follows the
+    // site's own redirect: every id it names first appeared in a reply after the last write.
+    const ids = [...url.matchAll(ANY_ID)].map((m) => m[0].toLowerCase());
+    const followsReply = !write && ids.length > 0 && ids.every((id) => { const f = this.firstSeen.get(id); return !!f && f.reply && f.seq > this.lastWriteSeq; });
+    let settled = true;
+    if (!followsReply) {
+      // The whole request, and each field value on its own, so neighbours can't hide an id.
+      for (const t of [url + "\n" + (body ?? ""), ...texts]) {
+        const d = canonDeep(t);
+        if (!d.settled) settled = false;
+        this.sent.push(d.text);
+        this.sentSize += d.text.length;
+      }
     }
-    return clean;
+    this.seeUrl(url);
+    for (const text of texts) for (const m of text.matchAll(ANY_ID)) this.see(m[0], false);
+    return clean && settled;
   }
 
   /** Did any request this run sent carry this id, in any disguise? Unsure (too much sent) is yes. */

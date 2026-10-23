@@ -20555,7 +20555,11 @@ var LANDING_WINDOW_MS = 15e3;
 var BODY_ID = /\b(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9A-HJKMNP-TV-Z]{26})\b/gi;
 var ANY_ID = /(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9A-HJKMNP-TV-Z]{26})/gi;
 function canon(s) {
+  return canonDeep(s).text;
+}
+function canonDeep(s) {
   let t = s;
+  let settled = false;
   for (let i = 0; i < 5; i++) {
     let next = t.replace(/\+/g, " ");
     try {
@@ -20563,10 +20567,15 @@ function canon(s) {
     } catch {
     }
     next = next.replace(/&#x([0-9a-f]+);?/gi, (_, h) => String.fromCodePoint(parseInt(h, 16))).replace(/&#(\d+);?/g, (_, d) => String.fromCodePoint(Number(d))).replace(/&(amp|hyphen|dash|minus);/gi, "-").replace(/\\u([0-9a-f]{4})/gi, (_, h) => String.fromCharCode(parseInt(h, 16)));
-    if (next === t) break;
+    if (next === t) {
+      settled = true;
+      break;
+    }
     t = next;
   }
-  return t.toLowerCase().replace(/[il]/g, "1").replace(/o/g, "0").replace(/[^0-9a-z]/g, "");
+  if (!settled && /%[0-9a-f]{2}|&#|\\u[0-9a-f]{4}/i.test(t)) settled = false;
+  else settled = true;
+  return { text: t.toLowerCase().replace(/[il]/g, "1").replace(/o/g, "0").replace(/[^0-9a-z]/g, ""), settled };
 }
 var SENT_LIMIT = 8e6;
 function requestTexts(url2, body) {
@@ -20669,15 +20678,24 @@ var OwnedTracker = class {
    * reply that echoes one back can never make it look new.
    */
   seeRequest(url2, body, write = true) {
-    this.seeUrl(url2);
     const { texts, clean: clean2 } = requestTexts(url2, body);
-    for (const text of texts) for (const m of text.matchAll(ANY_ID)) this.see(m[0], false);
-    if (write) {
-      const c = canon(url2 + "\n" + (body ?? ""));
-      this.sent.push(c);
-      this.sentSize += c.length;
+    const ids = [...url2.matchAll(ANY_ID)].map((m) => m[0].toLowerCase());
+    const followsReply = !write && ids.length > 0 && ids.every((id) => {
+      const f = this.firstSeen.get(id);
+      return !!f && f.reply && f.seq > this.lastWriteSeq;
+    });
+    let settled = true;
+    if (!followsReply) {
+      for (const t of [url2 + "\n" + (body ?? ""), ...texts]) {
+        const d = canonDeep(t);
+        if (!d.settled) settled = false;
+        this.sent.push(d.text);
+        this.sentSize += d.text.length;
+      }
     }
-    return clean2;
+    this.seeUrl(url2);
+    for (const text of texts) for (const m of text.matchAll(ANY_ID)) this.see(m[0], false);
+    return clean2 && settled;
   }
   /** Did any request this run sent carry this id, in any disguise? Unsure (too much sent) is yes. */
   everSent(id) {
@@ -20946,8 +20964,9 @@ async function openSession(o) {
         (0, import_node_fs7.writeFileSync)(loadPath, JSON.stringify([...learned], null, 2));
       }
       if (u.host === baseHost) {
-        const clean2 = owned.seeRequest(r.url(), r.postData() ?? void 0, method !== "GET" && method !== "HEAD");
-        if (method !== "GET" && method !== "HEAD" && !loading) owned.wrote(Date.now(), clean2);
+        const isWrite = method !== "GET" && method !== "HEAD";
+        const clean2 = isWrite || !STATIC.has(r.resourceType()) ? owned.seeRequest(r.url(), r.postData() ?? void 0, isWrite) : true;
+        if (isWrite && !loading) owned.wrote(Date.now(), clean2);
       }
       if (u.host === baseHost && !STATIC.has(r.resourceType())) network.push({ at: (/* @__PURE__ */ new Date()).toISOString(), ...entry, type: r.resourceType(), outcome: "allowed" });
       return await route.continue();
