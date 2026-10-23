@@ -74,14 +74,42 @@ export type GuardResult = { allow: true } | { deny: string };
 
 const DATA_DENY = "Baseline's data folder holds passwords, saved sessions and tracker tokens: tools can't read or change it. Use `baseline` commands instead.";
 
+/** Spellings of the data folders a command might use: absolute, ~/…, $HOME/…, ${HOME}/…. */
+function dataSpellings(dirs: string[], home: string): string[] {
+  const out = new Set<string>();
+  for (const d of dirs) {
+    out.add(d);
+    if (isInside(home, d) && d !== home) {
+      const rest = d.slice(home.length);
+      for (const h of ["~", "$home", "${home}"]) out.add(h + rest);
+    }
+  }
+  return [...out];
+}
+
 /** True when a command names one of Baseline's data folders. */
 export function mentionsDataDir(command: string, dirs: string[]): boolean {
   const home = resolve(process.env.HOME || homedir()).toLowerCase();
   const prot = dirs.map((d) => resolve(d).toLowerCase());
   const lower = command.replace(/['"\\]/g, "").toLowerCase();
   if (/\$\{?claude_plugin_data\b/.test(lower)) return true;
-  for (const raw of lower.split(/[\s;&|()<>=]+/)) {
-    if (!raw.includes("/")) continue;
+  // Any spelling of a data folder anywhere in the command (`@/…`, `file://…`, `-o/…` included),
+  // after collapsing // and /./.
+  const flat = lower.replace(/\/(\.\/)+/g, "/").replace(/\/{2,}/g, "/");
+  for (const d of dataSpellings(prot, home)) {
+    for (let i = flat.indexOf(d); i >= 0; i = flat.indexOf(d, i + 1)) {
+      const next = flat[i + d.length];
+      if (next === undefined || !/[a-z0-9._-]/.test(next)) return true;
+    }
+  }
+  if (/\.config\/baseline(?![a-z0-9._-])/.test(flat)) return true;
+  for (const word of lower.split(/[\s;&|()<>=]+/)) {
+    // A path can start partway into a word (`@/x`, `file:///x`, `-o~/x`): check from there.
+    const w = word.replace(/^-{1,2}[a-z]+(?=[~/$])/, "");
+    const at = w.search(/~\/|~$|\$\{?home\b|\//);
+    // Mid-word only after a separator (`@`, `:`): `src/x` is a relative path, not `/x`.
+    if (at < 0 || (at > 0 && /[a-z0-9._-]/.test(w[at - 1] ?? ""))) continue;
+    const raw = w.slice(at);
     // Expand ~ and $HOME, then normalise (//, /./ and ..) the way the shell's path lookup will.
     const expanded = raw.replace(/^(~|\$home|\$\{home\})(?=\/|$)/, home);
     const t = posix.normalize(expanded);
