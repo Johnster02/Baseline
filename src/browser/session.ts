@@ -75,6 +75,8 @@ export function appendJson(p: string, item: unknown): void {
 const STATIC = new Set(["script", "stylesheet", "image", "font", "media", "manifest"]);
 const CLICK_WINDOW_MS = 4000;
 const SNAPSHOT_LIMIT = 12000;
+/** Headers a site uses to send the browser somewhere after a write. Nothing else is read. */
+const REDIRECT_HEADERS = ["location", "x-action-redirect", "hx-redirect", "hx-location", "refresh"];
 /** Bodies bigger than this are not scanned for ids. */
 const ID_SCAN_LIMIT = 3_000_000;
 
@@ -185,9 +187,20 @@ export async function openSession(o: OpenOptions): Promise<Session> {
     if (m !== "GET" && m !== "HEAD") {
       const loc = res.headers()["location"];
       if (loc && res.status() === 201) { try { const l = new URL(loc, res.url()); if (l.host === baseHost) owned.add(l.pathname); } catch { /* ignore */ } }
-      // Where the site sends the browser after a write is its reply too: a redirect's Location,
-      // or a framework's own header (Next.js x-action-redirect, htmx HX-Redirect...). Read them all.
-      else owned.seeText(Object.values(res.headers()).join("\n"));
+      // Where the site sends the browser after a write is its reply too: a redirect's Location or
+      // a framework's redirect header. Only those headers, only same-site, ids from the path only.
+      else {
+        const h = res.headers();
+        for (const name of REDIRECT_HEADERS) {
+          const raw = h[name];
+          if (!raw) continue;
+          // htmx HX-Location may be JSON ({"path": ...}); Refresh is "0; url=...". Next adds ";push".
+          let target = raw;
+          try { const j = JSON.parse(raw); if (j && typeof j.path === "string") target = j.path; } catch { /* plain */ }
+          target = target.replace(/^\s*\d+\s*;\s*url=/i, "").split(";")[0]!.trim();
+          try { const t = new URL(target, res.url()); if (t.host === baseHost) owned.seeReplyPath(t.pathname); } catch { /* ignore */ }
+        }
+      }
     }
     if (STATIC.has(res.request().resourceType())) return;
     const type = res.headers()["content-type"] ?? "";

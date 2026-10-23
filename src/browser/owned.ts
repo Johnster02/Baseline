@@ -56,6 +56,11 @@ export class OwnedTracker {
     for (const m of text.matchAll(BODY_ID)) this.see(m[0], true);
   }
 
+  /** A same-site path the site's reply redirects to: its ids count as the reply's. */
+  seeReplyPath(path: string) {
+    for (const seg of path.split("/")) if (UNIQUE_ID.test(seg)) this.see(seg, true);
+  }
+
   /** The guard let a write through. */
   wrote(at = Date.now()) { this.lastWriteSeq = ++this.seq; this.lastWriteAt = at; }
 

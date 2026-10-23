@@ -20597,6 +20597,10 @@ var OwnedTracker = class {
   seeText(text) {
     for (const m of text.matchAll(BODY_ID)) this.see(m[0], true);
   }
+  /** A same-site path the site's reply redirects to: its ids count as the reply's. */
+  seeReplyPath(path) {
+    for (const seg of path.split("/")) if (UNIQUE_ID.test(seg)) this.see(seg, true);
+  }
   /** The guard let a write through. */
   wrote(at = Date.now()) {
     this.lastWriteSeq = ++this.seq;
@@ -20782,6 +20786,7 @@ function appendJson(p, item) {
 var STATIC = /* @__PURE__ */ new Set(["script", "stylesheet", "image", "font", "media", "manifest"]);
 var CLICK_WINDOW_MS = 4e3;
 var SNAPSHOT_LIMIT = 12e3;
+var REDIRECT_HEADERS = ["location", "x-action-redirect", "hx-redirect", "hx-location", "refresh"];
 var ID_SCAN_LIMIT = 3e6;
 var LABEL_JS = `(el) => {
   const svgTitle = el.querySelector && el.querySelector('svg title');
@@ -20903,7 +20908,25 @@ async function openSession(o) {
           if (l.host === baseHost) owned.add(l.pathname);
         } catch {
         }
-      } else owned.seeText(Object.values(res.headers()).join("\n"));
+      } else {
+        const h = res.headers();
+        for (const name of REDIRECT_HEADERS) {
+          const raw = h[name];
+          if (!raw) continue;
+          let target = raw;
+          try {
+            const j = JSON.parse(raw);
+            if (j && typeof j.path === "string") target = j.path;
+          } catch {
+          }
+          target = target.replace(/^\s*\d+\s*;\s*url=/i, "").split(";")[0].trim();
+          try {
+            const t = new URL(target, res.url());
+            if (t.host === baseHost) owned.seeReplyPath(t.pathname);
+          } catch {
+          }
+        }
+      }
     }
     if (STATIC.has(res.request().resourceType())) return;
     const type = res.headers()["content-type"] ?? "";

@@ -20,7 +20,7 @@ describe("OwnedTracker", () => {
   it("owns an id named only in a write's reply headers (a framework redirect header)", () => {
     const t = new OwnedTracker();
     t.wrote(1000);
-    t.seeText(["text/x-component", `/projects/${NEW_ID}?brief=new;push`].join("\n"));
+    t.seeReplyPath(`/projects/${NEW_ID}`);
     t.seeUrl(`${SITE}/projects/${NEW_ID}?brief=new`);
     expect(t.landed(`${SITE}/projects/${NEW_ID}?brief=new`, 1400)).toBe(`/projects/${NEW_ID}`);
   });
