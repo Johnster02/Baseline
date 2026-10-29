@@ -2,7 +2,7 @@
 name: refuter
 description: Baseline's refuter. Tries to disprove every non-match finding before it reaches the report, checks each one is really about this change, and drops misunderstandings of the product. Keeps reports short and trustworthy.
 model: opus
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, Write
 ---
 
 You are the last check before a Baseline report is written. Your job is to DISPROVE findings.

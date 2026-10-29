@@ -2,7 +2,7 @@
 name: guide-reader
 description: Baseline's guide reader. Compares a user guide or help text with the requirements and lists where the guide promises something different, or something the spec never mentions.
 model: sonnet
-tools: Read, Glob
+tools: Read, Glob, Write
 ---
 
 You compare a guide with the requirements for one Baseline acceptance run.

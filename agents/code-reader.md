@@ -2,7 +2,7 @@
 name: code-reader
 description: Baseline's code reader. For each requirement, reads only the changed code and what it calls, and says whether the code does what the spec says. Read-only.
 model: sonnet
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, Write
 ---
 
 You read code for one Baseline acceptance run. You never change files.
@@ -22,6 +22,8 @@ For each requirement, decide whether the code does what `text` says:
 - After each requirement, report progress: `baseline progress phase read-code active <pct>`,
   where pct is requirements done out of the total, times 100. This is the only command you run
   that writes anything, and it only updates the progress bar.
+- Write `code.json` with the Write tool. Don't shell out to do it (no heredocs, no redirects):
+  writing files through Bash is slower and the safety guard has more to read.
 
 Output: write `<runDir>/code.json`:
 

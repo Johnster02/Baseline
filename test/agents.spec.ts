@@ -35,6 +35,14 @@ describe("agents", () => {
       expect(md).toMatch(/never assume/i);
     });
   }
+  it("every agent told to write a file has the Write tool", () => {
+    for (const name of Object.keys(EXPECTED)) {
+      const md = readFileSync(join(AGENTS, name + ".md"), "utf8");
+      if (!/write `<runDir>/.test(md)) continue;
+      expect(front(md).tools, `${name} is told to write a file`).toMatch(/\bWrite\b/);
+    }
+  });
+
   it("explorers and the cleaner only drive the browser through baseline script", () => {
     for (const n of ["explorer", "cleaner"]) {
       const md = readFileSync(join(AGENTS, n + ".md"), "utf8");
