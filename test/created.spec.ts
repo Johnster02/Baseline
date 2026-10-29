@@ -45,12 +45,29 @@ describe("recording what a run created", () => {
     expect(last(dir)).toMatchObject({ pageUrl: `${f.url}/cart`, url: "/cart", labelled: true });
   }, 30000);
 
-  it("refuses a url on another site", async () => {
+  it("keeps a record whose url is on another site, without trusting the address (I6)", async () => {
+    // Throwing lost the record entirely, so the cleaner never heard about something the runner
+    // really did create. Keep it, and mark the address unusable.
     const dir = await withSession(async (s) => {
       await s.goto("/cart");
-      expect(() => s.created("order", "Baseline r-1 order", "https://evil.test/orders/1")).toThrow(/another site|origin/i);
+      s.created("order", "Baseline r-1 order", "https://evil.test/orders/1");
     });
-    expect(readCreated(dir)).toHaveLength(0);
+    expect(readCreated(dir)).toHaveLength(1);
+    expect(last(dir)).toMatchObject({ urlUnusable: true, confirmed: false, pageUrl: `${f.url}/cart` });
+    expect(last(dir).url).toBeUndefined();
+  }, 30000);
+
+  it("treats framework-style placeholders as unusable too (minor 4)", async () => {
+    const dir = await withSession(async (s) => {
+      await s.goto("/cart");
+      for (const bad of ["/projects/[id]", "/projects/$id", "/projects/${id}", "/projects/%7Bid%7D"]) {
+        s.created("project", "Baseline r-1 project", bad);
+      }
+    });
+    for (const e of readCreated(dir)) {
+      expect(e.urlUnusable, JSON.stringify(e)).toBe(true);
+      expect(e.url).toBeUndefined();
+    }
   }, 30000);
 
   it("stores a placeholder url as unusable rather than as an address", async () => {

@@ -195,3 +195,13 @@ describe("config describe says whether a sign-in can be proved", () => {
     expect(out).toMatch(/can't prove|cannot prove/i);
   });
 });
+
+describe("set-authed-check validates what it is told to look for (review minor 5)", () => {
+  it("refuses a role Playwright does not have, so a typo can't fake proof of being signed out", async () => {
+    await main(["config", "add-runner", "customer", "customer", "form", "/login"]);
+    expect(await main(["config", "set-authed-check", "customer", "/account", "--role", "Button"])).toBe(2);
+    expect(await main(["config", "set-authed-check", "customer", "/account", "--role", "buttn"])).toBe(2);
+    expect(loadConfig(cwd).runners[0]?.authedCheck).toBeUndefined();
+    expect(await main(["config", "set-authed-check", "customer", "/account", "--role", "button"])).toBe(0);
+  });
+});

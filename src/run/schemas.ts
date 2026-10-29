@@ -57,7 +57,7 @@ export const commitFileSchema = z.object({
 });
 
 /** <runDir>/runners.json: each runner's sign-in status this run. */
-export const runnersFileSchema = z.array(z.object({ key: z.string(), ok: z.boolean(), error: z.string().optional() }));
+export const runnersFileSchema = z.array(z.object({ key: z.string(), ok: z.boolean(), error: z.string().optional(), strength: z.enum(["proved", "weak"]).optional(), note: z.string().optional() }));
 
 /** <runDir>/cleanup.json, written by the cleaner agent. */
 export const cleanupFileSchema = z.array(z.object({ label: z.string(), removed: z.boolean(), note: z.string().optional() }));

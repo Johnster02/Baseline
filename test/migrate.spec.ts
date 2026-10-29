@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { migrateLegacyData } from "../src/core/migrate";
@@ -53,5 +53,23 @@ describe("migrating the legacy data folder", () => {
     const legacy = legacyWithState();
     expect(migrateLegacyData({ legacy, target: legacy })).toEqual({ moved: [], skipped: [] });
     expect(existsSync(join(legacy, "migrated-to"))).toBe(false);
+  });
+});
+
+describe("migration hardening (review minors 1 and 2)", () => {
+  it("never loosens the target's permissions, whatever the legacy folder's were", () => {
+    const legacy = legacyWithState(), target = tmp("target-");
+    chmodSync(join(legacy, "secrets"), 0o755);
+    migrateLegacyData({ legacy, target });
+    expect(statSync(join(target, "secrets")).mode & 0o777).toBe(0o700);
+    expect(statSync(join(target, "secrets", `${hash}.json`)).mode & 0o777).toBe(0o600);
+  });
+
+  it("leaves no half-written secret behind if it is interrupted", () => {
+    const legacy = legacyWithState(), target = tmp("target-");
+    migrateLegacyData({ legacy, target });
+    // Nothing partial: every file it wrote is a complete, valid copy, and no .tmp survives.
+    expect(readdirSync(join(target, "secrets")).filter((f) => f.includes(".tmp"))).toEqual([]);
+    expect(JSON.parse(readFileSync(join(target, "secrets", `${hash}.json`), "utf8"))).toHaveProperty("customer");
   });
 });

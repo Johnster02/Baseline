@@ -15,6 +15,13 @@ const auth = z.discriminatedUnion("kind", [
 ]);
 
 /**
+ * The roles Playwright's getByRole accepts. A typo would make getByRole throw, which the check
+ * reads as "not found" — so Baseline would report proof that the runner is signed OUT when it is
+ * really its own check that is broken (review minor 5).
+ */
+export const ARIA_ROLES = ["alert", "alertdialog", "application", "article", "banner", "blockquote", "button", "caption", "cell", "checkbox", "code", "columnheader", "combobox", "complementary", "contentinfo", "definition", "deletion", "dialog", "directory", "document", "emphasis", "feed", "figure", "form", "generic", "grid", "gridcell", "group", "heading", "img", "insertion", "link", "list", "listbox", "listitem", "log", "main", "marquee", "math", "menu", "menubar", "menuitem", "menuitemcheckbox", "menuitemradio", "meter", "navigation", "none", "note", "option", "paragraph", "presentation", "progressbar", "radio", "radiogroup", "region", "row", "rowgroup", "rowheader", "scrollbar", "search", "searchbox", "separator", "slider", "spinbutton", "status", "strong", "subscript", "superscript", "switch", "tab", "table", "tablist", "tabpanel", "term", "textbox", "time", "timer", "toolbar", "tooltip", "tree", "treegrid", "treeitem"] as const;
+
+/**
  * A page and something on it that only a signed-in visitor sees. Without one, Baseline can only
  * say a sign-in didn't obviously fail; it can't prove it worked (spec 3.3).
  */
@@ -22,7 +29,7 @@ export const authedCheckSchema = z.object({
   path: z.string().min(1),
   expect: z.object({
     text: z.string().min(1).optional(),
-    role: z.string().min(1).optional(),
+    role: z.enum(ARIA_ROLES).optional(),
     name: z.string().min(1).optional(),
   }).refine((e) => !!(e.text || e.role), { message: "an authedCheck needs text, or a role to look for" }),
 });

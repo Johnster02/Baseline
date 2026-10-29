@@ -236,3 +236,18 @@ describe("paths on a filesystem that ignores case", () => {
     expect(isInside("/Users/j/.config/baseline", "/users/j/.config/BASELINE/secrets")).toBe(folds);
   });
 });
+
+describe("the data folder may not sit inside the project, whatever the case (review minor 3)", () => {
+  it("refuses a data folder inside the project spelled in another case on macOS", async () => {
+    const { dataDir } = await import("../src/core/paths");
+    const saved = { ...process.env };
+    try {
+      process.env.BASELINE_DATA = "/Users/x/Project/steal";
+      // On a case-insensitive volume these are the same folder, so credentials would land in the repo.
+      const folds = process.platform === "darwin" || process.platform === "win32";
+      if (folds) expect(() => dataDir("/Users/x/project")).toThrow(/inside the project/);
+      else expect(dataDir("/Users/x/project")).toBe("/Users/x/Project/steal");
+      expect(() => dataDir("/Users/x/Project")).toThrow(/inside the project/);
+    } finally { process.env = saved; }
+  });
+});

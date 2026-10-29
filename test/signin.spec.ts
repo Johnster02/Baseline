@@ -129,7 +129,7 @@ describe("proving a runner is signed in", () => {
   beforeAll(async () => { pub = await startFixture(0, { publicHome: true }); });
   afterAll(() => pub.stop());
 
-  const sessionRunner = (authedCheck?: { path: string; expect: { text?: string; role?: string; name?: string } }) =>
+  const sessionRunner = (authedCheck?: import("../src/config/schema").AuthedCheck) =>
     newRunner("admin", "admin", { kind: "session" }, authedCheck);
 
   it("a home page that signed-out visitors can see is not proof of being signed in", async () => {
@@ -226,23 +226,63 @@ describe("capturing a hand-driven sign-in", () => {
     expect(existsSync(sessionPath(s.data, s.proj, "admin"))).toBe(true);
   }, 60000);
 
-  it("a popup closing does not end the capture", async () => {
+  it("refuses to keep a hand-driven session it cannot prove, signed out or not (C2)", async () => {
+    // The configuration every existing project is in after upgrade: no authedCheck. Closing the
+    // window while signed out used to report ok and leave a signed-out session behind.
     const s = setup(FIXTURE_USER.password, pub.url);
-    let popupClosed = false, endedBeforePopup = false;
-    const r = await captureSession(runner(), { ...s.cfg, runners: [runner()] }, { projectDir: s.proj, data: s.data, baseUrl: pub.url }, {
+    const bare = newRunner("admin", "admin", { kind: "session" });
+    const r = await captureSession(bare, { ...s.cfg, runners: [bare] }, { projectDir: s.proj, data: s.data, baseUrl: pub.url }, {
+      headless: true,
+      onReady: async (ctx) => { for (const p of ctx.pages()) await p.close(); },
+    });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/set-authed-check/);
+    expect(existsSync(sessionPath(s.data, s.proj, "admin"))).toBe(false);
+  }, 60000);
+
+  it("refuses even when the sign-in really worked, because it cannot tell (C2)", async () => {
+    const s = setup(FIXTURE_USER.password, pub.url);
+    const bare = newRunner("admin", "admin", { kind: "session" });
+    const r = await captureSession(bare, { ...s.cfg, runners: [bare] }, { projectDir: s.proj, data: s.data, baseUrl: pub.url }, {
       headless: true,
       onReady: async (ctx) => {
+        const page = ctx.pages()[0]!;
+        await page.goto(pub.url + "/login");
+        await page.fill('input[type="email"]', FIXTURE_USER.username);
+        await page.fill('input[type="password"]', FIXTURE_USER.password);
+        await page.press('input[type="password"]', "Enter");
+        await page.waitForURL(/\/cart/);
+        await page.close();
+      },
+    });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/can't tell|cannot tell|set-authed-check/);
+    expect(existsSync(sessionPath(s.data, s.proj, "admin"))).toBe(false);
+  }, 60000);
+
+  it("a popup closing does not end the capture (I7)", async () => {
+    const s = setup(FIXTURE_USER.password, pub.url);
+    let ended = false;
+    let stillOpenAfterPopup: boolean | undefined;
+    const p = captureSession(runner(), { ...s.cfg, runners: [runner()] }, { projectDir: s.proj, data: s.data, baseUrl: pub.url }, {
+      headless: true,
+      onReady: async (ctx, windowClosed) => {
         const popup = await ctx.newPage();
         await popup.goto(pub.url + "/login");
         await popup.close();
-        popupClosed = true;
-        // Still waiting: the capture ends when the window goes, not when a popup does.
-        await new Promise((r2) => setTimeout(r2, 300));
-        for (const p of ctx.pages()) await p.close();
+        // Ask the capture itself whether the window has gone. An OAuth popup closing must not
+        // end it; only the last window does.
+        const settled = Symbol("settled");
+        const race = await Promise.race([windowClosed.then(() => settled), new Promise((r2) => setTimeout(r2, 400))]);
+        stillOpenAfterPopup = race !== settled;
+        for (const page of ctx.pages()) await page.close();
+        await windowClosed;
+        ended = true;
       },
     });
-    expect(popupClosed).toBe(true);
-    expect(endedBeforePopup).toBe(false);
+    const r = await p;
+    expect(stillOpenAfterPopup).toBe(true);
+    expect(ended).toBe(true);
     expect(r.ok).toBe(false);
   }, 60000);
 });

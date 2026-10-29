@@ -29,7 +29,7 @@ export type RunRecord = {
   rejected: { index: number; id?: string; reason: string }[];
   unreadLinks: UnreadLink[];
   /** Each runner's sign-in status this run. */
-  runners: { key: string; ok: boolean; error?: string | undefined }[];
+  runners: { key: string; ok: boolean; error?: string | undefined; strength?: "proved" | "weak" | undefined; note?: string | undefined }[];
   /** Things the run created and could not remove. */
   leftBehind: { label: string; note: string }[];
   /** Screenshot path (relative to the run folder) to base64 JPEG/PNG. */
@@ -196,8 +196,11 @@ function runHTML(r: RunRecord, hidden: boolean): string {
     `<div class="row"><span><b>${esc(s.runner)}</b> <span class="k">${esc(s.method)} ${esc(s.host)}${esc(s.path)}</span></span><span>${esc(s.reason)}${s.trigger ? ` (“${esc(s.trigger)}”)` : ""}</span><span class="k">To include it next time: ${esc(ALLOW_HINT[s.category] ?? "change this runner's permissions")}</span></div>`).join("")}</div></section>` : "";
   const permHTML = r.permissions.length ? `<details class="sec fold wp" style="--w:6"><summary><h2>Permissions this run had · ${r.permissions.length}</h2>${TOG}</summary><div class="rows">${r.permissions.map((p) =>
     `<div class="perm"><b>${esc(p.runner)}</b><ul>${p.can.map((c) => `<li>${esc(c)}</li>`).join("")}</ul><ul class="no">${p.cannot.map((c) => `<li>not: ${esc(c)}</li>`).join("")}${(p.notes ?? []).map((n) => `<li>your note: ${esc(n)}</li>`).join("")}</ul></div>`).join("")}</div></details>` : "";
-  const runnersHTML = (r.runners ?? []).some((x) => !x.ok) ? `<section class="sec wp" style="--w:5"><h2>Runners</h2><div class="rows">${r.runners.map((x) =>
-    `<div class="row"><span><b>${esc(x.key)}</b></span><span>${x.ok ? "signed in" : "not signed in"}</span><span class="k">${esc(x.error ?? "")}</span></div>`).join("")}</div></section>` : "";
+  // A sign-in that could not be proved is shown too: reporting it as plain success is how a run
+  // could start with a quietly signed-out account (review finding I1).
+  const unproven = (x: { ok: boolean; strength?: "proved" | "weak" | undefined }) => x.ok && x.strength === "weak";
+  const runnersHTML = (r.runners ?? []).some((x) => !x.ok || unproven(x)) ? `<section class="sec wp" style="--w:5"><h2>Runners</h2><div class="rows">${r.runners.map((x) =>
+    `<div class="row"><span><b>${esc(x.key)}</b></span><span>${!x.ok ? "not signed in" : unproven(x) ? "signed in, not proved" : "signed in"}</span><span class="k">${esc(x.error ?? x.note ?? "")}</span></div>`).join("")}</div></section>` : "";
   const leftHTML = (r.leftBehind ?? []).length ? `<section class="sec wp" style="--w:6"><h2>Left behind · ${r.leftBehind.length}</h2><div class="rows">${r.leftBehind.map((x) =>
     `<div class="row"><span><b>${esc(x.label)}</b></span><span>${esc(x.note)}</span><span class="k">Remove it by hand on the site.</span></div>`).join("")}</div></section>` : "";
   const rejected = r.rejected ?? [];

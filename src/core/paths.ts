@@ -56,7 +56,10 @@ export function dataDir(projectDir = process.cwd()): string {
   const home = process.env.HOME || homedir();
   const dir = resolve(process.env.BASELINE_DATA || process.env.CLAUDE_PLUGIN_DATA || readPointer(home) || join(home, ".config", "baseline"));
   const proj = resolve(projectDir);
-  if (dir === proj || dir.startsWith(proj + sep)) throw new Error(`Refusing a Baseline data folder inside the project (${dir}).`);
+  // isInside, not a plain comparison: on a case-insensitive volume /Users/x/Project/steal is
+  // inside /Users/x/project, and credentials would land somewhere they can be committed
+  // (review minor 3).
+  if (isInside(proj, dir)) throw new Error(`Refusing a Baseline data folder inside the project (${dir}).`);
   return dir;
 }
 

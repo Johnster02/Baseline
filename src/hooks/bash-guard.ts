@@ -42,6 +42,7 @@ const ENV_OVERRIDE = /^(BASELINE_(SHARED_BROWSER|RUN_DIR|DATA)|CLAUDE_PLUGIN_DAT
 const ENV_PREFIX = new RegExp([
   String.raw`^[({!]\s*`,
   String.raw`^(?:env|export|declare|readonly|local|typeset|command|exec|nohup|time|builtin|sudo|doas|xargs|eval|set)(?:\s+(?:-u\s+\S+|-{1,2}[\w-]+(?:=\S*)?))*(?:\s+|$)`,
+  String.raw`^(?:timeout|nice|stdbuf|ionice|setsid|strace|chrt|ltrace)(?:\s+(?:-{1,2}[\w-]+(?:=\S*)?|\d+[smhd]?))*(?:\s+|$)`,
   String.raw`^(?:ba|z|da|k)?sh(?:\s+-\w+)*\s+-c\s+`,
   String.raw`^[A-Za-z_]\w*=\S*\s+`,
 ].join("|"));
@@ -64,6 +65,7 @@ const PREFIX = new RegExp([
   String.raw`^[({!]\s*`,
   String.raw`^[A-Za-z_]\w*=\S*\s+`,
   String.raw`^(?:env|command|exec|nohup|time|builtin|sudo|doas|xargs|eval)(?:\s+(?:-u\s+\S+|-{1,2}[\w-]+(?:=\S*)?))*(?:\s+|$)`,
+  String.raw`^(?:timeout|nice|stdbuf|ionice|setsid|strace|chrt|ltrace)(?:\s+(?:-{1,2}[\w-]+(?:=\S*)?|\d+[smhd]?))*(?:\s+|$)`,
   String.raw`^(?:ba|z|da|k)?sh(?:\s+-\w+)*\s+-c\s+`,
 ].join("|"));
 
@@ -113,6 +115,12 @@ function dataSpellings(dirs: string[], home: string): string[] {
 }
 
 const WILD = /[*?[{$`]/;
+/**
+ * Filename globs only. A variable in an echoed word prints its value, which spec 3.4 requires to
+ * be allowed; a glob is expanded by the shell before the command runs, so `echo <data folder>/*`
+ * prints a listing of the data folder.
+ */
+const GLOB = /[*?[{]/;
 /** Commands that print their arguments: a word of theirs is text, not a path to open. */
 const PRINTS_ARGS = /^(echo|printf|print)$/;
 /** Commands whose first argument is a regex or a script, not a path. */
@@ -120,7 +128,7 @@ const PATTERN_FIRST = /^(grep|egrep|fgrep|zgrep|rg|ag|ack|sed|awk)$/;
 /** Flags of those commands that take a pattern or a pattern file, so the next word is their value. */
 const TAKES_PATTERN = /^--?(regexp|file|expression)\b|^-[a-zA-Z]*[ef]/;
 /** Words that run the next word rather than being the command themselves. */
-const WRAPPER = /^(env|command|exec|nohup|time|builtin|sudo|doas|xargs|eval|export|declare|readonly|local|typeset|then|else|do|!)$/;
+const WRAPPER = /^(env|command|exec|nohup|time|builtin|sudo|doas|xargs|eval|export|declare|readonly|local|typeset|then|else|do|!|timeout|nice|stdbuf|ionice|setsid|strace|chrt|ltrace)$/;
 
 /**
  * The words of a command that sit where a path can go. A quoted regex (`sed -n '/\.config/p'`), a
@@ -134,7 +142,12 @@ export function pathWords(command: string): string[] {
   const solo = segs.filter((s) => s.trim()).length === 1;
   const out: string[] = [];
   for (const seg of segs) {
-    const parts = seg.replace(/\$'/g, "'").replace(/['"\\]/g, "").toLowerCase().split(/([\s;&|()<>]+)/);
+    // An empty quoted argument (`grep '' <path>`) is still an argument: stripping the quotes made
+    // it disappear, so the path after it slid into the pattern slot and was dropped as a regex —
+    // which let `grep -r '' <data folder>` print every saved password. Keep its place with a
+    // token that can never look like a path.
+    const parts = seg.replace(/\$'/g, "'").replace(/(^|\s)(''|"")(?=\s|$)/g, "$1\u0001")
+      .replace(/['"\\]/g, "").toLowerCase().split(/([\s;&|()<>]+)/);
     let cmd = "";
     let patternSeen = false;
     let valueFlag = false;
@@ -151,7 +164,7 @@ export function pathWords(command: string): string[] {
         continue;
       }
       if (flag && TAKES_PATTERN.test(word)) valueFlag = true;
-      if (!redirected && solo && PRINTS_ARGS.test(cmd)) continue;
+      if (!redirected && solo && PRINTS_ARGS.test(cmd) && !GLOB.test(word)) continue;
       if (!redirected && !flag && !patternSeen && !valueFlag && PATTERN_FIRST.test(cmd)) { patternSeen = true; continue; }
       out.push(word);
     }
@@ -210,8 +223,12 @@ const segsOf = (p: string) => p.split("/").filter((s) => s && s !== "." && s !==
  * hidden folder (`.config`, `.claude`) anchors the comparison — lining `data/*` or `plugins/*` up
  * with a data folder's middle would refuse ordinary project paths for no gain.
  */
-function relativeGlobReaches(word: string, prot: string[]): boolean {
-  if (!word.includes("/") || !WILD.test(word)) return false;
+function relativePathReaches(word: string, prot: string[]): boolean {
+  // Literal as well as glob: `../../.claude/plugins/data/baseline/x/secrets.json` names the
+  // folder outright, and only the glob spelling used to be caught. The loop below anchors on a
+  // literal hidden segment, so an ordinary relative path (`ls data/*`, `cat src/x.ts`) is
+  // untouched (review finding I5).
+  if (!word.includes("/")) return false;
   const pat = segsOf(posix.normalize(word));
   for (let i = 0; i < pat.length; i++) {
     const seg = pat[i] as string;
@@ -247,7 +264,7 @@ export function mentionsDataDir(command: string, dirs: string[]): boolean {
     const at = w.search(/~\/|~$|\$\{?home\b|\//);
     // Mid-word only after a separator (`@`, `:`): `src/x` is a relative path, not `/x`.
     if (at < 0 || (at > 0 && /[a-z0-9._-]/.test(w[at - 1] ?? ""))) {
-      if (relativeGlobReaches(w, prot)) return true;
+      if (relativePathReaches(w, prot)) return true;
       continue;
     }
     const raw = w.slice(at);
@@ -256,7 +273,7 @@ export function mentionsDataDir(command: string, dirs: string[]): boolean {
     if (WILD.test(t)) {
       // A glob or variable: refuse only when it could line up with a data folder, either reaching
       // into one or naming a folder above one.
-      if (!t.startsWith("/")) { if (relativeGlobReaches(t, prot)) return true; continue; }
+      if (!t.startsWith("/")) { if (relativePathReaches(t, prot)) return true; continue; }
       if (prot.some((d) => reaches(segsOf(t), segsOf(d)))) return true;
       continue;
     }

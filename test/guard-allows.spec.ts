@@ -119,3 +119,88 @@ describe("explainBash", () => {
     for (const c of REFUSED) expect(explainBash(c, ctx).decision, c).toBe("deny");
   });
 });
+
+// Review findings C1, I2, I3: three ways the narrowing lost ground that 7a070db held.
+describe("the narrowing must not drop a path from the command", () => {
+  const LEGACY = dirs[0]!, PLUGIN_DATA = dirs[1]!;
+  const deny = (cmd: string, extra: object = {}) =>
+    expect(bashGuard(cmd, { protectedDirs: dirs, ...extra }), cmd).toMatchObject({ deny: expect.any(String) });
+  const allow = (cmd: string, extra: object = {}) =>
+    expect(bashGuard(cmd, { protectedDirs: dirs, ...extra }), cmd).toEqual({ allow: true });
+
+  it("an empty search pattern does not shift the data folder out of the command (C1)", () => {
+    // Stripping quotes made '' vanish, so the next word landed in the pattern slot and was
+    // dropped as a regex. `grep -r '' <data folder>` prints every saved password.
+    deny(`grep '' ${LEGACY}/secrets.json`);
+    deny(`grep -r '' ${PLUGIN_DATA}`);
+    deny(`grep -r '' "$HOME/.config/baseline"`);
+    deny(`grep -r '' -- ${LEGACY}`);
+    deny(`rg '' ${LEGACY}`);
+    deny(`sed '' ${LEGACY}/secrets.json`);
+    deny(`awk '' ${LEGACY}/secrets.json`);
+    deny(`ag '' ${LEGACY}`);
+    deny(`zgrep '' ${LEGACY}/secrets.json`);
+    deny(`eval "grep '' ${LEGACY}/secrets.json"`);
+    deny(`grep "" ${LEGACY}/secrets.json`);
+  });
+
+  it("an empty pattern on an ordinary file is still fine", () => {
+    allow("grep '' notes.txt");
+    allow("grep -r '' src/");
+    allow('sed "" notes.txt');
+  });
+
+  it("a glob is never text, even as an argument to echo (I2)", () => {
+    // The shell expands the glob before echo runs, so the output is a listing of the data folder.
+    deny(`echo ${LEGACY}/*`);
+    deny(`printf '%s\\n' ${LEGACY}/*`);
+    deny(`echo ${PLUGIN_DATA}/*/session.json`);
+    deny("echo ~/.config/baseline/*");
+  });
+
+  it("printing a literal path, or a variable, is still fine", () => {
+    allow('echo "$CLAUDE_PLUGIN_DATA"');
+    allow(`echo ${LEGACY}`);
+    allow("echo hello world");
+    allow("printf '%s\\n' done");
+  });
+
+  it("a wrapper in front of an env override does not excuse it (I3)", () => {
+    const run = { runUrl: "https://staging.acme.dev" };
+    for (const w of ["timeout 5", "nice", "nice -n 10", "stdbuf -o0", "setsid", "ionice -c3", "strace -f"]) {
+      deny(`${w} BASELINE_DATA=/tmp/x baseline script a b`, run);
+      deny(`${w} CLAUDE_PLUGIN_DATA=/tmp/x baseline config show`, run);
+    }
+  });
+
+  it("the same wrappers do not let a subagent start, finish or sign in to a run (I3)", () => {
+    const agent = { runUrl: "https://staging.acme.dev", agent: true };
+    for (const w of ["timeout 5", "nice", "stdbuf -o0", "setsid"]) {
+      deny(`${w} baseline run finish`, agent);
+      deny(`${w} baseline signin customer`, agent);
+      deny(`${w} baseline run new --url https://x --label y`, agent);
+    }
+  });
+
+  it("those wrappers in front of an ordinary command are still fine", () => {
+    const run = { runUrl: "https://staging.acme.dev" };
+    allow("timeout 5 pnpm vitest run", run);
+    allow("nice node scripts/build.mjs", run);
+    allow("timeout 30 baseline script customer walk.cjs", { ...run, agent: true });
+  });
+  it("a relative path to the plugin data folder is refused, glob or not (I5)", () => {
+    deny("cat ../../.claude/plugins/data/baseline/x/secrets.json");
+    deny("cat a/.claude/plugins/data/baseline/secrets.json");
+    deny("cat ../.config/baseline/secrets.json");
+    deny("cat ../../.claude/plugins/data/*/secrets.json");
+  });
+
+  it("a relative path through a hidden folder that goes nowhere near the data folder is fine", () => {
+    allow("cat .claude/settings.json");
+    allow("ls ../other/.config/app");
+    allow("cat .config/nvim/init.lua");
+    allow("ls data/*");
+    allow("ls plugins/*");
+    allow("cat src/core/paths.ts");
+  });
+});

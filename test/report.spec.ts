@@ -260,3 +260,21 @@ describe("report: runners and cleanup", () => {
     expect(html).toContain("Baseline r-1 order");
   });
 });
+
+describe("the report says when a sign-in was never proved", () => {
+  it("carries strength and note through runners.json (I1)", async () => {
+    const { recordRunnerStatus } = await import("../src/run/runners");
+    const { runnersFileSchema } = await import("../src/run/schemas");
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "rs-")));
+    recordRunnerStatus(dir, [{ key: "customer", ok: true, strength: "weak", note: "could not prove customer is signed in" }]);
+    const read = runnersFileSchema.parse(JSON.parse(readFileSync(join(dir, "runners.json"), "utf8")));
+    expect(read[0]).toMatchObject({ key: "customer", ok: true, strength: "weak" });
+    expect(read[0]?.note).toMatch(/could not prove/);
+  });
+
+  it("shows an unproven runner in the report, not silent success", () => {
+    const html = renderSessionReport([record({ runners: [{ key: "customer", ok: true, strength: "weak", note: "could not prove customer is signed in" }] })], "br2049");
+    expect(html).toMatch(/not proved|could not prove/i);
+    expect(html).toMatch(/customer/);
+  });
+});

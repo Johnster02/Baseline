@@ -125,10 +125,16 @@ const isCreated = (v: unknown): CreatedEntry => {
 };
 
 /**
- * A url an agent passed that is a template, not an address: `/projects/<id>`, `{id}`, `:id`, `*`.
- * Recording one as the record's address is what nearly sent the cleaner to the wrong place.
+ * A url an agent passed that is a template, not an address: `/projects/<id>`, `{id}`, `[id]`
+ * (Next.js), `$id`, `:id`, `*`. Recording one as the record's address is what nearly sent the
+ * cleaner to the wrong place. Percent-encoded braces count too, since an agent may have built
+ * the string through a URL helper.
  */
-export const isPlaceholderUrl = (url: string) => /[<>{}*]|(^|\/):[A-Za-z_]/.test(url);
+export const isPlaceholderUrl = (url: string) => {
+  let t = url;
+  try { t = decodeURIComponent(url); } catch { /* compare what we have */ }
+  return /[<>{}*[\]$]|(^|\/):[A-Za-z_]/.test(t);
+};
 
 export function appendCreated(runDir: string, entry: CreatedEntry): void {
   const f = createdFile(runDir);

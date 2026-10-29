@@ -189,8 +189,12 @@ export async function signIn(runner: Runner, cfg: ProjectConfig, ctx: SignInCont
 export type CaptureOptions = {
   /** Visible by default: the whole point is that a person drives it. Tests override. */
   headless?: boolean;
-  /** Called once the window is open, with the live context. A test seam. */
-  onReady?: (context: BrowserContext) => Promise<void> | void;
+  /**
+   * Called once the window is open, with the live context and a promise that settles when the
+   * last window goes. Lets a caller do something while the sign-in is in progress and tell
+   * whether the window is still there.
+   */
+  onReady?: (context: BrowserContext, windowClosed: Promise<void>) => Promise<void> | void;
 };
 
 /**
@@ -240,8 +244,11 @@ export async function captureSession(runner: Runner, cfg: ProjectConfig, ctx: Si
   try {
     const page = context.pages()[0] ?? (await context.newPage());
     await page.goto(start.toString()).catch(() => { /* the user can navigate themselves */ });
-    await opts.onReady?.(context);
+    // Alongside, not before: the window closing is what ends this, and a caller watching from
+    // outside has to be able to see that a popup closing did not.
+    const ready = (async () => { await opts.onReady?.(context, closed); })();
     await closed;
+    await ready.catch(() => {});
   } finally {
     clearInterval(timer);
     await save();
@@ -258,6 +265,18 @@ export async function captureSession(runner: Runner, cfg: ProjectConfig, ctx: Si
   if (!v.ok) {
     rmSync(pending, { force: true });
     return { key: runner.key, ok: false, strength: v.strength, error: `${v.reason} Nothing was saved. Run it again and finish signing in before closing the window.` };
+  }
+  // A hand-driven sign-in is the one place a person is standing there, so it is the one place
+  // Baseline can insist on being able to check its work. Keeping a session it cannot vouch for is
+  // what let a signed-out account start a run (spec 3.2); a weak pass is not good enough here.
+  if (v.strength !== "proved") {
+    rmSync(pending, { force: true });
+    return {
+      key: runner.key,
+      ok: false,
+      strength: v.strength,
+      error: `Baseline can't tell whether ${runner.key} is signed in, so it did not keep the session. Give it a page and a word only a signed-in user sees, then sign in again:\n  baseline config set-authed-check ${runner.key} <path> --text "<word>"\n  baseline signin ${runner.key} --manual --url ${ctx.baseUrl}`,
+    };
   }
   renameSync(pending, file);
   chmodSync(file, 0o600);

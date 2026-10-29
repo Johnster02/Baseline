@@ -154,7 +154,9 @@ const MAX_WAIT_MS = 60_000;
  */
 const envMs = (name: string, fallback: number) => {
   const n = Number(process.env[name]);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
+  // Capped at the same ceiling agent waits get: an env var must not be able to hang a runner for
+  // an hour (review minor 7).
+  return Number.isFinite(n) && n > 0 ? Math.min(n, MAX_WAIT_MS) : fallback;
 };
 const DEFAULT_TIMEOUT_MS = envMs("BASELINE_TIMEOUT_MS", 8_000);
 const IDLE_MS = envMs("BASELINE_IDLE_MS", 1_000);
@@ -476,10 +478,11 @@ function actions(c: Ctx, page: Page, browser: Browser): Session {
       } else {
         let u: URL | undefined;
         try { u = new URL(url, base); } catch { u = undefined; }
-        if (!u || u.origin !== base.origin) {
-          throw new Error(`created() refuses "${url}": it is on another site, not ${base.origin}. Pass the record's own path, or leave it out and Baseline records the page you are on.`);
-        }
-        address = u.pathname + u.search;
+        // An address on another site is no use to the cleaner, but losing the record is worse:
+        // something the runner really created would never be tidied up. Keep it, say the address
+        // can't be used, and let pageUrl and the label identify it (review finding I6).
+        if (!u || u.origin !== base.origin) unusable = true;
+        else address = u.pathname + u.search;
       }
       // Labels start with "Baseline <runId>" (see agents/cleaner.md).
       const entry = {

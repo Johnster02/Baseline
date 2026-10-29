@@ -105,3 +105,37 @@ describe("links the gatherer could not read", () => {
     expect(out).not.toMatch(/no readable inputs\.json/);
   });
 });
+
+describe("unread-link never destroys the inputs it is appending to", () => {
+  const runDir = () => {
+    const d = join(cwd, ".baseline", "sessions", "s", "runs", "r-1");
+    mkdirSync(d, { recursive: true });
+    return d;
+  };
+
+  it("refuses, and leaves the file alone, when inputs.json does not validate (I4)", async () => {
+    const d = runDir();
+    // The exact state spec 3.5 is about: a file that fails validation.
+    const broken = JSON.stringify({ items: "nope", unreadLinks: [] });
+    writeFileSync(join(d, "inputs.json"), broken);
+    expect(await main(["inputs", "unread-link", "https://wiki/x", "--run", d])).toBe(2);
+    expect(readFileSync(join(d, "inputs.json"), "utf8")).toBe(broken);
+    expect(out).toMatch(/items/);
+  });
+
+  it("keeps fields it does not know about, so a newer run folder is not downgraded", async () => {
+    const d = runDir();
+    writeFileSync(join(d, "inputs.json"), JSON.stringify({ items: [], unreadLinks: [], futureField: { keep: 1 } }));
+    expect(await main(["inputs", "unread-link", "https://wiki/x", "--run", d])).toBe(0);
+    expect(JSON.parse(readFileSync(join(d, "inputs.json"), "utf8")).futureField).toEqual({ keep: 1 });
+  });
+
+  it("re-fetching inputs keeps the unread links already recorded (minor 8)", async () => {
+    const d = runDir();
+    writeFileSync(join(d, "inputs.json"), JSON.stringify({ items: [], unreadLinks: [{ url: "https://wiki/x", reason: "403" }] }));
+    // `inputs` with a plain text input rewrites the file; the recorded links must survive.
+    await main(["inputs", "--run", d, "some requirement text"]);
+    const f = inputsFileSchema.parse(JSON.parse(readFileSync(join(d, "inputs.json"), "utf8")));
+    expect(f.unreadLinks).toEqual([{ url: "https://wiki/x", reason: "403" }]);
+  });
+});

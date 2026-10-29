@@ -5,7 +5,7 @@
 // Copy, not move: the legacy folder keeps its copy, and stays a protected candidate in
 // dataDirCandidates(), so nothing is lost and the guards keep covering both places.
 // Kept free of heavy imports: the hook bundle uses it.
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 /** What a Baseline data folder holds. Nothing else is touched. */
@@ -24,8 +24,10 @@ export type MigrationResult = {
 /** Copy one tree, preserving modes, never overwriting. Returns the files it did not take. */
 function copyTree(from: string, to: string, rel: string, skipped: string[]): number {
   let copied = 0;
-  mkdirSync(to, { recursive: true, mode: statSync(from).mode & 0o777 });
-  chmodSync(to, statSync(from).mode & 0o777);
+  // Always 0700/0600, never the legacy folder's own modes: a legacy folder someone made by hand
+  // at 0755 must not loosen the folder these files are moving into (review minor 1).
+  mkdirSync(to, { recursive: true, mode: 0o700 });
+  chmodSync(to, 0o700);
   for (const name of readdirSync(from)) {
     const src = join(from, name), dst = join(to, name), r = join(rel, name);
     const st = statSync(src);
@@ -34,8 +36,12 @@ function copyTree(from: string, to: string, rel: string, skipped: string[]): num
     // A newer file at the target always wins: this runs on every session start, and a password
     // saved since the migration must never be rolled back to the legacy copy.
     if (existsSync(dst)) { skipped.push(r); continue; }
-    copyFileSync(src, dst);
-    chmodSync(dst, st.mode & 0o777);
+    // Write beside it and rename, so a concurrent `baseline` never reads half a secrets file
+    // (review minor 2). Same directory, so the rename is atomic.
+    const tmp = `${dst}.${process.pid}.tmp`;
+    copyFileSync(src, tmp);
+    chmodSync(tmp, 0o600);
+    renameSync(tmp, dst);
     copied++;
   }
   return copied;

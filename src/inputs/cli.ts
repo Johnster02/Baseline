@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseFlags, isOneOf } from "../core/args";
 import { activeRunDir } from "../core/paths";
@@ -22,13 +22,26 @@ register("inputs", "fetch what a run checks against: inputs [--run <dir>] [--as 
     try { parsedUrl = new URL(url); } catch { err(`"${url}" is not a URL`); return 2; }
     if (!/^https?:$/.test(parsedUrl.protocol)) { err(`"${url}" is not an http(s) URL`); return 2; }
     const file = join(runDir, "inputs.json");
-    const current = readJsonFile(file, parse(inputsFileSchema), { items: [], unreadLinks: [] });
-    if (!current.unreadLinks.some((l) => l.url === url)) {
-      current.unreadLinks.push({ url, ...(f.reason ? { reason: f.reason.slice(0, 300) } : {}) });
+    // Edit the raw object, never a parsed copy: writing a parsed copy back would drop every field
+    // the schema does not know, and a validation failure would overwrite the whole file with
+    // defaults — losing every fetched ticket and PR body (review finding I4).
+    let fileJson: Record<string, unknown> = { items: [], unreadLinks: [] };
+    if (existsSync(file)) {
+      let parsed: unknown;
+      try { parsed = JSON.parse(readFileSync(file, "utf8")); } catch { err(`${file} is not valid JSON. Fix it, or run \`baseline inputs\` again.`); return 2; }
+      const check = inputsFileSchema.safeParse(parsed);
+      if (!check.success) {
+        err(`${file} can't be read, so nothing was added to it: ${check.error.issues.slice(0, 3).map((i) => `${i.path.join(".") || "file"}: ${i.message}`).join("; ")}`);
+        return 2;
+      }
+      fileJson = parsed as Record<string, unknown>;
     }
+    const links = inputsFileSchema.parse(fileJson).unreadLinks;
+    if (!links.some((l) => l.url === url)) links.push({ url, ...(f.reason ? { reason: f.reason.slice(0, 300) } : {}) });
+    fileJson.unreadLinks = links;
     mkdirSync(runDir, { recursive: true });
-    writeJsonAtomic(file, current);
-    out(JSON.stringify({ unreadLinks: current.unreadLinks.length }));
+    writeJsonAtomic(file, fileJson);
+    out(JSON.stringify({ unreadLinks: links.length }));
     return 0;
   }
   // Same rule as every other command: --run, else the active run.
@@ -53,7 +66,10 @@ register("inputs", "fetch what a run checks against: inputs [--run <dir>] [--as 
     catch (e) { err(errMsg(e)); return 1; }
   }
   mkdirSync(runDir, { recursive: true });
-  writeFileSync(join(runDir, "inputs.json"), JSON.stringify({ items, unreadLinks: [] }, null, 2));
+  // Keep any unread links the gatherer already recorded: re-fetching the inputs is not a reason
+  // to forget what it could not open (review minor 8).
+  const existing = readJsonFile(join(runDir, "inputs.json"), parse(inputsFileSchema), { items: [], unreadLinks: [] });
+  writeFileSync(join(runDir, "inputs.json"), JSON.stringify({ items, unreadLinks: existing.unreadLinks }, null, 2));
   out(JSON.stringify({ items: items.map((i) => ({ kind: i.ref.kind, title: i.title, changedFiles: i.changedFiles?.length ?? 0, links: i.links.length, files: i.files?.length ?? 0 })) }));
   return 0;
 });
