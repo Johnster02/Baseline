@@ -1,6 +1,6 @@
 import { register, out, err, io } from "../cli";
 import { z } from "zod";
-import { CATEGORIES, DEPTHS, THEMES, projectConfigSchema } from "./schema";
+import { CATEGORIES, DEPTHS, THEMES, authedCheckSchema, projectConfigSchema } from "./schema";
 import { isOneOf } from "../core/args";
 import { checkTarget, describePermissions, ensureGitignored, loadConfig, newRunner, saveConfig } from "./store";
 import { dataDir, originOf, removeSecret, setSecret } from "./secrets";
@@ -30,7 +30,7 @@ export function describeAll(projectDir: string): string {
   }).join("\n\n");
 }
 
-register("config", "show | describe | add-runner | remove-runner | depth | allow | deny | note | set | secret", async (args) => {
+register("config", "show | describe | add-runner | remove-runner | depth | allow | deny | note | set | set-authed-check | secret", async (args) => {
   const [sub, ...a] = args;
   const dir = process.cwd();
   const cfg = loadConfig(dir);
@@ -104,6 +104,31 @@ register("config", "show | describe | add-runner | remove-runner | depth | allow
       out(`${r.key} will remember: "${text.slice(0, 300)}"`);
       return 0;
     }
+    case "set-authed-check": {
+      // How Baseline proves this runner is signed in: a page only they can see, and something on
+      // it a signed-out visitor never gets (spec 3.3).
+      const r = runnerOr(cfg, a[0]);
+      if (!r) return 2;
+      if (a.includes("--clear")) {
+        delete r.authedCheck;
+        saveConfig(dir, cfg);
+        out(`${r.key} has no signed-in check: its sign-ins can't be proved`);
+        return 0;
+      }
+      const path = a[1];
+      const flag = (name: string) => { const i = a.indexOf(`--${name}`); return i >= 0 ? a[i + 1] : undefined; };
+      const expect = { ...(flag("text") ? { text: flag("text") } : {}), ...(flag("role") ? { role: flag("role") } : {}), ...(flag("name") ? { name: flag("name") } : {}) };
+      if (!path || path.startsWith("--") || (!expect.text && !expect.role)) {
+        err('usage: baseline config set-authed-check <runner> <path> --text "<word>" | --role <role> [--name "<label>"] | --clear');
+        return 2;
+      }
+      const parsed = authedCheckSchema.safeParse({ path, expect });
+      if (!parsed.success) { err(parsed.error.issues.map((i) => i.message).join("; ")); return 2; }
+      r.authedCheck = parsed.data;
+      saveConfig(dir, cfg);
+      out(`${r.key} is signed in when ${path} shows ${expect.text ? `"${expect.text}"` : `${expect.role}${expect.name ? ` "${expect.name}"` : ""}`}`);
+      return 0;
+    }
     case "set": {
       const [field, value] = a;
       if (!isOneOf(SETTABLE, field) || value === undefined) {
@@ -159,7 +184,7 @@ register("config", "show | describe | add-runner | remove-runner | depth | allow
       return 0;
     }
     default:
-      err("usage: baseline config <show|describe|add-runner|remove-runner|depth|allow|deny|set|secret> ...");
+      err("usage: baseline config <show|describe|add-runner|remove-runner|depth|allow|deny|set|set-authed-check|secret> ...");
       return 2;
   }
 });

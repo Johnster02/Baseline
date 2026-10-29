@@ -14,7 +14,19 @@ export class SignedOutError extends Error {
 }
 
 export type SignInContext = { projectDir: string; data: string; baseUrl: string; runDir?: string; live?: boolean };
-export type SignInResult = { key: string; ok: boolean; landed?: string; error?: string };
+export type SignInResult = {
+  key: string;
+  ok: boolean;
+  landed?: string;
+  error?: string;
+  /**
+   * How the result was reached. "proved": something only a signed-in visitor sees was found (or
+   * provably absent). "weak": nothing objected, but nothing proved it either — the runner has no
+   * authedCheck. A weak result never claims proof; `note` says what could not be shown.
+   */
+  strength?: Strength;
+  note?: string;
+};
 
 const PASSWORD = 'input[type="password"]';
 const USERNAME = 'input[type="email"], input[autocomplete="username"], input[name*="user" i], input[name*="email" i], input[name*="login" i], input[type="text"]';
@@ -42,18 +54,67 @@ export function chooseSignInUrl(o: { flagUrl?: string | undefined; lastUrl?: str
 const SIGN_IN_PATH = /\/(log-?in|sign-?in|auth|session|sso)(\/|$|\?)/i;
 
 /**
- * Landed on a sign-in page: the runner's own login path, or (for any runner) a sign-in-looking
- * path that asks for a password. A password field alone (change password, confirm) is not it.
+ * Landed on a sign-in page: the runner's own login path or any step below it, or (for any runner)
+ * a sign-in-looking path that asks for a password. A password field alone (change password,
+ * confirm) is not it.
+ *
+ * The login path matches as a prefix because multi-step sign-ins (Clerk's /sign-in/factor-two,
+ * an MFA code screen) are still the sign-in, and a code screen has no password field for the
+ * other half of this check to catch. Comparing for equality is how a stalled sign-in used to
+ * report success (spec 3.3).
  */
 export function looksSignedOut(url: string, passwordVisible: boolean, runner: Runner): boolean {
   const u = new URL(url);
-  if (runner.auth.kind === "form" && u.pathname === new URL(runner.auth.loginUrl, url).pathname) return true;
+  if (runner.auth.kind === "form") {
+    const login = new URL(runner.auth.loginUrl, url).pathname.replace(/\/+$/, "");
+    if (u.pathname === login || u.pathname.startsWith(login + "/")) return true;
+  }
   return passwordVisible && SIGN_IN_PATH.test(u.pathname + (u.search ? "?" : ""));
 }
 
 export async function isSignedOut(page: Page, runner: Runner): Promise<boolean> {
   const visible = (await page.locator(PASSWORD).first().isVisible().catch(() => false)) === true;
   return looksSignedOut(page.url(), visible, runner);
+}
+
+export type Strength = "proved" | "weak";
+export type Verification = { ok: boolean; strength: Strength; reason?: string };
+
+/**
+ * Is this runner signed in? With an authedCheck, positively: load the page only a signed-in
+ * visitor can use and look for what it shows. Without one, all Baseline can do is notice it is
+ * not sitting on a sign-in page, which a site that serves its home page to everyone passes while
+ * signed out — so that answer comes back "weak", never as proof.
+ */
+export async function verifySignedIn(page: Page, runner: Runner): Promise<Verification> {
+  const check = runner.authedCheck;
+  if (check) {
+    const target = new URL(check.path, page.url());
+    if (target.origin !== new URL(page.url()).origin) {
+      return { ok: false, strength: "weak", reason: `the authedCheck path ${check.path} is on another site; it is not checked.` };
+    }
+    try {
+      await page.goto(target.toString(), { waitUntil: "load" });
+    } catch {
+      return { ok: false, strength: "proved", reason: `${check.path} could not be opened, so this runner is not signed in.` };
+    }
+    const wanted = check.expect.role
+      ? page.getByRole(check.expect.role as Parameters<Page["getByRole"]>[0], check.expect.name !== undefined ? { name: check.expect.name } : undefined).first()
+      : page.getByText(check.expect.text ?? "").first();
+    const found = await wanted.isVisible({ timeout: 5000 }).catch(() => false);
+    const looking = check.expect.role ? `${check.expect.role}${check.expect.name ? ` "${check.expect.name}"` : ""}` : `"${check.expect.text}"`;
+    return found
+      ? { ok: true, strength: "proved" }
+      : { ok: false, strength: "proved", reason: `signed out: ${check.path} did not show ${looking} (landed on ${new URL(page.url()).pathname}).` };
+  }
+  if (await isSignedOut(page, runner)) {
+    return { ok: false, strength: "proved", reason: `signed out: landed on ${new URL(page.url()).pathname}, which is a sign-in page.` };
+  }
+  return {
+    ok: true,
+    strength: "weak",
+    reason: `could not prove ${runner.key} is signed in: it is not on a sign-in page, but this site may show ${new URL(page.url()).pathname} to signed-out visitors too. Give this runner an authedCheck (a page and a word only a signed-in user sees) and Baseline can check properly.`,
+  };
 }
 
 function saveState(file: string, state: unknown) {
@@ -80,8 +141,9 @@ export async function signIn(runner: Runner, cfg: ProjectConfig, ctx: SignInCont
       const context = await browser.newContext({ baseURL: ctx.baseUrl, storageState: file });
       const page = await context.newPage();
       await page.goto(ctx.baseUrl, { waitUntil: "load" });
-      if (await isSignedOut(page, runner)) return { key: runner.key, ok: false, error: "Saved session has expired. Sign in by hand again: baseline signin " + runner.key + " --manual" };
-      return { key: runner.key, ok: true, landed: new URL(page.url()).pathname };
+      const v = await verifySignedIn(page, runner);
+      if (!v.ok) return { key: runner.key, ok: false, strength: v.strength, error: `${v.reason} Sign in by hand again: baseline signin ${runner.key} --manual` };
+      return { key: runner.key, ok: true, strength: v.strength, landed: new URL(page.url()).pathname, ...(v.reason ? { note: v.reason } : {}) };
     }
     const creds = getSecret(ctx.data, ctx.projectDir, runner.key);
     if (!creds) return { key: runner.key, ok: false, error: "No sign-in details saved for this runner. Re-run setup." };
@@ -106,11 +168,16 @@ export async function signIn(runner: Runner, cfg: ProjectConfig, ctx: SignInCont
     }
     if (new URL(page.url()).origin !== home) return { key: runner.key, ok: false, error: "Sign-in left the site before the password step. Use a manual sign-in for this runner." };
     await pw.fill(creds.password);
-    await Promise.all([page.waitForLoadState("load"), pw.press("Enter")]);
+    // An SPA sign-in never fires `load` again, so waiting on it proves nothing. Let the network
+    // settle instead, then ask the page whether the runner is actually in.
+    await pw.press("Enter");
     await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
-    if (await isSignedOut(page, runner)) return { key: runner.key, ok: false, error: "Sign-in did not succeed: still on the sign-in page. Check the saved details in setup." };
+    const v = await verifySignedIn(page, runner);
+    if (!v.ok) {
+      return { key: runner.key, ok: false, strength: v.strength, error: `Sign-in did not succeed: ${v.reason} If this site asks for a code or a second factor, use a manual sign-in: baseline signin ${runner.key} --manual` };
+    }
     saveState(file, await context.storageState());
-    return { key: runner.key, ok: true, landed: new URL(page.url()).pathname };
+    return { key: runner.key, ok: true, strength: v.strength, landed: new URL(page.url()).pathname, ...(v.reason ? { note: v.reason } : {}) };
   } catch (e) {
     return { key: runner.key, ok: false, error: `Sign-in failed: ${(e instanceof Error && e.name) || "error"}` };
   } finally {

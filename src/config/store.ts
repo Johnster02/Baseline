@@ -25,8 +25,8 @@ export function saveConfig(projectDir: string, cfg: ProjectConfig): void {
   writeFileSync(configPath(projectDir), JSON.stringify(valid, null, 2) + "\n");
 }
 
-export function newRunner(key: string, persona: string, auth: Runner["auth"]): Runner {
-  return runnerSchema.parse({ key, persona, auth });
+export function newRunner(key: string, persona: string, auth: Runner["auth"], authedCheck?: Runner["authedCheck"]): Runner {
+  return runnerSchema.parse({ key, persona, auth, ...(authedCheck ? { authedCheck } : {}) });
 }
 
 export function ensureGitignored(projectDir: string): void {

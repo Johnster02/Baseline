@@ -56,7 +56,15 @@ async function readBody(req: IncomingMessage) {
   return s;
 }
 
-export async function startFixture(port = 0): Promise<{ url: string; requests: { method: string; path: string }[]; stop(): Promise<void> }> {
+export type FixtureOptions = {
+  /**
+   * Serve `/` to signed-out visitors instead of redirecting to the sign-in page, the way most
+   * real sites do. Baseline used to read that page as proof of being signed in (spec 3.3).
+   */
+  publicHome?: boolean;
+};
+
+export async function startFixture(port = 0, opts: FixtureOptions = {}): Promise<{ url: string; requests: { method: string; path: string }[]; stop(): Promise<void> }> {
   const requests: { method: string; path: string }[] = [];
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const path = new URL(req.url || "/", "http://x").pathname;
@@ -65,6 +73,26 @@ export async function startFixture(port = 0): Promise<{ url: string; requests: {
     const body = await readBody(req);
     const html = (s: string) => { res.writeHead(200, { "content-type": "text/html" }); res.end(s); };
     if (path === "/version") { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ commit: FIXTURE_COMMIT })); return; }
+    // A signed-in-only page, for an authedCheck to look at.
+    if (path === "/account") {
+      if (!signedIn(req)) { res.writeHead(302, { location: "/login" }); res.end(); return; }
+      html(page("Account", `<p>customer@acme.test</p><a href="/logout">Sign out</a>`));
+      return;
+    }
+    // A Clerk-shaped sign-in: email and password together, then a one-time code on a sub-path.
+    // Step two has no password field, so a signed-out detector sees nothing to object to, and the
+    // path is not the login path either — which is how a stalled sign-in reported success (spec 3.3).
+    if (path === "/sign-in" && method === "GET") {
+      html(page("Sign in", `<form method="post" action="/sign-in"><label>Email <input type="email" name="email"></label>
+        <label>Password <input type="password" name="password"></label><button type="submit">Continue</button></form>`));
+      return;
+    }
+    if (path === "/sign-in" && method === "POST") { res.writeHead(302, { location: "/sign-in/factor-two" }); res.end(); return; }
+    if (path === "/sign-in/factor-two") {
+      html(page("Check your email", `<form><label>Code <input type="text" name="code" autocomplete="one-time-code"></label>
+        <button type="submit">Verify</button></form>`));
+      return;
+    }
     if (path === "/login" && method === "GET") {
       html(page("Sign in", `<form method="post" action="/login"><label>Email <input type="email" name="email"></label>
         <label>Password <input type="password" name="password"></label><button type="submit">Sign in</button></form>`));
@@ -80,7 +108,10 @@ export async function startFixture(port = 0): Promise<{ url: string; requests: {
       res.end();
       return;
     }
-    if (path === "/" ) { res.writeHead(302, { location: "/cart" }); res.end(); return; }
+    if (path === "/") {
+      if (opts.publicHome && !signedIn(req)) { html(page("Acme shop", `<p>Browse our mugs.</p><a href="/login">Sign in</a>`)); return; }
+      res.writeHead(302, { location: "/cart" }); res.end(); return;
+    }
     if (PAGES[path]) {
       if (!signedIn(req)) { res.writeHead(302, { location: "/login" }); res.end(); return; }
       html(PAGES[path]);

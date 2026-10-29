@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startFixture, FIXTURE_USER } from "./fixture-app/server";
@@ -112,4 +112,63 @@ describe("looksSignedOut", () => {
     expect(looksSignedOut("https://s.acme.dev/auth/enter", false, form)).toBe(true);
     expect(looksSignedOut("https://s.acme.dev/account", true, form)).toBe(false);
   });
+
+  it("an auth step below the login path counts as still on the sign-in page", () => {
+    const form = newRunner("b", "b", { kind: "form", loginUrl: "/sign-in" });
+    expect(looksSignedOut("https://s.acme.dev/sign-in/factor-one", false, form)).toBe(true);
+    expect(looksSignedOut("https://s.acme.dev/sign-in/factor-two", false, form)).toBe(true);
+    expect(looksSignedOut("https://s.acme.dev/dashboard", false, form)).toBe(false);
+    // A different path that merely starts with the same letters is not an auth step.
+    expect(looksSignedOut("https://s.acme.dev/sign-institute", false, form)).toBe(false);
+  });
+});
+
+describe("proving a runner is signed in", () => {
+  let pub: Awaited<ReturnType<typeof startFixture>>;
+  beforeAll(async () => { pub = await startFixture(0, { publicHome: true }); });
+  afterAll(() => pub.stop());
+
+  const sessionRunner = (authedCheck?: { path: string; expect: { text?: string; role?: string; name?: string } }) =>
+    newRunner("admin", "admin", { kind: "session" }, authedCheck);
+
+  it("a home page that signed-out visitors can see is not proof of being signed in", async () => {
+    const s = setup(FIXTURE_USER.password, pub.url);
+    const runner = sessionRunner();
+    const state = sessionPath(s.data, s.proj, "admin");
+    mkdirSync(join(state, ".."), { recursive: true });
+    writeFileSync(state, JSON.stringify({ cookies: [], origins: [] }));
+    const r = await signIn(runner, { ...s.cfg, runners: [runner] }, { projectDir: s.proj, data: s.data, baseUrl: pub.url });
+    expect(r.strength).toBe("weak");
+    expect(r.note).toMatch(/could not prove/i);
+  }, 30000);
+
+  it("an authedCheck that finds its text proves the sign-in", async () => {
+    const s = setup(FIXTURE_USER.password, pub.url);
+    const runner = sessionRunner({ path: "/account", expect: { text: "Sign out" } });
+    // Sign in for real first, so there is a session worth checking.
+    const form = await signIn(s.runner, s.cfg, { projectDir: s.proj, data: s.data, baseUrl: pub.url });
+    expect(form.ok).toBe(true);
+    copyFileSync(sessionPath(s.data, s.proj, "customer"), sessionPath(s.data, s.proj, "admin"));
+    const r = await signIn(runner, { ...s.cfg, runners: [runner] }, { projectDir: s.proj, data: s.data, baseUrl: pub.url });
+    expect(r).toMatchObject({ ok: true, strength: "proved" });
+  }, 30000);
+
+  it("an authedCheck that does not find its text fails, and says which page it looked at", async () => {
+    const s = setup(FIXTURE_USER.password, pub.url);
+    const runner = sessionRunner({ path: "/account", expect: { text: "Sign out" } });
+    const state = sessionPath(s.data, s.proj, "admin");
+    mkdirSync(join(state, ".."), { recursive: true });
+    writeFileSync(state, JSON.stringify({ cookies: [], origins: [] }));
+    const r = await signIn(runner, { ...s.cfg, runners: [runner] }, { projectDir: s.proj, data: s.data, baseUrl: pub.url });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/\/account/);
+  }, 30000);
+
+  it("a form sign-in that stalls on a code screen reports failure, and saves no session", async () => {
+    const s = setup(FIXTURE_USER.password, pub.url);
+    const runner = newRunner("customer", "customer", { kind: "form", loginUrl: "/sign-in" });
+    const r = await signIn(runner, { ...s.cfg, runners: [runner] }, { projectDir: s.proj, data: s.data, baseUrl: pub.url });
+    expect(r.ok).toBe(false);
+    expect(existsSync(sessionPath(s.data, s.proj, "customer"))).toBe(false);
+  }, 30000);
 });

@@ -28,6 +28,14 @@ choices. Re-running setup edits what is there; it never starts over.
      anything), **Create and tidy** (may create its own test items labelled with the run id, and
      delete only those), **Full workflow** (may take its own test items through every step).
      `baseline config depth <key> <look|create|workflow>`;
+   - **how Baseline can tell this account is signed in.** Ask for one page only a signed-in user
+     can see (a path like `/account` or `/dashboard`) and one word or button on it that a
+     signed-out visitor never gets (their email, "Sign out", "My orders").
+     `baseline config set-authed-check <key> <path> --text "<word>"` (or `--role button --name
+     "<label>"`). Say why plainly: most sites show their home page to everyone, so without this
+     Baseline can only say a sign-in did not obviously fail — it cannot prove it worked, and a
+     run can start with an account that is quietly signed out. If they skip it, carry on; every
+     sign-in result for that runner will say it could not be proved.
    - **protected areas**, all off unless they say so, multi-select: test a live site or real
      users, send email, change sign-in or accounts, delete projects or users, payments and
      finance. `baseline config allow <key> <live|email|auth|delete|finance>` for each one ticked.

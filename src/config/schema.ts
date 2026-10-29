@@ -14,6 +14,20 @@ const auth = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("session") }),
 ]);
 
+/**
+ * A page and something on it that only a signed-in visitor sees. Without one, Baseline can only
+ * say a sign-in didn't obviously fail; it can't prove it worked (spec 3.3).
+ */
+export const authedCheckSchema = z.object({
+  path: z.string().min(1),
+  expect: z.object({
+    text: z.string().min(1).optional(),
+    role: z.string().min(1).optional(),
+    name: z.string().min(1).optional(),
+  }).refine((e) => !!(e.text || e.role), { message: "an authedCheck needs text, or a role to look for" }),
+});
+export type AuthedCheck = z.infer<typeof authedCheckSchema>;
+
 export const runnerSchema = z.object({
   key: z.string().regex(/^[a-z0-9][a-z0-9-]*$/, "runner keys are lowercase letters, digits and hyphens"),
   persona: z.string().min(1),
@@ -22,6 +36,7 @@ export const runnerSchema = z.object({
   /** Standing instructions from the user, kept so nobody has to repeat them every run. */
   notes: z.array(z.string().min(1).max(300)).max(20).default([]),
   auth,
+  authedCheck: authedCheckSchema.optional(),
 });
 export type Runner = z.infer<typeof runnerSchema>;
 

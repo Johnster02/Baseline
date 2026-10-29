@@ -111,3 +111,32 @@ describe("config set", () => {
     expect(loadConfig(cwd).readPosts).toEqual(["/api/only"]);
   });
 });
+
+describe("config set-authed-check", () => {
+  const addRunner = () => main(["config", "add-runner", "customer", "customer", "form", "/login"]);
+
+  it("saves a page and a word only a signed-in user sees", async () => {
+    await addRunner();
+    expect(await main(["config", "set-authed-check", "customer", "/account", "--text", "Sign out"])).toBe(0);
+    expect(loadConfig(cwd).runners[0]?.authedCheck).toEqual({ path: "/account", expect: { text: "Sign out" } });
+  });
+
+  it("saves a role and name instead of text", async () => {
+    await addRunner();
+    expect(await main(["config", "set-authed-check", "customer", "/dashboard", "--role", "button", "--name", "Log out"])).toBe(0);
+    expect(loadConfig(cwd).runners[0]?.authedCheck).toEqual({ path: "/dashboard", expect: { role: "button", name: "Log out" } });
+  });
+
+  it("--clear removes it", async () => {
+    await addRunner();
+    await main(["config", "set-authed-check", "customer", "/account", "--text", "Sign out"]);
+    expect(await main(["config", "set-authed-check", "customer", "--clear"])).toBe(0);
+    expect(loadConfig(cwd).runners[0]?.authedCheck).toBeUndefined();
+  });
+
+  it("refuses a check with nothing to look for, and an unknown runner", async () => {
+    await addRunner();
+    expect(await main(["config", "set-authed-check", "customer", "/account"])).toBe(2);
+    expect(await main(["config", "set-authed-check", "nobody", "/account", "--text", "x"])).toBe(2);
+  });
+});
