@@ -34,7 +34,7 @@ const AGENT_FROZEN = /^baseline\s+(run\s+(new|finish)\b|signin\b|config\s+(?!(sh
  * the subcommand is matched wherever it appears rather than only at the start. The cost is that a
  * subagent searching for the text "baseline run finish" is refused too; it reports back instead.
  */
-const AGENT_FROZEN_ANYWHERE = /(^|\s)baseline\s+(run\s+(new|finish)\b|signin\b)/;
+const AGENT_FROZEN_ANYWHERE = /(^|[\s/])(baseline|cli\.cjs)\s+(run\s+(new|finish)\b|signin\b)/;
 /** Shell commands that write files: a redirect, tee, copy/move/remove, in-place edits. */
 const WRITES_FILES = /(^|[^<>&0-9])>>?|(^|[\s;&|(])(tee|cp|mv|rm|rmdir|ln|install|truncate|touch|mkdir|dd|chmod|chown|rsync|unlink)(\s|$)|(^|\s)(sed|perl|ruby)\s+(-\S*\s+)*-i/;
 /** A run started with --live may sign its runners in and check its own target with --live. */
@@ -315,16 +315,21 @@ function relativePathReaches(word: string, prot: string[]): boolean {
   // .claude/` lists a folder, it does not read the data inside it — so a literal word has to go
   // at least as deep as the data folder to count. Without that, every `ls .claude/` and
   // `git add .claude/` in any project was refused (review finding I-2).
+  //
+  // The anchor is a hidden segment, glob or not. Skipping a wildcarded one let `.claud?/…` and
+  // `.[c]laude/…` through, because no later segment starts with a dot (review 4, C2).
   if (!word.includes("/")) return false;
   const pat = segsOf(posix.normalize(word));
   const literal = !WILD.test(word);
   for (let i = 0; i < pat.length; i++) {
     const seg = pat[i] as string;
-    if (WILD.test(seg) || !seg.startsWith(".")) continue;
+    if (!seg.startsWith(".")) continue;
+    const glob = WILD.test(seg);
     for (const d of prot) {
       const dir = segsOf(d);
       for (let k = 0; k < dir.length; k++) {
-        if (dir[k] !== seg) continue;
+        const here = dir[k] as string;
+        if (glob ? !segmentRe(seg).test(here) : here !== seg) continue;
         if (literal && pat.length - i < dir.length - k) continue;
         if (reaches(pat.slice(i), dir.slice(k))) return true;
       }
@@ -352,7 +357,12 @@ export function mentionsDataDir(command: string, dirs: string[]): boolean {
     }
     // The legacy folder named relatively (`../../.config/baseline/…`).
     if (/\.config\/baseline(?![a-z0-9._-])/.test(flat)) return true;
-    const w = word.replace(/^-{1,2}[a-z]+(?=[~/$])/, "");
+    // A path glued to a flag (`-o/x`, `--file=~/x`, `-o.claude/x`): the dot form is a path too.
+    const w = word.replace(/^-{1,2}[a-z]+=?(?=[~/$.])/, "");
+    // The anchored check runs on the whole word first. What follows chops the word at its first
+    // path marker (for `-o/x`, `@/x`), which threw away the anchor of `.claud?/plugins/…` —
+    // everything before the first slash, including the hidden segment (review 4, C2).
+    if (relativePathReaches(w, prot)) return true;
     const at = w.search(/~\/|~$|\$\{?home\b|\//);
     // Mid-word only after a separator (`@`, `:`): `src/x` is a relative path, not `/x`.
     if (at < 0 || (at > 0 && /[a-z0-9._-]/.test(w[at - 1] ?? ""))) {
@@ -370,6 +380,9 @@ export function mentionsDataDir(command: string, dirs: string[]): boolean {
       continue;
     }
     if (t.startsWith("/") && prot.some((d) => isInside(d, t))) return true;
+    // A tail left behind by `$(…)` or a backtick looks absolute but is missing its real root
+    // (`/.claude/plugins/data/baseline/x`), so the anchored check decides it too (review 4, I1).
+    if (relativePathReaches(t, prot)) return true;
   }
   return false;
 }
@@ -380,14 +393,39 @@ export function mentionsDataDir(command: string, dirs: string[]): boolean {
  * `cd` into those, and globs that spell the data folder's name partly (`.config/basel*`).
  * Defence in depth: a determined command can still get around a text check.
  */
-export function sweepsHome(command: string): boolean {
+export function sweepsHome(command: string, dirs: string[] = []): boolean {
   const lower = command.replace(/['"\\]/g, "").toLowerCase();
   if (/\.config\/basel[^/\s]*[*?[{]/.test(lower) || /\.config\/[*?[{]/.test(lower) || /\.claude\/(plugins\/)?[*?[{]/.test(lower)) return true;
   const home = resolve(process.env.HOME || homedir()).toLowerCase();
   const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const roots = [String.raw`~`, String.raw`\$home`, String.raw`\$\{home\}`, esc(home)].map((r) => `${r}(?:/(?:\\.config|\\.claude(?:/plugins)?))?/?`);
-  const root = `(?:${roots.join("|")})(?=$|[\\s;&|)])`;
-  const sweep = new RegExp(String.raw`(^|[\s;&|(])(find|grep\s+(?:-\S+\s+)*-\S*[rR]\S*|rg|ag|ls\s+(?:-\S+\s+)*-\S*[rR]\S*|tar|zip|7z|rsync|cp\s+(?:-\S+\s+)*-\S*[rRa]\S*|du|tree)\s+(?:-\S+\s+)*(?:\S+\s+)*?` + root);
+  // Every folder that contains a data folder, however deep, derived from the folders themselves
+  // rather than guessed from two home layouts. `~/.claude/plugins/data` is the parent of the
+  // folder Claude Code actually gives the plugin, and a hardcoded list stopped one level short of
+  // it: `grep -r password ~/.claude/plugins/data` printed every saved password (review 4, C1).
+  const ancestors = new Set<string>();
+  for (const d of dirs) {
+    let p = resolve(d).toLowerCase();
+    for (;;) {
+      const up = p.slice(0, p.lastIndexOf("/"));
+      if (!up || up === p || up.length < home.length) break;
+      ancestors.add(up);
+      p = up;
+    }
+  }
+  const spellings = (abs: string): string[] => {
+    const out = [esc(abs)];
+    if (abs.startsWith(home + "/")) {
+      const rest = esc(abs.slice(home.length));
+      out.push(String.raw`~` + rest, String.raw`\$home` + rest, String.raw`\$\{home\}` + rest);
+    }
+    return out;
+  };
+  const homeRoots = [String.raw`~`, String.raw`\$home`, String.raw`\$\{home\}`, esc(home)]
+    .map((r) => `${r}(?:/(?:\\.config|\\.claude(?:/plugins)?))?/?`);
+  const root = `(?:${[...homeRoots, ...[...ancestors].flatMap(spellings).map((a) => `${a}/?`)].join("|")})(?=$|[\\s;&|)])`;
+  // Tools that descend into, copy, archive or remove a whole folder.
+  const TOOLS = String.raw`find|grep\s+(?:-\S+\s+)*-\S*[rR]\S*|rg|ag|ack|ugrep|ls\s+(?:-\S+\s+)*-\S*[rR]\S*|g?tar|zip|7za?r?|rsync|cp\s+(?:-\S+\s+)*-\S*[rRa]\S*|mv|scp|rm\s+(?:-\S+\s+)*-\S*[rR]\S*|cpio|pax|du|tree`;
+  const sweep = new RegExp(String.raw`(^|[\s;&|(])(${TOOLS})\s+(?:-\S+\s+)*(?:\S+\s+)*?` + root);
   // `cd ~/.config && cat baseline/...`: moving into one of those folders and then doing more.
   const cdThen = new RegExp(String.raw`(^|[\s;&|(])(cd|pushd)\s+` + root + String.raw`\s*(&&|;|\|\|?|\n)\s*\S`);
   return sweep.test(lower) || cdThen.test(lower);
@@ -432,7 +470,7 @@ export type BashExplain = { decision: "allow" } | { decision: "deny"; rule: stri
 export function explainBash(command: string, ctx: BashContext): BashExplain {
   const no = (rule: string, deny: string): BashExplain => ({ decision: "deny", rule, deny });
   if (ctx.protectedDirs && mentionsDataDir(command, ctx.protectedDirs)) return no("data-folder", DATA_DENY);
-  if (ctx.protectedDirs && sweepsHome(command)) return no("home-sweep", DATA_DENY);
+  if (ctx.protectedDirs && sweepsHome(command, ctx.protectedDirs)) return no("home-sweep", DATA_DENY);
   const urls = ctx.runUrls?.length ? ctx.runUrls : ctx.runUrl ? [ctx.runUrl] : [];
   if (!urls.length) return { decision: "allow" };
   const segments = command.split(SEGMENT_SPLIT).map((s) => normalizeSegment(s)).filter(Boolean);
