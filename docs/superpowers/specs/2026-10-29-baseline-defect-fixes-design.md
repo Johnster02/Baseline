@@ -137,6 +137,28 @@ deciding whether a path could reach a protected folder. `cat ~/.claude/settings.
 `grep -E '^[a-z]*$' ~/.config/app/list.txt` are allowed, so the behaviour turns on
 spelling, not on what the command touches.
 
+### 3.4a What the guard now costs, deliberately
+
+Four reviews of this file found seven bypasses, every one of them from trying to work out which
+argument was a search pattern so it could be exempted from the path check. That idea is gone: every
+word a command names is a candidate path, and reachability decides. The guard fails closed, which
+has a price, and these are the whole of it. Each is a command a *developer of Baseline* runs, not a
+command a user of it runs, and `baseline guard explain '<command>'` names the word that caused the
+refusal.
+
+| Refused | Why |
+|---|---|
+| `grep -rn '.config/baseline' src/...`, `git log -S '.config/baseline'`, `git grep '.config/baseline'` | relative to a home folder that word is a real path to the data folder |
+| `grep -rn '.claude/plugins/data/baseline' src/...` | the same, for the other data folder |
+| `git commit -m "... .config/baseline ..."` | the message is a word of the command |
+| `rg '$CLAUDE_PLUGIN_DATA' src`, `grep -rn '${CLAUDE_PLUGIN_DATA}' hooks/hooks.json` | the variable's name with its sigil is how a path to the folder is spelled |
+| `echo 'BASELINE_DATA=/tmp/x baseline view'` (mid-run only) | an assignment with a value beside a `baseline` word is how the folder gets overridden |
+| a subagent running `grep -rn 'baseline run finish' skills/run/SKILL.md` (mid-run only) | the frozen subcommands are matched wherever they appear, because no list of wrapper names can be complete. Read the file with the Read tool instead |
+
+Searching for those strings without the leading dot or sigil is unaffected: `rg -F 'config/baseline'
+src`, `rg 'BASELINE_DATA' src`, `grep -rn 'CLAUDE_PLUGIN_DATA' hooks/hooks.json` and
+`sed -n '/\.config\/baseline/p' docs/permissions.md` are all allowed.
+
 The code-reader report (it "stopped its code-reader from saving results") is **not reproduced**.
 `writeGuard` allows writes anywhere under `.baseline/sessions/`, which is where run folders live,
 and none of the heredoc, redirect, `tee`, `node -e` or `python3 -c` shapes I tried is refused, with

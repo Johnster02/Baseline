@@ -495,3 +495,26 @@ describe("a path glued onto a flag", () => {
     }
   });
 });
+
+describe("guard explain names the word that caused the refusal (review 4, minor)", () => {
+  it("says which word looked like a path into a data folder", () => {
+    const r = explainBash("grep -rn '.config/baseline' src/core/paths.ts", { protectedDirs: dirs });
+    expect(r.decision).toBe("deny");
+    // Without this, the documented false positive reads as "use a baseline command instead",
+    // which is no help when the real answer is "your search pattern parses as a path".
+    expect(r.word).toBe(".config/baseline");
+    if (r.decision === "deny") expect(r.deny).toContain(".config/baseline");
+  });
+
+  it("says which folder a sweep would reach into", () => {
+    const parent = dirs[1]!.slice(0, dirs[1]!.lastIndexOf("/"));
+    const r = explainBash(`grep -r password ${parent}`, { protectedDirs: dirs });
+    expect(r).toMatchObject({ decision: "deny", rule: "home-sweep" });
+  });
+
+  it("still explains an allowed command without inventing a word", () => {
+    const r = explainBash("ls .claude/", { protectedDirs: dirs });
+    expect(r).toMatchObject({ decision: "allow" });
+    expect(r.word).toBeUndefined();
+  });
+});

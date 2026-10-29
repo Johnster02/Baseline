@@ -340,33 +340,42 @@ function relativePathReaches(word: string, prot: string[]): boolean {
 
 /** True when a command could read or write one of Baseline's data folders. */
 export function mentionsDataDir(command: string, dirs: string[]): boolean {
+  return dataDirWord(command, dirs) !== undefined;
+}
+
+/**
+ * The word that made a command look like it reaches a data folder, for `guard explain`. Naming it
+ * is the difference between "use a baseline command instead" and "your search pattern parses as a
+ * path into the data folder", which is the documented false positive (review 4, minor).
+ */
+export function dataDirWord(command: string, dirs: string[]): string | undefined {
   const home = resolve(process.env.HOME || homedir()).toLowerCase();
   const prot = dirs.map((d) => resolve(d).toLowerCase());
   const spellings = dataSpellings(prot, home);
   for (const word of pathWords(command)) {
     // The plugin data folder's variable, wherever it sits in a path word.
-    if (/\$\{?claude_plugin_data\b/.test(word)) return true;
+    if (/\$\{?claude_plugin_data\b/.test(word)) return word;
     // Any spelling of a data folder inside the word (`@/…`, `file://…`, `-o/…` included), after
     // collapsing // and /./.
     const flat = word.replace(/\/(\.\/)+/g, "/").replace(/\/{2,}/g, "/");
     for (const d of spellings) {
       for (let i = flat.indexOf(d); i >= 0; i = flat.indexOf(d, i + 1)) {
         const next = flat[i + d.length];
-        if (next === undefined || !/[a-z0-9._-]/.test(next)) return true;
+        if (next === undefined || !/[a-z0-9._-]/.test(next)) return word;
       }
     }
     // The legacy folder named relatively (`../../.config/baseline/…`).
-    if (/\.config\/baseline(?![a-z0-9._-])/.test(flat)) return true;
+    if (/\.config\/baseline(?![a-z0-9._-])/.test(flat)) return word;
     // A path glued to a flag (`-o/x`, `--file=~/x`, `-o.claude/x`): the dot form is a path too.
     const w = word.replace(/^-{1,2}[a-z]+=?(?=[~/$.])/, "");
     // The anchored check runs on the whole word first. What follows chops the word at its first
     // path marker (for `-o/x`, `@/x`), which threw away the anchor of `.claud?/plugins/…` —
     // everything before the first slash, including the hidden segment (review 4, C2).
-    if (relativePathReaches(w, prot)) return true;
+    if (relativePathReaches(w, prot)) return word;
     const at = w.search(/~\/|~$|\$\{?home\b|\//);
     // Mid-word only after a separator (`@`, `:`): `src/x` is a relative path, not `/x`.
     if (at < 0 || (at > 0 && /[a-z0-9._-]/.test(w[at - 1] ?? ""))) {
-      if (relativePathReaches(w, prot)) return true;
+      if (relativePathReaches(w, prot)) return word;
       continue;
     }
     const raw = w.slice(at);
@@ -375,16 +384,16 @@ export function mentionsDataDir(command: string, dirs: string[]): boolean {
     if (WILD.test(t)) {
       // A glob or variable: refuse only when it could line up with a data folder, either reaching
       // into one or naming a folder above one.
-      if (!t.startsWith("/")) { if (relativePathReaches(t, prot)) return true; continue; }
-      if (prot.some((d) => reaches(segsOf(t), segsOf(d)))) return true;
+      if (!t.startsWith("/")) { if (relativePathReaches(t, prot)) return word; continue; }
+      if (prot.some((d) => reaches(segsOf(t), segsOf(d)))) return word;
       continue;
     }
-    if (t.startsWith("/") && prot.some((d) => isInside(d, t))) return true;
+    if (t.startsWith("/") && prot.some((d) => isInside(d, t))) return word;
     // A tail left behind by `$(…)` or a backtick looks absolute but is missing its real root
     // (`/.claude/plugins/data/baseline/x`), so the anchored check decides it too (review 4, I1).
-    if (relativePathReaches(t, prot)) return true;
+    if (relativePathReaches(t, prot)) return word;
   }
-  return false;
+  return undefined;
 }
 
 /**
@@ -460,7 +469,9 @@ export type BashContext = {
 };
 
 /** A guard decision with the name of the rule that made it, for `baseline guard explain`. */
-export type BashExplain = { decision: "allow" } | { decision: "deny"; rule: string; deny: string };
+export type BashExplain =
+  | { decision: "allow"; word?: undefined }
+  | { decision: "deny"; rule: string; deny: string; word?: string };
 
 /**
  * Every Bash rule in order, each named. `bashGuard` is this without the names: when the guard
@@ -468,8 +479,11 @@ export type BashExplain = { decision: "allow" } | { decision: "deny"; rule: stri
  * instead of leaving it to be guessed.
  */
 export function explainBash(command: string, ctx: BashContext): BashExplain {
-  const no = (rule: string, deny: string): BashExplain => ({ decision: "deny", rule, deny });
-  if (ctx.protectedDirs && mentionsDataDir(command, ctx.protectedDirs)) return no("data-folder", DATA_DENY);
+  const no = (rule: string, deny: string, word?: string): BashExplain => ({ decision: "deny", rule, deny, ...(word ? { word } : {}) });
+  if (ctx.protectedDirs) {
+    const word = dataDirWord(command, ctx.protectedDirs);
+    if (word !== undefined) return no("data-folder", `${DATA_DENY} The word that reads as a path into it: "${word}".`, word);
+  }
   if (ctx.protectedDirs && sweepsHome(command, ctx.protectedDirs)) return no("home-sweep", DATA_DENY);
   const urls = ctx.runUrls?.length ? ctx.runUrls : ctx.runUrl ? [ctx.runUrl] : [];
   if (!urls.length) return { decision: "allow" };
