@@ -2,15 +2,35 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseFlags, isOneOf } from "../core/args";
 import { activeRunDir } from "../core/paths";
-import { errMsg } from "../core/json";
+import { errMsg, readJsonFile, writeJsonAtomic } from "../core/json";
+import { inputsFileSchema, parse } from "../run/schemas";
 import { register, out, err, io } from "../cli";
 import { INPUT_KINDS, resolveInputs } from "./resolve";
 import type { InputRef } from "./resolve";
 import { fetchInput, insecureTrackerWarning } from "./fetch";
 import { loadTrackers } from "./trackers";
 
-register("inputs", "fetch what a run checks against: inputs [--run <dir>] [--as jira|linear] <input...>", async (args) => {
-  const { values: f, positionals: raw } = parseFlags(args, { as: { type: "string" } });
+register("inputs", "fetch what a run checks against: inputs [--run <dir>] [--as jira|linear] <input...> | inputs unread-link <url> [--reason <text>]", async (args) => {
+  const { values: f, positionals: raw } = parseFlags(args, { as: { type: "string" }, reason: { type: "string" } });
+  // `inputs unread-link <url>`: the gatherer records a link it could not open, instead of
+  // hand-editing inputs.json and writing a shape the sizing step can't read (spec 3.5).
+  if (raw[0] === "unread-link") {
+    const runDir = activeRunDir(process.cwd(), f.run, io.origCwd);
+    const url = raw[1];
+    if (!runDir || !url) { err("usage: baseline inputs unread-link <url> [--reason <text>] [--run <dir>]"); return 2; }
+    let parsedUrl: URL;
+    try { parsedUrl = new URL(url); } catch { err(`"${url}" is not a URL`); return 2; }
+    if (!/^https?:$/.test(parsedUrl.protocol)) { err(`"${url}" is not an http(s) URL`); return 2; }
+    const file = join(runDir, "inputs.json");
+    const current = readJsonFile(file, parse(inputsFileSchema), { items: [], unreadLinks: [] });
+    if (!current.unreadLinks.some((l) => l.url === url)) {
+      current.unreadLinks.push({ url, ...(f.reason ? { reason: f.reason.slice(0, 300) } : {}) });
+    }
+    mkdirSync(runDir, { recursive: true });
+    writeJsonAtomic(file, current);
+    out(JSON.stringify({ unreadLinks: current.unreadLinks.length }));
+    return 0;
+  }
   // Same rule as every other command: --run, else the active run.
   const runDir = activeRunDir(process.cwd(), f.run, io.origCwd);
   if (!runDir || !raw.length) { err("usage: baseline inputs [--run <dir>] [--as jira|linear] <input...>"); return 2; }

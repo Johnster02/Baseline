@@ -128,7 +128,8 @@ describe("buildRunRecord", () => {
     expect(r.findings.map((f) => f.id)).toEqual(["R-2", "R-1"]);
     expect(r.counts).toMatchObject({ checked: 1, passed: 1, passRate: 100, product: 1 });
     expect(r.durationMin).toBe(9);
-    expect(r.unreadLinks).toEqual(["https://wiki/x"]);
+    // Read back as objects now, whichever shape the file used (spec 3.5).
+    expect(r.unreadLinks).toEqual([{ url: "https://wiki/x" }]);
     expect(Buffer.from(r.shots["shots/customer-a-1.jpg"]!, "base64").toString()).toBe("JPEGDATA");
   });
 

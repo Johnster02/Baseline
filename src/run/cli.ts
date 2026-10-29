@@ -1,10 +1,11 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { register, out, err, io } from "../cli";
 import { checkTarget, describePermissions, loadConfig } from "../config/store";
 import { activeRunDir, isInside } from "../core/paths";
 import { parseFlags, isOneOf } from "../core/args";
-import { readJsonFile } from "../core/json";
+import { errMsg, readJsonFile } from "../core/json";
+import { z } from "zod";
 import { newRun, finishRun } from "./state";
 import { stopHosts } from "../browser/host";
 import { PHASES, updateProgress, readProgress } from "./progress";
@@ -110,8 +111,20 @@ register("size", "size the active run from its inputs.json: size --personas a,b 
   const { values: f } = parseFlags(args, { personas: { type: "string" }, guide: { type: "boolean" } });
   const runDir = needRun(f.run);
   if (!runDir) return 2;
-  const inputs = readJsonFile(join(runDir, "inputs.json"), parse(inputsFileSchema), undefined);
-  if (!inputs) { err(`no readable inputs.json in ${runDir}. Run: baseline inputs <input...>`); return 2; }
+  // Say what is actually wrong. A single bad field used to come out as "no readable inputs.json",
+  // which sent people looking for a missing file that was right there (spec 3.5).
+  const file = join(runDir, "inputs.json");
+  if (!existsSync(file)) { err(`no inputs.json in ${runDir}. Run: baseline inputs <input...>`); return 2; }
+  let inputs: ReturnType<typeof inputsFileSchema.parse>;
+  try {
+    inputs = inputsFileSchema.parse(JSON.parse(readFileSync(file, "utf8")));
+  } catch (e) {
+    const why = e instanceof z.ZodError
+      ? e.issues.slice(0, 3).map((i) => `${i.path.join(".") || "file"}: ${i.message}`).join("; ")
+      : errMsg(e);
+    err(`${file} can't be read: ${why}`);
+    return 2;
+  }
   const personas = (f.personas ?? "").split(",").filter(Boolean);
   const paths = inputs.items.flatMap((i) => i.changedFiles ?? []);
   const changed = paths.length;

@@ -22,7 +22,9 @@ through a connector arrive as files in `<runDir>/linked/`; pass those paths on a
 2. Read `<runDir>/inputs.json`. For every link in `items[].links` that looks like a spec, design or
    guide (Confluence, Notion, Google Docs, a docs site, a PDF), try to read it with the tools you
    have (WebFetch, a connector). Save what you read as `<runDir>/linked/<n>.md` with the URL on the
-   first line. Add every link you could not read to `unreadLinks` in `inputs.json`.
+   first line. For every link you could not read, run
+   `baseline inputs unread-link <url> --reason "<why, short>"`. Never edit `inputs.json` by hand:
+   the sizing step reads it, and a hand-written shape stops the run.
    After each link, report how far you are: `baseline progress phase gather active <pct>`, going
    from 20 up to 45 by links done out of links found.
 3. For PDFs listed in `files`, read them with Read and save the text the same way.
@@ -32,5 +34,5 @@ Rules:
 - Never sign in anywhere, never submit forms, never follow links to the site under test.
 - Keep it short. Do not summarise or interpret.
 
-Output: an updated `<runDir>/inputs.json` and `<runDir>/linked/*.md`. Your final message lists
+Output: `<runDir>/linked/*.md`, and the unread links recorded with the command above. Your final message lists
 what you read and what you could not, one line each.

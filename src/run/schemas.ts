@@ -21,6 +21,18 @@ export const runFileSchema = z.object({
 });
 export type RunFile = z.infer<typeof runFileSchema>;
 
+/**
+ * A link the gatherer could not open. Both shapes are read: a plain URL (what `inputs` used to
+ * write) and `{ url, reason }` (what a gatherer told only "add the link" naturally writes). One
+ * wrong entry used to make the whole file unreadable, and `baseline size` then called it missing
+ * (spec 3.5). Use `baseline inputs unread-link` rather than editing the file.
+ */
+export type UnreadLink = { url: string; reason?: string | undefined };
+const unreadLink = z.union([
+  z.string(),
+  z.object({ url: z.string(), reason: z.string().optional() }),
+]).transform((v): UnreadLink => (typeof v === "string" ? { url: v } : v));
+
 /** <runDir>/inputs.json, written by `inputs`. */
 export const inputsFileSchema = z.object({
   items: z.array(z.object({
@@ -32,7 +44,7 @@ export const inputsFileSchema = z.object({
     headSha: z.string().optional(),
     files: z.array(z.string()).optional(),
   })).default([]),
-  unreadLinks: z.array(z.string()).default([]),
+  unreadLinks: z.array(unreadLink).default([]),
 });
 export type InputsFile = z.infer<typeof inputsFileSchema>;
 

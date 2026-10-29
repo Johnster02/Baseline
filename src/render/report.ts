@@ -8,6 +8,7 @@ import { readJsonFile, readJsonl } from "../core/json";
 import type { Parse } from "../core/json";
 import { isInside, trustedRunPath } from "../core/paths";
 import { readTrustedRun } from "../core/trusted-run";
+import type { UnreadLink } from "../run/schemas";
 import { blockedEntrySchema, cleanupFileSchema, commitFileSchema, inputsFileSchema, parse, progressFileSchema, runFileSchema, runnersFileSchema } from "../run/schemas";
 import type { BlockedRecord } from "../run/schemas";
 import type { Counts } from "../findings/counts";
@@ -26,7 +27,7 @@ export type RunRecord = {
   findings: Finding[]; other: Finding[]; otherHidden: number; skipped: BlockedRecord[]; counts: Counts;
   /** Findings in findings.json that failed validation and were left out, with why. */
   rejected: { index: number; id?: string; reason: string }[];
-  unreadLinks: string[];
+  unreadLinks: UnreadLink[];
   /** Each runner's sign-in status this run. */
   runners: { key: string; ok: boolean; error?: string | undefined }[];
   /** Things the run created and could not remove. */
@@ -202,7 +203,7 @@ function runHTML(r: RunRecord, hidden: boolean): string {
   const rejected = r.rejected ?? [];
   const rejectedHTML = rejected.length ? `<section class="sec wp" style="--w:7"><h2>Findings left out · ${rejected.length}</h2><p class="notice">These entries in findings.json were not valid findings, so they are not counted above.</p><div class="rows">${rejected.map((x) =>
     `<div class="row"><span><b>${esc(x.id ?? `#${x.index + 1}`)}</b></span><span class="k">${esc(x.reason)}</span></div>`).join("")}</div></section>` : "";
-  const unread = r.unreadLinks.length ? `<section class="sec wp" style="--w:7"><h2>Links that could not be read</h2><div class="rows">${r.unreadLinks.map((l) => `<div class="row"><span class="k">${esc(l)}</span></div>`).join("")}</div></section>` : "";
+  const unread = r.unreadLinks.length ? `<section class="sec wp" style="--w:7"><h2>Links that could not be read</h2><div class="rows">${r.unreadLinks.map((l) => `<div class="row"><span class="k">${esc(l.url)}</span>${l.reason ? `<span class="v">${esc(l.reason)}</span>` : ""}</div>`).join("")}</div></section>` : "";
   return `<section class="run" data-run="${esc(r.runId)}"${hidden ? " hidden" : ""}>
 <header class="case wp" style="--w:0"><div><h1>${esc(r.label)}</h1><div class="tele"><span>run <b>${esc(r.runId)}</b></span><span>${esc(r.size)} · <b>${esc(Number(r.agents) || 0)} agents</b></span><span>${r.durationMin}m</span><span>${esc(r.url)}${r.commit.commitRead ? ` @ <b>${esc(r.commit.commitRead)}</b>` : ""}</span></div></div><span class="result">Complete</span></header>
 ${warn}${rejected.length ? `<p class="warn">${rejected.length} finding${rejected.length === 1 ? " was" : "s were"} not valid and left out. See “Findings left out” below.</p>` : ""}
