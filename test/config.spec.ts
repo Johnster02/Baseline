@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, saveConfig, ensureGitignored, newRunner, checkTarget, describePermissions } from "../src/config/store";
@@ -157,5 +157,35 @@ describe("isProduction", () => {
     const cfg = { ...loadConfig(tmp()), productionUrls: ["https://acme.dev"] };
     expect(isProduction("https://api.acme.dev/x", cfg)).toBe(true);
     expect(isProduction("https://notacme.dev/x", cfg)).toBe(false);
+  });
+});
+
+describe("where Baseline keeps its data", () => {
+  /** dataDir reads HOME and the two overrides; test/setup.ts sets BASELINE_DATA for every file. */
+  const withEnv = <T>(env: Record<string, string | undefined>, fn: () => T): T => {
+    const saved = Object.fromEntries(Object.keys(env).map((k) => [k, process.env[k]]));
+    for (const [k, v] of Object.entries(env)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    try { return fn(); } finally {
+      for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  };
+
+  it("a pointer to a folder that does not exist yet still wins over the legacy fallback", async () => {
+    const { dataDir, recordPluginData } = await import("../src/core/paths");
+    const home = realpathSync(tmp("home-"));
+    const data = join(home, ".claude", "plugins", "data", "baseline");
+    recordPluginData(data, home);
+    expect(existsSync(data)).toBe(true);
+    withEnv({ HOME: home, BASELINE_DATA: undefined, CLAUDE_PLUGIN_DATA: undefined }, () => {
+      expect(dataDir(tmp("proj-"))).toBe(data);
+    });
+  });
+
+  it("the legacy folder stays a protected candidate, so the guards keep it out of reach", async () => {
+    const { dataDirCandidates } = await import("../src/core/paths");
+    const home = realpathSync(tmp("home-"));
+    withEnv({ HOME: home, BASELINE_DATA: undefined, CLAUDE_PLUGIN_DATA: undefined }, () => {
+      expect(dataDirCandidates()).toContain(join(home, ".config", "baseline"));
+    });
   });
 });

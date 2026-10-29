@@ -1,6 +1,6 @@
 // The guard hooks in-process: runGuardHook (shared by dist/hook.cjs) and `baseline hook <name>`.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runGuardHook, isGuardHook, safeGuardHook } from "../src/hooks/handlers";
@@ -123,6 +123,23 @@ describe("baseline hook", () => {
     try {
       expect(await main(["hook", "store-options"])).toBe(0);
       expect(readFileSync(join(home, ".config", "baseline", "plugin-data"), "utf8").trim()).toBe(process.env.CLAUDE_PLUGIN_DATA);
+    } finally {
+      process.env.HOME = prev.HOME;
+      if (prev.CLAUDE_PLUGIN_DATA === undefined) delete process.env.CLAUDE_PLUGIN_DATA; else process.env.CLAUDE_PLUGIN_DATA = prev.CLAUDE_PLUGIN_DATA;
+    }
+  });
+  it("store-options brings a login saved in the legacy folder across", async () => {
+    const home = mkdtempSync(join(tmpdir(), "hh-home-"));
+    const legacy = join(home, ".config", "baseline");
+    mkdirSync(join(legacy, "secrets"), { recursive: true, mode: 0o700 });
+    writeFileSync(join(legacy, "secrets", "abc.json"), "{}", { mode: 0o600 });
+    const prev = { HOME: process.env.HOME, CLAUDE_PLUGIN_DATA: process.env.CLAUDE_PLUGIN_DATA };
+    process.env.HOME = home;
+    process.env.CLAUDE_PLUGIN_DATA = join(home, ".claude", "plugins", "data", "baseline");
+    try {
+      expect(await main(["hook", "store-options"])).toBe(0);
+      expect(existsSync(join(process.env.CLAUDE_PLUGIN_DATA, "secrets", "abc.json"))).toBe(true);
+      expect(existsSync(join(legacy, "migrated-to"))).toBe(true);
     } finally {
       process.env.HOME = prev.HOME;
       if (prev.CLAUDE_PLUGIN_DATA === undefined) delete process.env.CLAUDE_PLUGIN_DATA; else process.env.CLAUDE_PLUGIN_DATA = prev.CLAUDE_PLUGIN_DATA;

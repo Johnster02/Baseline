@@ -12,8 +12,14 @@ import { join, resolve, sep } from "node:path";
 
 const pointerFile = (home: string) => join(home, ".config", "baseline", "plugin-data");
 
-/** Hooks see CLAUDE_PLUGIN_DATA but plain Bash calls don't: the SessionStart hook leaves a pointer. */
+/**
+ * Hooks see CLAUDE_PLUGIN_DATA but plain Bash calls don't: the SessionStart hook leaves a pointer.
+ * The folder is created first, because readPointer refuses a pointer that names nothing — without
+ * this, hook-context calls used the plugin folder while CLI-context calls fell back to
+ * ~/.config/baseline, and a login saved by one was invisible to the other.
+ */
 export function recordPluginData(dir: string, home = homedir()): void {
+  mkdirSync(resolve(dir), { recursive: true, mode: 0o700 });
   mkdirSync(join(home, ".config", "baseline"), { recursive: true, mode: 0o700 });
   writeFileSync(pointerFile(home), dir + "\n", { mode: 0o600 });
 }

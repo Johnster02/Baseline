@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bashGuard, activeRunUrl, activeRun, normalizeSegment, mentionsDataDir, readGuard, sweepsHome, writeGuard } from "../src/hooks/bash-guard";
@@ -76,14 +76,18 @@ describe("plugin data pointer: only trusted when it names Claude Code's plugin d
     Object.assign(process.env, { HOME: home, ...extra });
     try { fn(dataDir); } finally { process.env = saved; }
   };
-  it("ignores a pointer to a folder elsewhere under ~/.claude/plugins, or to a missing folder", async () => {
+  it("ignores a pointer to a folder elsewhere under ~/.claude/plugins, or to a folder since deleted", async () => {
     const home = mkdtempSync(join(tmpdir(), "home-"));
     const { recordPluginData } = await import("../src/config/secrets");
     const elsewhere = join(home, ".claude", "plugins", "cache", "evil");
     mkdirSync(elsewhere, { recursive: true });
     recordPluginData(elsewhere, home);
     await withHome(home, {}, (dataDir) => expect(dataDir()).toBe(join(home, ".config", "baseline")));
-    recordPluginData(join(home, ".claude", "plugins", "data", "missing"), home);
+    // recordPluginData creates its target (spec 3.1), so a pointer is only ever stale, never
+    // born missing. Deleting the folder afterwards must still send dataDir back to the fallback.
+    const gone = join(home, ".claude", "plugins", "data", "gone");
+    recordPluginData(gone, home);
+    rmSync(gone, { recursive: true, force: true });
     await withHome(home, {}, (dataDir) => expect(dataDir()).toBe(join(home, ".config", "baseline")));
   });
   it("follows CLAUDE_CONFIG_DIR's plugin data folder", async () => {

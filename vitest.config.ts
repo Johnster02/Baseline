@@ -6,7 +6,7 @@ export default defineConfig({
     hookTimeout: 30000,
     css: true,
     setupFiles: ["test/setup.ts"],
-    exclude: ["node_modules/**", "mod-tests/**"],
+    exclude: ["node_modules/**", "mod-tests/**", ".claude/**", "**/.claude/worktrees/**"],
     coverage: {
       provider: "v8",
       include: ["src/**"],
