@@ -103,9 +103,22 @@ password, nothing is visible to detect, and `signIn` saves the signed-out state 
 
 **Decisions.** Add an optional per-runner `authedCheck` to the config: a path plus something only a
 signed-in user sees. Setup asks for it. Verification is positive: load the path, look for the
-thing. Without an `authedCheck`, verification reports `weak` and says what it could not prove —
-never `ok`. Treat the login path as a **prefix**, so auth sub-steps count as "still signing in".
+thing. Treat the login path as a **prefix**, so auth sub-steps count as "still signing in".
 (My calls.)
+
+Without an `authedCheck`, verification reports `weak` and says what it could not prove. "Never
+`ok`" was the first wording here, and it splits in two once you ask what it costs:
+
+- **A hand-driven sign-in (`--manual`) keeps nothing it cannot prove.** A person is standing
+  there, so Baseline can insist, and the error names the one command that fixes it. This is the
+  case the run notes complained about: the window closed while signed out and the command said
+  success.
+- **A stored-password sign-in still succeeds on a weak pass**, carrying `strength: "weak"` and a
+  `note` that reaches `runners.json` and the report ("signed in, not proved"). Failing it instead
+  would break every project that upgrades before setting a check, unattended, which nobody asked
+  for.
+
+(My call, after review; see 3.2.)
 
 ### 3.4 The guard blocks its own helpers and harmless commands
 
@@ -121,7 +134,7 @@ Reproduced against `bashGuard` with this project's protected dirs:
 
 The common cause: the guard matches command **text** against path-shaped patterns instead of
 deciding whether a path could reach a protected folder. `cat ~/.claude/settings.json` and
-`grep -E '^[a-z]*$' /home/johnc/.config/app/list.txt` are allowed, so the behaviour turns on
+`grep -E '^[a-z]*$' ~/.config/app/list.txt` are allowed, so the behaviour turns on
 spelling, not on what the command touches.
 
 The code-reader report (it "stopped its code-reader from saving results") is **not reproduced**.
