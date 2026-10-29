@@ -11,6 +11,7 @@ import { stopHosts } from "../browser/host";
 import { PHASES, updateProgress, readProgress } from "./progress";
 import { sizeRun, SIZES } from "./sizing";
 import { commitInfo } from "./commit";
+import { readTimings, summariseTimings } from "./timings";
 import { mergeSiteMap, parseSiteMap, readSiteMap } from "./sitemap";
 import { inputsFileSchema, parse, runFileSchema } from "./schemas";
 import type { RunFile } from "./schemas";
@@ -131,6 +132,13 @@ register("size", "size the active run from its inputs.json: size --personas a,b 
   const sized = inputs.items.map((i) => ({ kind: i.ref.kind, words: (i.body ?? "").split(/\s+/).filter(Boolean).length, guide: f.guide === true }));
   const info = await commitInfo(process.cwd(), loadConfig(process.cwd()));
   out(JSON.stringify({ ...sizeRun(sized, changed, personas, info.codeRead, paths), changedFiles: changed }));
+  return 0;
+});
+
+register("timings", "what each browser command cost this run: timings [--run <dir>]", (args) => {
+  const runDir = needRun(parseFlags(args, {}).values.run);
+  if (!runDir) return 2;
+  out(summariseTimings(readTimings(runDir)));
   return 0;
 });
 

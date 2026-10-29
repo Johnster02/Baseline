@@ -108,6 +108,7 @@ register("script", "run an agent's browser script as a runner: script <runner> <
   // The report shows which runner was signed out mid-run.
   const noteSignedOut = (message: string) => recordRunnerStatus(runDir, [{ key: runner.key, ok: false, error: message }]);
   const own = createDispatcher({
+    runDir,
     openSession: () => openSession({ runDir, runId: run.runId, runner, cfg, baseUrl: run.url, storageState: sessionPath(dataDir(), projectDir, runner.key) }),
     info: { runner: runner.key, persona: runner.persona, depth: runner.depth },
     keepOnClose: false,

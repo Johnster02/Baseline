@@ -221,6 +221,7 @@ register("browser-host", "(internal) keep one browser open for a runner during a
   let last = Date.now();
   let closing = false;
   const dispatcher = createDispatcher({
+    runDir,
     openSession: () => openSession({ runDir, runId: run.runId, runner: r, cfg, baseUrl: run.url, storageState: sessionPath(dataDir(), projectDir, r.key) }),
     info: { runner: r.key, persona: r.persona, depth: r.depth },
     keepOnClose: true,

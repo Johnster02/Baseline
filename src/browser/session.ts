@@ -147,6 +147,17 @@ const REDIRECT_HEADERS = ["location", "x-action-redirect", "hx-redirect", "hx-lo
 const ID_SCAN_LIMIT = 3_000_000;
 /** Longest an agent may wait on one element; Playwright's 0 ("forever") would hang the runner. */
 const MAX_WAIT_MS = 60_000;
+/**
+ * How long one element lookup may take, and how long a navigation waits for the network to go
+ * quiet. Both were higher (15s and 3s), which on a run where selector guesses miss is minutes
+ * rather than seconds. Overridable without a rebuild, for a genuinely slow site (spec 2.1).
+ */
+const envMs = (name: string, fallback: number) => {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+const DEFAULT_TIMEOUT_MS = envMs("BASELINE_TIMEOUT_MS", 8_000);
+const IDLE_MS = envMs("BASELINE_IDLE_MS", 1_000);
 
 // What a control says: its accessible name, then its text, then (for icon buttons) an SVG title,
 // an icon's <use> name or its class names, so an unlabelled trash icon still reads "trash".
@@ -366,7 +377,7 @@ function actions(c: Ctx, page: Page, browser: Browser): Session {
       await go();
       c.state.loading = true;
       await page.waitForLoadState("load");
-      await page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
+      await page.waitForLoadState("networkidle", { timeout: IDLE_MS }).catch(() => {});
     } finally {
       c.state.loading = false;
       c.state.agentNav = false;
@@ -523,7 +534,7 @@ export async function openSession(o: OpenOptions): Promise<Session> {
       serviceWorkers: "block",
       ...(o.storageState && existsSync(o.storageState) ? { storageState: o.storageState } : {}),
     });
-    context.setDefaultTimeout(15000);
+    context.setDefaultTimeout(DEFAULT_TIMEOUT_MS);
     await context.exposeBinding("__baselineClick", (_src, t: unknown) => { c.clicks.record(String(t || "")); });
     await context.addInitScript({ content: INIT });
     await context.route("**/*", (route) => onRequest(c, route));

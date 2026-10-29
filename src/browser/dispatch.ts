@@ -5,6 +5,7 @@ import type { Session, Target } from "./session";
 import { isCommand } from "./rpc";
 import type { Command, RpcReply, RpcRequest } from "./rpc";
 import { errMsg } from "../core/json";
+import { recordTiming } from "../run/timings";
 
 /** No agent wait may hang a runner's browser: Playwright's `timeout: 0` means forever. */
 export const MAX_WAIT_MS = 60_000;
@@ -46,6 +47,8 @@ export type DispatcherOptions = {
   /** Host: a script finishing is not the run finishing, so close keeps the browser. */
   keepOnClose: boolean;
   onSignedOut?: (message: string) => void;
+  /** Where to record what each command cost. Method and duration only (see run/timings). */
+  runDir?: string | undefined;
 };
 
 export function createDispatcher(o: DispatcherOptions) {
@@ -54,21 +57,29 @@ export function createDispatcher(o: DispatcherOptions) {
 
   async function run(m: RpcRequest): Promise<Omit<RpcReply, "id">> {
     if (!isCommand(m.method)) return { ok: false, error: `"${String(m.method)}" is not an allowed command` };
+    const started = Date.now();
+    const method = m.method;
+    const timed = <T extends Omit<RpcReply, "id">>(r: T): T => {
+      if (o.runDir) {
+        recordTiming(o.runDir, { at: new Date(started).toISOString(), runner: o.info.runner, method, ms: Date.now() - started, ok: r.ok });
+      }
+      return r;
+    };
     try {
       if (m.method === "open") {
         session ??= await o.openSession();
-        return { ok: true, value: o.info };
+        return timed({ ok: true, value: o.info });
       }
-      if (!session) return { ok: false, error: "call open() first" };
+      if (!session) return timed({ ok: false, error: "call open() first" });
       if (m.method === "close") {
         if (!o.keepOnClose) { const s = session; session = undefined; await s.close(); }
-        return { ok: true };
+        return timed({ ok: true });
       }
-      return { ok: true, value: await handlers[m.method](session, m.args) };
+      return timed({ ok: true, value: await handlers[m.method](session, m.args) });
     } catch (e) {
       const name = e instanceof Error ? e.name : "Error";
       if (name === "SignedOutError") o.onSignedOut?.(errMsg(e));
-      return { ok: false, error: `${name}: ${errMsg(e).split("\n")[0]}` };
+      return timed({ ok: false, error: `${name}: ${errMsg(e).split("\n")[0]}` });
     }
   }
 
