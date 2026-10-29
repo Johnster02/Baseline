@@ -42,6 +42,10 @@ describe("createDispatcher", () => {
       ["shot", ["cart", "Cart"], ["cart", "Cart"]],
       ["created", ["order", "Baseline r-1 order"], ["order", "Baseline r-1 order", undefined]],
       ["created", ["order", "Baseline r-1 order", "/orders/1"], ["order", "Baseline r-1 order", "/orders/1"]],
+      ["fixture", ["clip.mp4"], ["clip.mp4"]],
+      ["upload", [t, ["fixtures/clip.mp4"]], [t, ["fixtures/clip.mp4"]]],
+      // One path on its own is still a list; the Session checks it against the run folder.
+      ["upload", [t, "fixtures/clip.mp4"], [t, ["fixtures/clip.mp4"]]],
     ];
     for (const [method, args, expected] of cases) {
       f.calls.length = 0;

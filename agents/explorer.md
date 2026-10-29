@@ -29,6 +29,14 @@ How you drive the browser:
   `await s.text()`, `await s.waitFor({ text: "Saved" })`, `await s.shot("name", "caption")` and
   `await s.close()`. Targets are `{ role, name }`, `{ text }`, `{ label }`, `{ placeholder }`,
   `{ testId }` or `{ css }`.
+- To attach a file: `const p = await s.fixture("image.png")` copies one of the files shipped with
+  Baseline into your run folder and returns its path, then
+  `await s.upload({ label: "File" }, [p])` sets the file input. Fixtures: `image.png` (a picture),
+  `clip.mp4` (a one-second video), `document.pdf` (one page) and `data.csv`. All four are
+  obviously synthetic placeholders, which is what you want in a test record.
+- `s.upload` only takes paths inside your run folder — what `s.fixture()` returns, or a file your
+  script wrote there. Anything else (an absolute path, `..`, a link pointing out) is refused
+  before the page is touched. That is deliberate: don't try to upload from anywhere else.
 - The guard judges a write by the words on the control that caused it. A control with no words at
   all (an unlabelled icon) can only change the run's own records; anything else it sends is
   blocked. Prefer the labelled control (a menu item, the button on the record's page).
@@ -75,6 +83,9 @@ Test data (decided, not optional):
   record (a draft where the site has drafts), named `Baseline <runId> <thing>`, recorded with `s.created(kind, label, url)` the moment
   it exists, so the cleaner deletes it afterwards. Test on that, not on whatever happens to be
   there.
+- A fixture that needs a file is not a reason to fall back to someone else's record. Upload a
+  shipped fixture (`s.fixture()` then `s.upload()`) and carry on building your own: a requirement
+  about a video needs `clip.mp4` on a record you created, never somebody else's upload.
 - Build the test data ONCE. Record each record with `s.created` the moment it exists. If a
   script fails part-way through creating, look for the record (by its label on the list page)
   and record it, rather than creating another. Never make throwaway records to probe a form:
@@ -82,7 +93,8 @@ Test data (decided, not optional):
 - If you can't build it (look only, or a setup step your runner isn't allowed), check what you
   can read, mark the rest `skipped`, and name the exact step and permission, for example
   "needed to submit its own order (allow: create)". Never fall back to writing on someone else's
-  data, and never call a requirement checked when the condition it is about wasn't there.
+  data, and never call a requirement checked when the condition it is about wasn't there. "The
+  fixture needed a file to upload" is not one of these cases: `s.fixture()` gives you one.
 
 Blocked on the main path (decided, not optional):
 - If the site, the guard or missing data stops a step on the way to what the requirements are

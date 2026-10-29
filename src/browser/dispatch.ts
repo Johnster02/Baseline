@@ -35,6 +35,9 @@ const handlers: { [K in Callable]: (s: Session, a: unknown[]) => unknown } = {
   title: (s) => s.title(),
   shot: (s, a) => s.shot(S(a[0]), S(a[1])),
   created: (s, a) => s.created(S(a[0]), S(a[1]), a[2] === undefined ? undefined : S(a[2])),
+  fixture: (s, a) => s.fixture(S(a[0])),
+  // The paths are checked against the run folder by the Session, not here.
+  upload: (s, a) => s.upload(T(a[0]), Array.isArray(a[1]) ? (a[1] as string[]) : ([a[1]] as string[])),
 };
 
 export type DispatcherOptions = {
