@@ -10,3 +10,4 @@ import "./findings/cli";
 import "./render/cli";
 import "./render/term-cli";
 import "./setup/install";
+import "./core/doctor";
