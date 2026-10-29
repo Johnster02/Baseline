@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveInputs } from "../src/inputs/resolve";
 import { fetchInput, insecureTrackerWarning } from "../src/inputs/fetch";
 import { adfToText } from "../src/inputs/jira";
 
-const ctx = (jira = false, linear = false, cwd = mkdtempSync(join(tmpdir(), "in-"))) => ({ trackers: { jira, linear }, cwd });
+const ctx = (jira = false, linear = false, cwd = realpathSync(mkdtempSync(join(tmpdir(), "in-")))) => ({ trackers: { jira, linear }, cwd });
 
 describe("resolveInputs", () => {
   it("maps each form to its kind", () => {
@@ -101,7 +101,7 @@ describe("fetchInput", () => {
   });
 
   it("a folder lists readable spec files", async () => {
-    const d = mkdtempSync(join(tmpdir(), "f-"));
+    const d = realpathSync(mkdtempSync(join(tmpdir(), "f-")));
     for (const n of ["a.md", "b.txt", "c.html", "d.pdf", "e.png"]) writeFileSync(join(d, n), "x");
     const r = await fetchInput({ kind: "folder", ref: d }, {});
     expect(r.files?.map((p) => p.split("/").pop())).toEqual(["a.md", "b.txt", "c.html", "d.pdf"]);

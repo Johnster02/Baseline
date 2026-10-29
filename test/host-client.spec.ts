@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createServer } from "node:net";
 import type { Server } from "node:net";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { connectHost, hostKey, isHostProcess, stopHosts } from "../src/browser/host";
@@ -14,7 +14,7 @@ const writeInfo = (key: string, info: object) => { mkdirSync(hosts(), { recursiv
 
 /** A fake host: answers ping, echoes `url`, never answers `hang`, refuses a wrong token. */
 async function fakeHost(): Promise<string> {
-  const sock = join(mkdtempSync(join(tmpdir(), "hc-")), "h.sock");
+  const sock = join(realpathSync(mkdtempSync(join(tmpdir(), "hc-"))), "h.sock");
   const server = createServer((c) => {
     let buf = "";
     c.on("data", (d) => {
@@ -37,9 +37,9 @@ async function fakeHost(): Promise<string> {
 }
 
 beforeEach(() => {
-  data = mkdtempSync(join(tmpdir(), "hc-data-"));
+  data = realpathSync(mkdtempSync(join(tmpdir(), "hc-data-")));
   process.env.BASELINE_DATA = data;
-  runDir = join(mkdtempSync(join(tmpdir(), "hc-run-")), "r-1");
+  runDir = join(realpathSync(mkdtempSync(join(tmpdir(), "hc-run-"))), "r-1");
   mkdirSync(runDir, { recursive: true });
   servers = [];
 });

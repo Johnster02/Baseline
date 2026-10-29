@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync, existsSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startFixture } from "./fixture-app/server";
@@ -15,9 +15,9 @@ let f: Awaited<ReturnType<typeof startFixture>>;
 let state: string;
 beforeAll(async () => {
   // Trusted run state goes to the data folder: keep it out of the real one.
-  process.env.BASELINE_DATA = mkdtempSync(join(tmpdir(), "data-"));
+  process.env.BASELINE_DATA = realpathSync(mkdtempSync(join(tmpdir(), "data-")));
   f = await startFixture();
-  state = join(mkdtempSync(join(tmpdir(), "st-")), "state.json");
+  state = join(realpathSync(mkdtempSync(join(tmpdir(), "st-"))), "state.json");
   const host = new URL(f.url).hostname;
   writeFileSync(state, JSON.stringify({ cookies: [{ name: "sid", value: "ok", domain: host, path: "/", expires: -1, httpOnly: true, secure: false, sameSite: "Lax" }], origins: [] }));
 });
@@ -27,7 +27,7 @@ afterAll(() => f.stop());
 const openSession: typeof rawOpenSession = (o) => { trustRun(o); return rawOpenSession(o); };
 
 const look = newRunner("customer", "customer", { kind: "session" });
-const runDir = () => mkdtempSync(join(tmpdir(), "run-"));
+const runDir = () => realpathSync(mkdtempSync(join(tmpdir(), "run-")));
 const read = (p: string) => JSON.parse(readFileSync(p, "utf8"));
 const lines = (p: string) => readJsonl<any>(p);
 const had = (method: string, path: string) => f.requests.some((r) => r.method === method && r.path === path);

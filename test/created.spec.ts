@@ -2,7 +2,7 @@
 // cleaner navigates from these entries, so a placeholder address here sends it to the wrong
 // record (spec 3.7).
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DRAFT_ID, startFixture } from "./fixture-app/server";
@@ -15,9 +15,9 @@ let f: Awaited<ReturnType<typeof startFixture>>;
 let state: string;
 
 beforeAll(async () => {
-  process.env.BASELINE_DATA = mkdtempSync(join(tmpdir(), "data-"));
+  process.env.BASELINE_DATA = realpathSync(mkdtempSync(join(tmpdir(), "data-")));
   f = await startFixture();
-  state = join(mkdtempSync(join(tmpdir(), "st-")), "state.json");
+  state = join(realpathSync(mkdtempSync(join(tmpdir(), "st-"))), "state.json");
   const host = new URL(f.url).hostname;
   writeFileSync(state, JSON.stringify({ cookies: [{ name: "sid", value: "ok", domain: host, path: "/", expires: -1, httpOnly: true, secure: false, sameSite: "Lax" }], origins: [] }));
 });
@@ -27,7 +27,7 @@ const openSession: typeof rawOpenSession = (o) => { trustRun(o); return rawOpenS
 const runner = { ...newRunner("customer", "customer", { kind: "session" }), depth: "create" as const };
 
 async function withSession(fn: (s: Session, dir: string) => Promise<void>): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), "run-"));
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "run-")));
   const cfg = loadConfig(dir);
   const s = await openSession({ runDir: dir, runId: "r-1", runner, cfg, baseUrl: f.url, storageState: state });
   try { await fn(s, dir); } finally { await s.close(); }

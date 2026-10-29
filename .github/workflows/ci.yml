@@ -8,12 +8,18 @@ concurrency:
   cancel-in-progress: true
 jobs:
   check:
-    runs-on: ubuntu-latest
+    # Baseline supports Linux and macOS. Ubuntu runs every supported Node; macOS runs one, to
+    # prove the platform works without tripling the matrix (spec 4).
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        node: [20, 22, 24]
+        include:
+          - { os: ubuntu-latest, node: 20 }
+          - { os: ubuntu-latest, node: 22 }
+          - { os: ubuntu-latest, node: 24 }
+          - { os: macos-latest, node: 22 }
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -25,12 +31,17 @@ jobs:
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
-          path: ~/.cache/ms-playwright
+          path: ${{ runner.os == 'macOS' && '~/Library/Caches/ms-playwright' || '~/.cache/ms-playwright' }}
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - run: pnpm exec playwright install --with-deps chromium
+        if: runner.os == 'Linux'
+      - run: pnpm exec playwright install chromium
+        if: runner.os != 'Linux'
       - run: pnpm typecheck
-      - run: pnpm test:coverage
+      # Before the tests: test/host.spec.ts and test/runner-script.spec.ts rebuild dist/ in their
+      # beforeAll, so a --verify after them always passes and proves nothing about the commit.
       - run: node scripts/build.mjs --verify
+      - run: pnpm test:coverage
       - name: Plugin tests and validation
         run: |
           if command -v claude >/dev/null 2>&1; then

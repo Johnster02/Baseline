@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startFixture, FIXTURE_USER } from "./fixture-app/server";
@@ -15,12 +15,12 @@ beforeAll(async () => { f = await startFixture(); });
 afterAll(() => f.stop());
 
 const setup = (password = FIXTURE_USER.password, origin: string | null = f.url) => {
-  const proj = mkdtempSync(join(tmpdir(), "proj-"));
-  const data = mkdtempSync(join(tmpdir(), "data-"));
+  const proj = realpathSync(mkdtempSync(join(tmpdir(), "proj-")));
+  const data = realpathSync(mkdtempSync(join(tmpdir(), "data-")));
   const runner = newRunner("customer", "customer", { kind: "form", loginUrl: "/login" });
   const cfg = { ...loadConfig(proj), runners: [runner] };
   setSecret(data, proj, "customer", { username: FIXTURE_USER.username, password, ...(origin ? { origin } : {}) });
-  return { proj, data, runner, cfg, runDir: mkdtempSync(join(tmpdir(), "run-")) };
+  return { proj, data, runner, cfg, runDir: realpathSync(mkdtempSync(join(tmpdir(), "run-"))) };
 };
 
 describe("signIn", () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -15,7 +15,7 @@ let data: string;
 beforeEach(() => {
   out = "";
   spawnSync.mockReset();
-  data = mkdtempSync(join(tmpdir(), "install-data-"));
+  data = realpathSync(mkdtempSync(join(tmpdir(), "install-data-")));
   process.env.BASELINE_DATA = data;
   vi.spyOn(process.stdout, "write").mockImplementation((s: any) => { out += String(s); return true; });
   vi.spyOn(process.stderr, "write").mockImplementation((s: any) => { out += String(s); return true; });

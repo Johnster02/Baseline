@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { trustedFiles } from "../src/core/paths";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -111,7 +111,7 @@ describe("renderSessionReport", () => {
 
 describe("buildRunRecord", () => {
   it("assembles a record from a run folder and filters findings", () => {
-    const proj = mkdtempSync(join(tmpdir(), "p-"));
+    const proj = realpathSync(mkdtempSync(join(tmpdir(), "p-")));
     const runDir = join(proj, ".baseline", "sessions", "s", "runs", "r-1");
     mkdirSync(join(runDir, "shots"), { recursive: true });
     writeFileSync(join(runDir, "run.json"), JSON.stringify({ runId: "r-1", url: "http://x", label: "PR #1", startedAt: "2026-10-22T09:00:00Z", permissions: [] }));
@@ -134,7 +134,7 @@ describe("buildRunRecord", () => {
   });
 
   it("counts invalid findings instead of dropping them silently, and reads JSONL logs", () => {
-    const proj = mkdtempSync(join(tmpdir(), "p-"));
+    const proj = realpathSync(mkdtempSync(join(tmpdir(), "p-")));
     const runDir = join(proj, ".baseline", "sessions", "s", "runs", "r-1");
     mkdirSync(runDir, { recursive: true });
     writeFileSync(join(runDir, "run.json"), JSON.stringify({ runId: "r-1", url: "http://x", label: "PR #1", startedAt: "2026-10-22T09:00:00Z" }));
@@ -155,7 +155,7 @@ describe("buildRunRecord", () => {
   });
 
   it("for a run Baseline recorded, reads only its own blocked log, never the run folder's copy", () => {
-    const proj = mkdtempSync(join(tmpdir(), "p-"));
+    const proj = realpathSync(mkdtempSync(join(tmpdir(), "p-")));
     const runDir = join(proj, ".baseline", "sessions", "s", "runs", "r-1");
     mkdirSync(runDir, { recursive: true });
     writeFileSync(join(runDir, "run.json"), JSON.stringify({ runId: "r-1", url: "http://x", label: "PR #1", startedAt: "2026-10-22T09:00:00Z" }));
@@ -169,7 +169,7 @@ describe("buildRunRecord", () => {
   });
 
   it("never reads a screenshot from outside the run folder, even a sibling with the same prefix", () => {
-    const proj = mkdtempSync(join(tmpdir(), "p-"));
+    const proj = realpathSync(mkdtempSync(join(tmpdir(), "p-")));
     const runs = join(proj, ".baseline", "sessions", "s", "runs");
     const runDir = join(runs, "r-1");
     mkdirSync(runDir, { recursive: true });
@@ -182,7 +182,7 @@ describe("buildRunRecord", () => {
     expect(buildRunRecord(runDir).shots).toEqual({});
   });
   it("never follows a symlinked screenshot, and only inlines image files", () => {
-    const proj = mkdtempSync(join(tmpdir(), "p-"));
+    const proj = realpathSync(mkdtempSync(join(tmpdir(), "p-")));
     const runDir = join(proj, ".baseline", "sessions", "s", "runs", "r-1");
     mkdirSync(join(runDir, "shots"), { recursive: true });
     const secret = join(proj, "secret.txt");
@@ -203,7 +203,7 @@ describe("baseline report cli", () => {
     const { main } = await import("../src/cli");
     await import("../src/commands");
     const { vi } = await import("vitest");
-    const proj = mkdtempSync(join(tmpdir(), "p-"));
+    const proj = realpathSync(mkdtempSync(join(tmpdir(), "p-")));
     const sess = join(proj, ".baseline", "sessions", "s");
     const runDir = join(sess, "runs", "r-1");
     mkdirSync(runDir, { recursive: true });
@@ -231,7 +231,7 @@ describe("report --open", () => {
     const { main, io } = await import("../src/cli");
     await import("../src/commands");
     const { vi } = await import("vitest");
-    const proj = mkdtempSync(join(tmpdir(), "p-"));
+    const proj = realpathSync(mkdtempSync(join(tmpdir(), "p-")));
     const sess = join(proj, ".baseline", "sessions", "s");
     mkdirSync(join(sess, "runs", "r-1"), { recursive: true });
     writeFileSync(join(sess, "runs", "r-1", "run.json"), JSON.stringify({ runId: "r-1", url: "http://x", label: "x", startedAt: "2026-10-22T09:00:00Z" }));
@@ -248,7 +248,7 @@ describe("report --open", () => {
 
 describe("report: runners and cleanup", () => {
   it("shows runner sign-in status and anything left behind", () => {
-    const proj = mkdtempSync(join(tmpdir(), "rep-"));
+    const proj = realpathSync(mkdtempSync(join(tmpdir(), "rep-")));
     const runDir = join(proj, ".baseline", "sessions", "s", "runs", "r-1");
     mkdirSync(runDir, { recursive: true });
     writeFileSync(join(runDir, "run.json"), JSON.stringify({ runId: "r-1", url: "http://x", label: "x", startedAt: "2026-10-22T09:00:00Z" }));

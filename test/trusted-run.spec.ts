@@ -1,6 +1,6 @@
 // Which run folders Baseline will open a browser for, or hand to a script sandbox.
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkRunDir, readTrustedRun } from "../src/core/trusted-run";
@@ -8,8 +8,8 @@ import { trustedFiles } from "../src/core/paths";
 
 let proj: string;
 beforeEach(() => {
-  proj = mkdtempSync(join(tmpdir(), "tr-proj-"));
-  process.env.BASELINE_DATA = mkdtempSync(join(tmpdir(), "tr-data-"));
+  proj = realpathSync(mkdtempSync(join(tmpdir(), "tr-proj-")));
+  process.env.BASELINE_DATA = realpathSync(mkdtempSync(join(tmpdir(), "tr-data-")));
 });
 
 const runFolder = (id = "r-1") => {
@@ -28,7 +28,7 @@ describe("checkRunDir", () => {
     expect(c).toMatchObject({ ok: true, run: { url: "https://staging.acme.dev", finished: false } });
   });
   it("refuses a folder outside .baseline/sessions, and the sessions folder itself", () => {
-    const outside = mkdtempSync(join(tmpdir(), "tr-home-"));
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), "tr-home-")));
     writeFileSync(join(outside, "run.json"), "{}");
     expect(checkRunDir(proj, outside)).toMatchObject({ ok: false, reason: expect.stringMatching(/not a run folder/) });
     runFolder();
@@ -44,7 +44,7 @@ describe("checkRunDir", () => {
   });
   it("refuses a run recorded for another project", () => {
     const d = runFolder();
-    record(d, { projectDir: mkdtempSync(join(tmpdir(), "tr-other-")) });
+    record(d, { projectDir: realpathSync(mkdtempSync(join(tmpdir(), "tr-other-"))) });
     expect(checkRunDir(proj, d)).toMatchObject({ ok: false, reason: expect.stringMatching(/another project/) });
   });
   it("refuses a run folder that holds the data folder", () => {

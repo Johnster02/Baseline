@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bashGuard, activeRunUrl, activeRun, normalizeSegment, mentionsDataDir, readGuard, sweepsHome, writeGuard } from "../src/hooks/bash-guard";
@@ -44,7 +44,7 @@ describe("bashGuard with no active run", () => {
 
 describe("activeRunUrl", () => {
   it("reads the url of the active run in this project only", () => {
-    const p = mkdtempSync(join(tmpdir(), "bg-"));
+    const p = realpathSync(mkdtempSync(join(tmpdir(), "bg-")));
     expect(activeRunUrl(p)).toBeUndefined();
     const runDir = join(p, ".baseline", "sessions", "s", "runs", "r-1");
     mkdirSync(runDir, { recursive: true });
@@ -56,7 +56,7 @@ describe("activeRunUrl", () => {
 
 describe("plugin data pointer", () => {
   it("the SessionStart hook records CLAUDE_PLUGIN_DATA so plain `baseline` calls find it", async () => {
-    const home = mkdtempSync(join(tmpdir(), "home-"));
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "home-")));
     const { recordPluginData, dataDir } = await import("../src/config/secrets");
     const target = join(home, ".claude", "plugins", "data", "baseline");
     mkdirSync(target, { recursive: true });
@@ -77,7 +77,7 @@ describe("plugin data pointer: only trusted when it names Claude Code's plugin d
     try { fn(dataDir); } finally { process.env = saved; }
   };
   it("ignores a pointer to a folder elsewhere under ~/.claude/plugins, or to a folder since deleted", async () => {
-    const home = mkdtempSync(join(tmpdir(), "home-"));
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "home-")));
     const { recordPluginData } = await import("../src/config/secrets");
     const elsewhere = join(home, ".claude", "plugins", "cache", "evil");
     mkdirSync(elsewhere, { recursive: true });
@@ -91,8 +91,8 @@ describe("plugin data pointer: only trusted when it names Claude Code's plugin d
     await withHome(home, {}, (dataDir) => expect(dataDir()).toBe(join(home, ".config", "baseline")));
   });
   it("follows CLAUDE_CONFIG_DIR's plugin data folder", async () => {
-    const home = mkdtempSync(join(tmpdir(), "home-"));
-    const cfgDir = mkdtempSync(join(tmpdir(), "claude-cfg-"));
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "home-")));
+    const cfgDir = realpathSync(mkdtempSync(join(tmpdir(), "claude-cfg-")));
     const target = join(cfgDir, "plugins", "data", "baseline");
     mkdirSync(target, { recursive: true });
     const { recordPluginData } = await import("../src/config/secrets");
@@ -145,7 +145,7 @@ describe("task 13 review: guard hardening", () => {
 
 describe("active run detection", () => {
   it("ignores a pointer that escapes the sessions folder", () => {
-    const p = mkdtempSync(join(tmpdir(), "bg-"));
+    const p = realpathSync(mkdtempSync(join(tmpdir(), "bg-")));
     const evil = join(p, ".baseline", "sessions", "..", "..", "evil");
     mkdirSync(evil, { recursive: true });
     mkdirSync(join(p, ".baseline", "sessions"), { recursive: true });
@@ -154,7 +154,7 @@ describe("active run detection", () => {
     expect(activeRunUrl(p)).toBeUndefined();
   });
   it("ignores a stale run older than a day", () => {
-    const p = mkdtempSync(join(tmpdir(), "bg-"));
+    const p = realpathSync(mkdtempSync(join(tmpdir(), "bg-")));
     const runDir = join(p, ".baseline", "sessions", "s", "runs", "r-1");
     mkdirSync(runDir, { recursive: true });
     writeFileSync(join(runDir, "run.json"), JSON.stringify({ url, startedAt: new Date(Date.now() - 25 * 3600e3).toISOString() }));
@@ -166,14 +166,14 @@ describe("active run detection", () => {
 describe("data dir safety", () => {
   it("never uses a data dir inside the project", async () => {
     const { dataDir } = await import("../src/config/secrets");
-    const proj = mkdtempSync(join(tmpdir(), "proj-"));
+    const proj = realpathSync(mkdtempSync(join(tmpdir(), "proj-")));
     const saved = { ...process.env };
     process.env.BASELINE_DATA = join(proj, "steal");
     try { expect(() => dataDir(proj)).toThrow(/inside the project/); } finally { process.env = saved; }
   });
   it("ignores a pointer outside ~/.claude/plugins", async () => {
     const { recordPluginData, dataDir } = await import("../src/config/secrets");
-    const home = mkdtempSync(join(tmpdir(), "home-"));
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "home-")));
     recordPluginData("/tmp/somewhere-else", home);
     const saved = { ...process.env };
     delete process.env.BASELINE_DATA; delete process.env.CLAUDE_PLUGIN_DATA; process.env.HOME = home;
@@ -270,8 +270,8 @@ describe("Baseline's data folder is off limits at all times", () => {
     expect(readGuard(["/tmp/project/README.md"], ctx)).toEqual({ allow: true });
   });
   it("read: a symlink that points into the data folder is followed and refused", () => {
-    const data = mkdtempSync(join(tmpdir(), "rg-data-"));
-    const proj = mkdtempSync(join(tmpdir(), "rg-proj-"));
+    const data = realpathSync(mkdtempSync(join(tmpdir(), "rg-data-")));
+    const proj = realpathSync(mkdtempSync(join(tmpdir(), "rg-proj-")));
     writeFileSync(join(data, "trackers.json"), "{}");
     symlinkSync(data, join(proj, "link"));
     const ctx = { cwd: proj, protectedDirs: [data] };
@@ -300,7 +300,7 @@ describe("Baseline's data folder is off limits at all times", () => {
 
 describe("active run from trusted state", () => {
   const withData = (fn: (data: string) => void) => {
-    const data = mkdtempSync(join(tmpdir(), "data-"));
+    const data = realpathSync(mkdtempSync(join(tmpdir(), "data-")));
     const saved = process.env.BASELINE_DATA;
     process.env.BASELINE_DATA = data;
     try { fn(data); } finally { if (saved === undefined) delete process.env.BASELINE_DATA; else process.env.BASELINE_DATA = saved; }
@@ -312,7 +312,7 @@ describe("active run from trusted state", () => {
     return d;
   };
   it("deleting the project pointer or editing run.json doesn't switch the guard off", () => withData((data) => {
-    const p = mkdtempSync(join(tmpdir(), "bg-"));
+    const p = realpathSync(mkdtempSync(join(tmpdir(), "bg-")));
     const runDir = join(p, ".baseline", "sessions", "s", "runs", "r-1");
     mkdirSync(runDir, { recursive: true });
     writeFileSync(join(runDir, "run.json"), JSON.stringify({ url: "https://other.example", startedAt: "1970-01-01T00:00:00Z" }));
@@ -322,7 +322,7 @@ describe("active run from trusted state", () => {
     expect(activeRun(p)?.url).toBe(url);
   }));
   it("a finished or stale run is not active; another project's run doesn't count", () => withData((data) => {
-    const p = mkdtempSync(join(tmpdir(), "bg-")), other = mkdtempSync(join(tmpdir(), "bg-"));
+    const p = realpathSync(mkdtempSync(join(tmpdir(), "bg-"))), other = realpathSync(mkdtempSync(join(tmpdir(), "bg-")));
     const d = trusted(data, p, join(p, "r-1"));
     trusted(data, other, join(other, "r-2"));
     expect(activeRun(p)?.runDir).toBe(join(p, "r-1"));
@@ -338,7 +338,7 @@ describe("dist/hook.cjs", () => {
   const hook = (name: string, input: unknown, env: Record<string, string> = {}) =>
     spawnSync("node", [join(ROOT, "dist", "hook.cjs"), name], { input: JSON.stringify(input), encoding: "utf8", env: { ...process.env, ...env } });
   it("blocks reading the data folder and allows ordinary commands", () => {
-    const data = mkdtempSync(join(tmpdir(), "data-"));
+    const data = realpathSync(mkdtempSync(join(tmpdir(), "data-")));
     const r = hook("bash-guard", { tool_input: { command: `cat ${data}/secrets/x.json` }, cwd: tmpdir() }, { BASELINE_DATA: data });
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/data folder/);
@@ -358,7 +358,7 @@ describe("live runs", () => {
     expect(bashGuard("baseline config allow customer finance", { runUrl: "https://shop.acme.dev", live: true })).toMatchObject({ deny: expect.any(String) });
   });
   it("activeRun reports the live flag from a pre-trusted-state run.json", () => {
-    const p = mkdtempSync(join(tmpdir(), "bg-live-"));
+    const p = realpathSync(mkdtempSync(join(tmpdir(), "bg-live-")));
     const runDir = join(p, ".baseline", "sessions", "s", "runs", "r-1");
     mkdirSync(runDir, { recursive: true });
     writeFileSync(join(runDir, "run.json"), JSON.stringify({ url: "https://shop.acme.dev", live: true, startedAt: new Date().toISOString() }));
@@ -390,8 +390,8 @@ describe("bash guard: config changes however baseline is named", () => {
 
 describe("active run: several runs at once", () => {
   it("lists every unfinished run and guards all of their sites", () => {
-    const proj = mkdtempSync(join(tmpdir(), "multi-"));
-    const data = mkdtempSync(join(tmpdir(), "multi-data-"));
+    const proj = realpathSync(mkdtempSync(join(tmpdir(), "multi-")));
+    const data = realpathSync(mkdtempSync(join(tmpdir(), "multi-data-")));
     const saved = process.env.BASELINE_DATA;
     process.env.BASELINE_DATA = data;
     try {

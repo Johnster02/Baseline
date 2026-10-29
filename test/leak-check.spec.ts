@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { leakCheck } from "../scripts/leak-check-lib.mjs";
 
-const tmp = () => mkdtempSync(join(tmpdir(), "leak-"));
+const tmp = () => realpathSync(mkdtempSync(join(tmpdir(), "leak-")));
 
 describe("leakCheck", () => {
   it("finds a banned term case-insensitively with its line", () => {

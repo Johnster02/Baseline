@@ -74,13 +74,13 @@ describe("colorMode", () => {
 
 describe("summary and view cli", () => {
   it("summary --plain prints totals for a run folder", async () => {
-    const { mkdtempSync, mkdirSync, writeFileSync } = await import("node:fs");
+    const { mkdtempSync, mkdirSync, realpathSync, writeFileSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
     const { join } = await import("node:path");
     const { vi } = await import("vitest");
     const { main } = await import("../src/cli");
     await import("../src/commands");
-    const proj = mkdtempSync(join(tmpdir(), "p-"));
+    const proj = realpathSync(mkdtempSync(join(tmpdir(), "p-")));
     const runDir = join(proj, ".baseline", "sessions", "s", "runs", "r-1");
     mkdirSync(runDir, { recursive: true });
     writeFileSync(join(runDir, "run.json"), JSON.stringify({ runId: "r-1", url: "http://x", label: "PR #1", startedAt: "2026-10-22T09:00:00Z" }));
@@ -112,14 +112,14 @@ describe("control characters from run data", () => {
 
 describe("summary writes stay inside the project", () => {
   it("refuses a run folder outside .baseline/sessions", async () => {
-    const { mkdtempSync, writeFileSync, existsSync } = await import("node:fs");
+    const { mkdtempSync, writeFileSync, existsSync, realpathSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
     const { join } = await import("node:path");
     const { vi } = await import("vitest");
     const { main } = await import("../src/cli");
     await import("../src/commands");
-    const proj = mkdtempSync(join(tmpdir(), "p-"));
-    const outside = mkdtempSync(join(tmpdir(), "elsewhere-"));
+    const proj = realpathSync(mkdtempSync(join(tmpdir(), "p-")));
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), "elsewhere-")));
     writeFileSync(join(outside, "run.json"), JSON.stringify({ runId: "r-1", url: "http://x", label: "x", startedAt: "" }));
     vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     vi.spyOn(process.stderr, "write").mockImplementation(() => true);

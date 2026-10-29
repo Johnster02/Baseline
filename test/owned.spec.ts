@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, readFileSync, utimesSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OwnedTracker, LANDING_WINDOW_MS } from "../src/browser/owned";
@@ -169,7 +169,7 @@ describe("OwnedTracker", () => {
   });
 
   it("shares what it owns with other runners through its file", () => {
-    const file = join(mkdtempSync(join(tmpdir(), "owned-")), "owned.jsonl");
+    const file = join(realpathSync(mkdtempSync(join(tmpdir(), "owned-"))), "owned.jsonl");
     const a = new OwnedTracker(file);
     a.add("/orders/" + NEW_ID);
     const b = new OwnedTracker(file);
@@ -178,7 +178,7 @@ describe("OwnedTracker", () => {
   });
 
   it("two runners adding at the same time never lose each other's records (append-only)", () => {
-    const file = join(mkdtempSync(join(tmpdir(), "owned-")), "owned.jsonl");
+    const file = join(realpathSync(mkdtempSync(join(tmpdir(), "owned-"))), "owned.jsonl");
     const a = new OwnedTracker(file), b = new OwnedTracker(file);
     // Both opened before either wrote: a read-merge-write would let the second write drop the first.
     a.add("/orders/" + NEW_ID);
@@ -190,7 +190,7 @@ describe("OwnedTracker", () => {
 
 describe("OwnedTracker across runners and client-side routes", () => {
   it("a tracker opened earlier sees records another runner's tracker added later", () => {
-    const file = join(mkdtempSync(join(tmpdir(), "owned-")), "owned.jsonl");
+    const file = join(realpathSync(mkdtempSync(join(tmpdir(), "owned-"))), "owned.jsonl");
     const early = new OwnedTracker(file);
     expect(early.paths).toEqual([]);
     new OwnedTracker(file).add("/orders/" + NEW_ID);

@@ -15,7 +15,7 @@
     "test:coverage": "vitest run --coverage",
     "test:fast": "vitest run --exclude \"test/{guard,runner-script,signin,fixture-app,host}.spec.ts\"",
     "typecheck": "tsc --noEmit",
-    "check": "tsc --noEmit && vitest run && node scripts/build.mjs --verify && (command -v claude >/dev/null && claude plugin test || echo \"WARNING: claude CLI not found, mod tests skipped\" >&2)",
+    "check": "tsc --noEmit && node scripts/build.mjs --verify && vitest run && (command -v claude >/dev/null && claude plugin test || echo \"WARNING: claude CLI not found, mod tests skipped\" >&2)",
     "fixture": "tsx test/fixture-app/run.ts",
     "prepare": "git config core.hooksPath .githooks || true",
     "test:mod": "claude plugin test",

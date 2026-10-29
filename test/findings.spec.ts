@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { filterFindings } from "../src/findings/filter";
@@ -83,7 +83,7 @@ describe("countRun", () => {
 
 describe("notes", () => {
   it("round trip", () => {
-    const p = mkdtempSync(join(tmpdir(), "n-"));
+    const p = realpathSync(mkdtempSync(join(tmpdir(), "n-")));
     addNote(p, "R-3", "admins can't see billing by design");
     expect(listNotes(p)).toEqual([expect.objectContaining({ findingId: "R-3", text: "admins can't see billing by design" })]);
   });
@@ -122,7 +122,7 @@ describe("filterFindings: dedupe", () => {
 describe("baseline dismiss", () => {
   let cwd: string;
   beforeEach(() => {
-    cwd = mkdtempSync(join(tmpdir(), "dismiss-"));
+    cwd = realpathSync(mkdtempSync(join(tmpdir(), "dismiss-")));
     vi.spyOn(process, "cwd").mockReturnValue(cwd);
     vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     vi.spyOn(process.stderr, "write").mockImplementation(() => true);

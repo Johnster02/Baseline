@@ -1,7 +1,7 @@
 // dist/hook.cjs end to end: what hooks.json runs on every tool call.
 import { describe, it, expect, beforeAll } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runKey } from "../src/core/paths";
@@ -17,9 +17,9 @@ const hook = (name: string, input: unknown, projectDir = project) =>
   });
 
 beforeAll(() => {
-  data = mkdtempSync(join(tmpdir(), "hook-data-"));
-  project = mkdtempSync(join(tmpdir(), "hook-proj-"));
-  idle = mkdtempSync(join(tmpdir(), "hook-idle-"));
+  data = realpathSync(mkdtempSync(join(tmpdir(), "hook-data-")));
+  project = realpathSync(mkdtempSync(join(tmpdir(), "hook-proj-")));
+  idle = realpathSync(mkdtempSync(join(tmpdir(), "hook-idle-")));
   runDir = join(project, ".baseline", "sessions", "s", "runs", "r-1");
   mkdirSync(runDir, { recursive: true });
   writeFileSync(join(project, ".baseline", "active-run"), runDir);

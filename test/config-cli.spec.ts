@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { main } from "../src/cli";
@@ -13,9 +13,9 @@ beforeEach(() => {
   out = "";
   vi.spyOn(process.stdout, "write").mockImplementation((s: any) => { out += String(s); return true; });
   vi.spyOn(process.stderr, "write").mockImplementation((s: any) => { out += String(s); return true; });
-  cwd = mkdtempSync(join(tmpdir(), "cli-"));
+  cwd = realpathSync(mkdtempSync(join(tmpdir(), "cli-")));
   vi.spyOn(process, "cwd").mockReturnValue(cwd);
-  process.env.BASELINE_DATA = mkdtempSync(join(tmpdir(), "data-"));
+  process.env.BASELINE_DATA = realpathSync(mkdtempSync(join(tmpdir(), "data-")));
 });
 afterEach(() => vi.restoreAllMocks());
 

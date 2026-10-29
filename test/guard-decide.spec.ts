@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { decide, globMatch, wsDecide, decodeMessage, redactUrl, requestKey, urlMatches } from "../src/browser/guard";
 import { loadConfig, newRunner } from "../src/config/store";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const cfg = () => ({ ...loadConfig(mkdtempSync(join(tmpdir(), "g-"))), productionUrls: ["https://shop.acme.dev"] });
+const cfg = () => ({ ...loadConfig(realpathSync(mkdtempSync(join(tmpdir(), "g-")))), productionUrls: ["https://shop.acme.dev"] });
 const look = newRunner("c", "customer", { kind: "session" });
 const create = { ...look, depth: "create" as const };
 const base = "https://staging.acme.dev";
@@ -134,7 +134,7 @@ describe("unlabelled controls", () => {
 });
 
 describe("decide: DELETE and the run's own records", () => {
-  const c0 = loadConfig(mkdtempSync(join(tmpdir(), "c-")));
+  const c0 = loadConfig(realpathSync(mkdtempSync(join(tmpdir(), "c-"))));
   const ctx = (runner: typeof look = create) => ({ runner, cfg: c0, learned: new Set<string>(), baseHost: "staging.acme.dev" });
   it("DELETE needs the delete permission even on a create runner", () => {
     expect(decide({ method: "DELETE", url: "https://staging.acme.dev/api/x/1", loading: false }, ctx())).toMatchObject({ action: "abort", category: "delete" });
@@ -219,7 +219,7 @@ describe("redactUrl", () => {
 });
 
 describe("wsDecide", () => {
-  const plain = () => loadConfig(mkdtempSync(join(tmpdir(), "ws-")));
+  const plain = () => loadConfig(realpathSync(mkdtempSync(join(tmpdir(), "ws-"))));
   const wsCfg = { ...plain(), productionUrls: ["https://shop.acme.dev"] };
   const wsCreate = { ...newRunner("a", "a", { kind: "session" }), depth: "create" as const };
   const wsLook = newRunner("c", "c", { kind: "session" });

@@ -2,12 +2,12 @@ import { describe, it, expect } from "vitest";
 import { ClickAttribution, CLICK_WINDOW_MS } from "../src/browser/click-attribution";
 import { decide } from "../src/browser/guard";
 import { loadConfig, newRunner } from "../src/config/store";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const clock = () => { let t = 1000; return { now: () => t, tick: (ms: number) => { t += ms; } }; };
-const cfg = loadConfig(mkdtempSync(join(tmpdir(), "ca-")));
+const cfg = loadConfig(realpathSync(mkdtempSync(join(tmpdir(), "ca-"))));
 const create = { ...newRunner("c", "customer", { kind: "session" }), depth: "create" as const };
 const ctx = { runner: create, cfg, learned: new Set<string>(), baseHost: "staging.acme.dev" };
 const base = "https://staging.acme.dev";

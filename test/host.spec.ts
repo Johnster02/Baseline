@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { stopHosts } from "../src/browser/host";
@@ -17,8 +17,8 @@ afterAll(() => {
 });
 
 function project() {
-  const proj = mkdtempSync(join(tmpdir(), "hostproj-"));
-  const data = mkdtempSync(join(tmpdir(), "hostdata-"));
+  const proj = realpathSync(mkdtempSync(join(tmpdir(), "hostproj-")));
+  const data = realpathSync(mkdtempSync(join(tmpdir(), "hostdata-")));
   const env = { ...process.env, BASELINE_DATA: data };
   spawnSync("node", [join(ROOT, "dist/cli.cjs"), "config", "add-runner", "customer", "customer", "session"], { cwd: proj, env });
   // A real run: the host refuses run folders Baseline didn't start.

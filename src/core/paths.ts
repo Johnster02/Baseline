@@ -82,9 +82,17 @@ export function activeRunDir(projectDir: string, runFlag?: string, origCwd = pro
   return readActivePointer(projectDir);
 }
 
-/** True when `child` is `parent` or inside it. Plain `startsWith` lets `/r-1-evil` pass for `/r-1`. */
-export function isInside(parent: string, child: string): boolean {
-  const p = resolve(parent), c = resolve(child);
+/**
+ * True when `child` is `parent` or inside it. Plain `startsWith` lets `/r-1-evil` pass for `/r-1`.
+ *
+ * Case is folded on macOS and Windows, whose filesystems ignore it: without that, `~/.Config/baseline`
+ * opens the same files as `~/.config/baseline` while the guards see an unrelated folder, which is a
+ * guard bypass rather than a cosmetic difference (spec 4). `platform` is a parameter so both
+ * branches are tested wherever the suite runs.
+ */
+export function isInside(parent: string, child: string, platform: NodeJS.Platform = process.platform): boolean {
+  const fold = (s: string) => (platform === "darwin" || platform === "win32" ? s.toLowerCase() : s);
+  const p = fold(resolve(parent)), c = fold(resolve(child));
   return c === p || c.startsWith(p.endsWith(sep) ? p : p + sep);
 }
 

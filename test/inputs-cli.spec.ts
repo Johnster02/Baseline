@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { main } from "../src/cli";
@@ -13,9 +13,9 @@ beforeEach(() => {
   out = "";
   vi.spyOn(process.stdout, "write").mockImplementation((s: any) => { out += String(s); return true; });
   vi.spyOn(process.stderr, "write").mockImplementation((s: any) => { out += String(s); return true; });
-  cwd = mkdtempSync(join(tmpdir(), "icli-"));
+  cwd = realpathSync(mkdtempSync(join(tmpdir(), "icli-")));
   vi.spyOn(process, "cwd").mockReturnValue(cwd);
-  process.env.BASELINE_DATA = mkdtempSync(join(tmpdir(), "data-"));
+  process.env.BASELINE_DATA = realpathSync(mkdtempSync(join(tmpdir(), "data-")));
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -32,7 +32,7 @@ describe("trackers store", () => {
 describe("baseline inputs", () => {
   it("writes inputs.json for a text and a file input", async () => {
     writeFileSync(join(cwd, "spec.md"), "Expired codes are rejected. See https://acme.notion.so/x");
-    const run = mkdtempSync(join(tmpdir(), "run-"));
+    const run = realpathSync(mkdtempSync(join(tmpdir(), "run-")));
     expect(await main(["inputs", "--run", run, "spec.md", "Check the discount field"])).toBe(0);
     const j = JSON.parse(readFileSync(join(run, "inputs.json"), "utf8"));
     expect(j.items.map((i: any) => i.ref.kind)).toEqual(["file", "text"]);
@@ -41,13 +41,13 @@ describe("baseline inputs", () => {
   });
 
   it("exits 4 with the options when a key is ambiguous", async () => {
-    const run = mkdtempSync(join(tmpdir(), "run-"));
+    const run = realpathSync(mkdtempSync(join(tmpdir(), "run-")));
     expect(await main(["inputs", "--run", run, "ABC-12"])).toBe(4);
     expect(JSON.parse(out)).toEqual({ ambiguous: "ABC-12", options: ["jira", "linear"] });
   });
 
   it("--as forces a kind for an ambiguous key", async () => {
-    const run = mkdtempSync(join(tmpdir(), "run-"));
+    const run = realpathSync(mkdtempSync(join(tmpdir(), "run-")));
     expect(await main(["inputs", "--run", run, "--as", "linear", "ABC-12"])).toBe(1);
     expect(out).toMatch(/Linear is not set up/);
   });
@@ -55,7 +55,7 @@ describe("baseline inputs", () => {
 
 describe("baseline inputs --as", () => {
   it("applies to every ambiguous key instead of crashing", async () => {
-    const run = mkdtempSync(join(tmpdir(), "run-"));
+    const run = realpathSync(mkdtempSync(join(tmpdir(), "run-")));
     const code = await main(["inputs", "--run", run, "--as", "linear", "ABC-1", "DEF-2"]);
     expect(code).toBe(1);
     expect(out).toMatch(/Linear is not set up/);

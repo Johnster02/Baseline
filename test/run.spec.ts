@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { newRun, finishRun } from "../src/run/state";
@@ -11,7 +11,7 @@ import { commitInfo } from "../src/run/commit";
 import { readSiteMap, mergeSiteMap } from "../src/run/sitemap";
 import { loadConfig } from "../src/config/store";
 
-const tmp = () => mkdtempSync(join(tmpdir(), "run-"));
+const tmp = () => realpathSync(mkdtempSync(join(tmpdir(), "run-")));
 
 describe("newRun", () => {
   it("runs in one session share a session dir and write run.json + active-run", () => {

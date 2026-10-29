@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { main } from "../src/cli";
@@ -12,7 +12,7 @@ beforeEach(() => {
   out = "";
   vi.spyOn(process.stdout, "write").mockImplementation((s: any) => { out += String(s); return true; });
   vi.spyOn(process.stderr, "write").mockImplementation((s: any) => { out += String(s); return true; });
-  cwd = mkdtempSync(join(tmpdir(), "rcli-"));
+  cwd = realpathSync(mkdtempSync(join(tmpdir(), "rcli-")));
   vi.spyOn(process, "cwd").mockReturnValue(cwd);
 });
 afterEach(() => vi.restoreAllMocks());
@@ -33,7 +33,7 @@ describe("run cli", () => {
   });
 
   it("won't start a second run while one is still going, unless --force", async () => {
-    process.env.BASELINE_DATA = mkdtempSync(join(tmpdir(), "rcli-data-"));
+    process.env.BASELINE_DATA = realpathSync(mkdtempSync(join(tmpdir(), "rcli-data-")));
     expect(await main(["run", "new", "--url", "http://x", "--label", "a"])).toBe(0);
     out = "";
     expect(await main(["run", "new", "--url", "http://x", "--label", "b"])).toBe(4);

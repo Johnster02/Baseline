@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { secretForm } from "../src/config/secret-form";
@@ -7,7 +7,7 @@ import { getSecret } from "../src/config/secrets";
 
 describe("secret form", () => {
   it("saves what the user types in the local form, never echoing it", async () => {
-    const data = mkdtempSync(join(tmpdir(), "d-")), proj = mkdtempSync(join(tmpdir(), "p-"));
+    const data = realpathSync(mkdtempSync(join(tmpdir(), "d-"))), proj = realpathSync(mkdtempSync(join(tmpdir(), "p-")));
     let shown = "";
     const done = secretForm({ data, projectDir: proj, runner: "customer", origin: "https://shop.acme.test", open: (u) => { shown = u; } });
     await vi.waitFor(() => { if (!shown) throw new Error("not open yet"); }, { timeout: 5000 });
@@ -21,7 +21,7 @@ describe("secret form", () => {
     expect(getSecret(data, proj, "customer")).toEqual({ username: "c@acme.test", password: "p'w\"\\1", origin: "https://shop.acme.test" });
   });
   it("refuses a post from another site and closes after one use", async () => {
-    const data = mkdtempSync(join(tmpdir(), "d-")), proj = mkdtempSync(join(tmpdir(), "p-"));
+    const data = realpathSync(mkdtempSync(join(tmpdir(), "d-"))), proj = realpathSync(mkdtempSync(join(tmpdir(), "p-")));
     let shown = "";
     const done = secretForm({ data, projectDir: proj, runner: "customer", origin: "https://shop.acme.test", open: (u) => { shown = u; } });
     await vi.waitFor(() => { if (!shown) throw new Error("not open yet"); }, { timeout: 5000 });

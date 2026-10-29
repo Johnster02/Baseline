@@ -1,7 +1,7 @@
 // `s.fixture()` and `s.upload()`: a script builds its own test data from files shipped with the
 // plugin, and may name nothing outside its run folder. The refusals are the point of this file.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { startFixture } from "./fixture-app/server";
@@ -17,12 +17,12 @@ let outside: string;
 
 beforeAll(async () => {
   // Trusted run state goes to the data folder: keep it out of the real one.
-  process.env.BASELINE_DATA = mkdtempSync(join(tmpdir(), "data-"));
+  process.env.BASELINE_DATA = realpathSync(mkdtempSync(join(tmpdir(), "data-")));
   f = await startFixture();
-  state = join(mkdtempSync(join(tmpdir(), "st-")), "state.json");
+  state = join(realpathSync(mkdtempSync(join(tmpdir(), "st-"))), "state.json");
   const host = new URL(f.url).hostname;
   writeFileSync(state, JSON.stringify({ cookies: [{ name: "sid", value: "ok", domain: host, path: "/", expires: -1, httpOnly: true, secure: false, sameSite: "Lax" }], origins: [] }));
-  outside = join(mkdtempSync(join(tmpdir(), "outside-")), "secret.txt");
+  outside = join(realpathSync(mkdtempSync(join(tmpdir(), "outside-"))), "secret.txt");
   writeFileSync(outside, "pretend this is a saved session\n");
 });
 afterAll(() => f.stop());
@@ -36,7 +36,7 @@ const lines = (p: string) => readJsonl<Record<string, unknown>>(p);
 const had = (method: string, path: string) => f.requests.some((r) => r.method === method && r.path === path);
 
 async function withSession(runner: typeof look, fn: (s: Session, dir: string) => Promise<void>): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), "run-"));
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "run-")));
   const cfg = loadConfig(dir);
   const s = await openSession({ runDir: dir, runId: "r-test", runner, cfg, baseUrl: f.url, storageState: state });
   try { await fn(s, dir); } finally { await s.close(); }

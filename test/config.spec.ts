@@ -7,7 +7,7 @@ import { secretsPath, setSecret, getSecret } from "../src/config/secrets";
 import { defaultPatterns, patternsSchema, projectConfigSchema } from "../src/config/schema";
 import { isProduction } from "../src/config/target";
 
-const tmp = (p = "cfg-") => mkdtempSync(join(tmpdir(), p));
+const tmp = (p = "cfg-") => realpathSync(mkdtempSync(join(tmpdir(), p)));
 
 describe("config", () => {
   it("a fresh project gets br2049 and no runners", () => {
@@ -209,5 +209,30 @@ describe("the setup summary names the user's own risky words", () => {
   it("says nothing extra when the user added nothing", () => {
     const d = describePermissions(newRunner("c", "c", { kind: "session" }), patternsSchema.parse({}));
     expect(d.cannot.join(" | ")).not.toMatch(/yours:/);
+  });
+});
+
+describe("paths on a filesystem that ignores case", () => {
+  it("folds case where the filesystem does, and not where it doesn't", async () => {
+    const { isInside } = await import("../src/core/paths");
+    const dir = "/Users/j/.config/baseline", spelled = "/users/j/.config/BASELINE/secrets";
+    // Both branches are checked on every platform, so the macOS rule is covered by a Linux CI run.
+    expect(isInside(dir, spelled, "darwin")).toBe(true);
+    expect(isInside(dir, spelled, "win32")).toBe(true);
+    expect(isInside(dir, spelled, "linux")).toBe(false);
+  });
+
+  it("folding case does not make a neighbouring folder look nested", async () => {
+    const { isInside } = await import("../src/core/paths");
+    for (const p of ["darwin", "linux"] as const) {
+      expect(isInside("/Users/j/.config/baseline", "/Users/j/.config/baseline-other/x", p)).toBe(false);
+      expect(isInside("/Users/j/.config/baseline", "/Users/j/.config/baseline", p)).toBe(true);
+    }
+  });
+
+  it("the live default follows this machine", async () => {
+    const { isInside } = await import("../src/core/paths");
+    const folds = process.platform === "darwin" || process.platform === "win32";
+    expect(isInside("/Users/j/.config/baseline", "/users/j/.config/BASELINE/secrets")).toBe(folds);
   });
 });

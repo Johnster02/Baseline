@@ -1,6 +1,6 @@
 // The guard hooks in-process: runGuardHook (shared by dist/hook.cjs) and `baseline hook <name>`.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runGuardHook, isGuardHook, safeGuardHook } from "../src/hooks/handlers";
@@ -14,8 +14,8 @@ const env = () => ({ ...process.env, BASELINE_DATA: data, CLAUDE_PROJECT_DIR: pr
 const call = (name: Parameters<typeof runGuardHook>[0], input: object) => runGuardHook(name, JSON.stringify({ cwd: project, ...input }), env());
 
 beforeEach(() => {
-  data = mkdtempSync(join(tmpdir(), "hh-data-"));
-  project = mkdtempSync(join(tmpdir(), "hh-proj-"));
+  data = realpathSync(mkdtempSync(join(tmpdir(), "hh-data-")));
+  project = realpathSync(mkdtempSync(join(tmpdir(), "hh-proj-")));
   process.env.BASELINE_DATA = data;
   runDir = join(project, ".baseline", "sessions", "s", "runs", "r-1");
   mkdirSync(runDir, { recursive: true });
@@ -116,7 +116,7 @@ describe("baseline hook", () => {
     expect(await main(["hook", "bash-guard"])).toBe(0);
   });
   it("store-options records the plugin data pointer", async () => {
-    const home = mkdtempSync(join(tmpdir(), "hh-home-"));
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "hh-home-")));
     const prev = { HOME: process.env.HOME, CLAUDE_PLUGIN_DATA: process.env.CLAUDE_PLUGIN_DATA };
     process.env.HOME = home;
     process.env.CLAUDE_PLUGIN_DATA = join(home, ".claude", "plugins", "data", "baseline");
@@ -129,7 +129,7 @@ describe("baseline hook", () => {
     }
   });
   it("store-options brings a login saved in the legacy folder across", async () => {
-    const home = mkdtempSync(join(tmpdir(), "hh-home-"));
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "hh-home-")));
     const legacy = join(home, ".config", "baseline");
     mkdirSync(join(legacy, "secrets"), { recursive: true, mode: 0o700 });
     writeFileSync(join(legacy, "secrets", "abc.json"), "{}", { mode: 0o600 });

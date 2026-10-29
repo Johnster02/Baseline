@@ -1,6 +1,6 @@
 // `baseline signin` refuses to type stored passwords anywhere but the site under test.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { main } from "../src/cli";
@@ -14,9 +14,9 @@ beforeEach(() => {
   out = "";
   vi.spyOn(process.stdout, "write").mockImplementation((s: any) => { out += String(s); return true; });
   vi.spyOn(process.stderr, "write").mockImplementation((s: any) => { out += String(s); return true; });
-  cwd = mkdtempSync(join(tmpdir(), "signin-cli-"));
+  cwd = realpathSync(mkdtempSync(join(tmpdir(), "signin-cli-")));
   vi.spyOn(process, "cwd").mockReturnValue(cwd);
-  process.env.BASELINE_DATA = mkdtempSync(join(tmpdir(), "data-"));
+  process.env.BASELINE_DATA = realpathSync(mkdtempSync(join(tmpdir(), "data-")));
   const cfg = loadConfig(cwd);
   saveConfig(cwd, { ...cfg, lastUrl: "https://staging.acme.dev", runners: [newRunner("customer", "customer", { kind: "form", loginUrl: "/login" })] });
 });

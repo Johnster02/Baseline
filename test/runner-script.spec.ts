@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { startFixture } from "./fixture-app/server";
@@ -24,8 +24,8 @@ afterAll(() => {
 });
 
 function project() {
-  const proj = mkdtempSync(join(tmpdir(), "proj-"));
-  const data = mkdtempSync(join(tmpdir(), "data-"));
+  const proj = realpathSync(mkdtempSync(join(tmpdir(), "proj-")));
+  const data = realpathSync(mkdtempSync(join(tmpdir(), "data-")));
   dataDirs.push(data);
   const env = { ...process.env, BASELINE_DATA: data };
   const cli = (args: string[]) => spawnSync("node", [join(ROOT, "dist/cli.cjs"), ...args], { cwd: proj, env, encoding: "utf8" });
@@ -175,7 +175,7 @@ describe("baseline script (browser in the parent, script talks over IPC)", () =>
   });
 
   it("refuses an unknown runner", () => {
-    const proj = mkdtempSync(join(tmpdir(), "proj-"));
+    const proj = realpathSync(mkdtempSync(join(tmpdir(), "proj-")));
     const r = spawnSync("node", [join(ROOT, "dist/cli.cjs"), "script", "ghost", "x.cjs", "--run", proj], { cwd: proj, encoding: "utf8", env: { ...process.env, BASELINE_DATA: proj } });
     expect(r.status).toBe(2);
   });

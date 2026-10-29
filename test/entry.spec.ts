@@ -1,13 +1,13 @@
 // The bundled CLI as agents run it: from the project root or from inside a run folder.
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const CLI = join(__dirname, "..", "dist", "cli.cjs");
 const run = (args: string[], cwd: string) =>
-  spawnSync(process.execPath, [CLI, ...args], { cwd, encoding: "utf8", env: { ...process.env, BASELINE_DATA: mkdtempSync(join(tmpdir(), "entry-data-")) } });
+  spawnSync(process.execPath, [CLI, ...args], { cwd, encoding: "utf8", env: { ...process.env, BASELINE_DATA: realpathSync(mkdtempSync(join(tmpdir(), "entry-data-"))) } });
 
 describe("dist/cli.cjs", () => {
   it("prints the plugin version", () => {
@@ -21,7 +21,7 @@ describe("dist/cli.cjs", () => {
     expect(r.stderr).toMatch(/usage: baseline/);
   });
   it("works from inside a run folder by moving to the project root", () => {
-    const root = mkdtempSync(join(tmpdir(), "entry-proj-"));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "entry-proj-")));
     mkdirSync(join(root, ".baseline"));
     writeFileSync(join(root, ".baseline", "config.json"), "{}");
     const deep = join(root, ".baseline", "sessions", "s", "runs", "r-1");
