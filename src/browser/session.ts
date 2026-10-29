@@ -1,10 +1,10 @@
-import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import type { Browser, BrowserContext, Locator, Page, Request, Response, Route } from "playwright";
 import { projectConfigSchema, type ProjectConfig, type Runner } from "../config/schema";
 import { appendJsonl, errMsg, readJsonFile, readJsonl } from "../core/json";
-import { dataDir, trustedFiles } from "../core/paths";
+import { dataDir, isInside, realPath, trustedFiles } from "../core/paths";
 import { readTrustedRun } from "../core/trusted-run";
 import { ClickAttribution } from "./click-attribution";
 import { decide, redactUrl, wsDecide } from "./guard";
@@ -45,6 +45,8 @@ export type Session = {
   title(): Promise<string>;
   shot(name: string, caption: string): Promise<string>;
   created(kind: string, label: string, url?: string): void;
+  fixture(name: string): Promise<string>;
+  upload(t: Target, paths: string[]): Promise<void>;
   close(): Promise<void>;
 };
 
@@ -66,6 +68,52 @@ export function loadPlaywright(): typeof import("playwright") {
     try { return createRequire(b)("playwright") as typeof import("playwright"); } catch (e) { last = e; }
   }
   throw new Error("Playwright is not installed. Run /baseline:setup first. (" + errMsg(last) + ")");
+}
+
+/** The files `fixture()` serves, shipped with the plugin: <root>/fixtures, beside dist/. */
+function shippedFixtures(): string {
+  const roots: string[] = [];
+  // Bundled, __dirname is <root>/dist; from source (tests) it is <root>/src/browser.
+  if (typeof __dirname !== "undefined") roots.push(resolve(__dirname, ".."), resolve(__dirname, "..", ".."));
+  roots.push(process.cwd());
+  for (const r of roots) { const d = join(r, "fixtures"); if (existsSync(d)) return d; }
+  return join(roots[0] ?? process.cwd(), "fixtures");
+}
+
+/** What the plugin ships, by name. A name only: `fixture()` never takes a path. */
+function fixtureNames(): string[] {
+  try { return readdirSync(shippedFixtures()).filter((n) => !n.startsWith(".")).sort(); } catch { return []; }
+}
+
+const FIXTURE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/**
+ * The paths an agent script may upload: inside the run folder, and nowhere else.
+ *
+ * A script's own file access is already limited to its run folder by Node's permission model
+ * (`--allow-fs-read=<runDir>`, see runner-script.ts), which keeps saved sessions and credentials in
+ * the data folder out of reach. This runs in the parent process, which has no such limit, so it
+ * draws the same boundary itself — and does it before the page or the file input is touched, so a
+ * refused path never reaches the browser. Absolute paths, `..` and symlinks out are all refused;
+ * there is deliberately no way to upload from the data folder, the project or the user's home.
+ */
+function uploadPaths(runDir: string, paths: readonly unknown[]): string[] {
+  if (paths.length === 0) throw new Error("upload needs at least one path inside the run folder.");
+  const root = realPath(runDir);
+  return paths.map((p) => {
+    if (typeof p !== "string" || p.trim() === "") throw new Error(`upload needs a path inside the run folder, not ${JSON.stringify(p)}.`);
+    const refuse = (why: string) => new Error(`upload refuses "${p}": ${why} Give a path inside the run folder, such as the one s.fixture() returns.`);
+    if (isAbsolute(p)) throw refuse("absolute paths are not allowed.");
+    // Resolve "..' first, so an escape is refused before the file system is touched at all.
+    const target = resolve(root, p);
+    if (!isInside(root, target)) throw refuse("it leads outside the run folder.");
+    let real: string;
+    try { real = realpathSync.native(target); } catch { throw refuse("there is no such file in the run folder."); }
+    // Now the real path: a symlink, or a symlinked folder on the way, must not reach out either.
+    if (!isInside(root, real)) throw refuse("it points outside the run folder.");
+    if (!statSync(real).isFile()) throw refuse("it is not a file.");
+    return real;
+  });
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
@@ -377,6 +425,26 @@ function actions(c: Ctx, page: Page, browser: Browser): Session {
       await page.screenshot({ path: file, fullPage: false, type: "jpeg", quality: 70 });
       appendJsonl(join(o.runDir, "shots.jsonl"), { runner: o.runner.key, name: safe, path: rel, caption, at: new Date().toISOString() } satisfies ShotEntry);
       return rel;
+    },
+    async fixture(name: string) {
+      const available = fixtureNames();
+      if (typeof name !== "string" || !FIXTURE_NAME.test(name) || !available.includes(name)) {
+        throw new Error(`There is no fixture called ${JSON.stringify(String(name))}. Fixtures: ${available.join(", ") || "none"}.`);
+      }
+      // Into the run folder, so the script's own read permission covers the file it gets back.
+      mkdirSync(join(o.runDir, "fixtures"), { recursive: true });
+      copyFileSync(join(shippedFixtures(), name), join(o.runDir, "fixtures", name));
+      return join("fixtures", name);
+    },
+    async upload(t, paths) {
+      // Refuse first: a path outside the run folder never reaches the page or the input at all.
+      uploadPaths(o.runDir, paths);
+      const l = loc(t);
+      await noteTarget(l, "input");
+      // Then check again, right before the browser reads them. The script is a separate process
+      // that may write its run folder while this call is in flight, so a path that was inside the
+      // folder a moment ago (before the round-trip above) is not proof enough on its own.
+      await l.setInputFiles(uploadPaths(o.runDir, paths));
     },
     created(kind: string, label: string, url?: string) {
       // Labels start with "Baseline <runId>" (see agents/cleaner.md).

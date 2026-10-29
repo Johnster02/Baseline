@@ -41,6 +41,20 @@ const PAGES: Record<string, string> = {
   // Unlabelled fields: typing autosaves, Enter sends a search from a form with no submit button.
   "/notes": page("Notes", `<textarea id="n" oninput="call('/api/notes/save', {text: this.value})"></textarea>
     <form id="f" onsubmit="event.preventDefault(); call('/api/notes/find', {q: document.getElementById('s').value})"><input id="s"></form>`),
+  // A file input that echoes what was picked, and a button that sends it as a multipart POST.
+  "/upload": page("Attachments", `<form onsubmit="event.preventDefault(); send()">
+    <label>File <input type="file" name="file" id="f" multiple onchange="document.getElementById('picked').textContent = Array.from(this.files).map((x) => x.name).join(', ')"></label>
+    <button type="submit">Attach file</button></form>
+    <p id="picked"></p>
+    <script>
+    function send() {
+      const d = new FormData();
+      for (const x of document.getElementById('f').files) d.append('file', x, x.name);
+      return fetch('/api/attach', { method: 'POST', body: d })
+        .then((r) => document.getElementById('status').textContent = 'done ' + r.status)
+        .catch(() => document.getElementById('status').textContent = 'failed');
+    }
+    </script>`),
   "/users/7/delete": page("Removed", `<p>Member removed.</p>`),
   "/logout": page("Logged out", `<p>Bye.</p>`),
   "/tracked": page("Tracked", `<p>This page reports a view on load.</p><script>fetch('/api/track', {method: 'POST', body: '{}'})</script>`),
