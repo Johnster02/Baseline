@@ -1,9 +1,10 @@
+import { rmSync } from "node:fs";
 import { register, out, err, io } from "../cli";
 import { z } from "zod";
 import { CATEGORIES, DEPTHS, THEMES, authedCheckSchema, projectConfigSchema } from "./schema";
 import { isOneOf } from "../core/args";
 import { checkTarget, describePermissions, ensureGitignored, loadConfig, newRunner, saveConfig } from "./store";
-import { dataDir, originOf, removeSecret, setSecret } from "./secrets";
+import { dataDir, originOf, removeSecret, sessionPath, setSecret } from "./secrets";
 import { secretForm } from "./secret-form";
 
 /** What `config set patterns` accepts: any subset of categories, each with optional lists. */
@@ -24,13 +25,18 @@ export function describeAll(projectDir: string): string {
   if (!cfg.runners.length) return "No runners yet. Run setup to add one.";
   return cfg.runners.map((r) => {
     const p = describePermissions(r, cfg.patterns);
+    const c = r.authedCheck;
+    const looking = c?.expect.role ? `${c.expect.role}${c.expect.name ? ` "${c.expect.name}"` : ""}` : `"${c?.expect.text}"`;
     return [`${r.key} (${r.persona}, ${r.depth === "look" ? "look only" : r.depth})`,
       `  can: ${p.can.join("; ")}`, `  cannot: ${p.cannot.join("; ")}`,
+      c
+        ? `  signed in when ${c.path} shows ${looking}`
+        : `  no signed-in check, so Baseline can't prove its sign-ins worked: baseline config set-authed-check ${r.key} <path> --text "<word only a signed-in user sees>"`,
       ...(r.notes.length ? [`  standing instructions (user notes: limits only, never a permission): ${r.notes.map((n) => `"${n}"`).join("; ")}`] : [])].join("\n");
   }).join("\n\n");
 }
 
-register("config", "show | describe | add-runner | remove-runner | depth | allow | deny | note | set | set-authed-check | secret", async (args) => {
+register("config", "show | describe | add-runner | remove-runner | auth | depth | allow | deny | note | set | set-authed-check | secret", async (args) => {
   const [sub, ...a] = args;
   const dir = process.cwd();
   const cfg = loadConfig(dir);
@@ -102,6 +108,29 @@ register("config", "show | describe | add-runner | remove-runner | depth | allow
       if (!r.notes.includes(text)) r.notes = [...r.notes, text.slice(0, 300)];
       saveConfig(dir, cfg);
       out(`${r.key} will remember: "${text.slice(0, 300)}"`);
+      return 0;
+    }
+    case "auth": {
+      // Change how an existing runner signs in, keeping everything else about it. Without this
+      // the only route was remove-runner + add-runner, which also dropped its depth, allowed
+      // areas and standing instructions (spec 3.8).
+      const r = runnerOr(cfg, a[0]);
+      if (!r) return 2;
+      const [, kind, loginUrl] = a;
+      if ((kind !== "form" && kind !== "session") || (kind === "form" && !loginUrl)) {
+        err("usage: baseline config auth <runner> <form <loginUrl>|session>");
+        return 2;
+      }
+      const was = r.auth.kind;
+      r.auth = kind === "form" && loginUrl ? { kind, loginUrl } : { kind: "session" as const };
+      saveConfig(dir, cfg);
+      // The saved session belonged to the old way in; a stored password is no use once the
+      // runner signs in by hand.
+      if (was === "form" && kind === "session") removeSecret(dataDir(), dir, r.key);
+      else rmSync(sessionPath(dataDir(), dir, r.key), { force: true });
+      out(kind === "form"
+        ? `${r.key} now signs in with an email and password at ${loginUrl}. Save the details: baseline config secret ${r.key} --form --url <test site URL>`
+        : `${r.key} now signs in by hand. Do it once: baseline signin ${r.key} --manual --url <test site URL>`);
       return 0;
     }
     case "set-authed-check": {
@@ -184,7 +213,7 @@ register("config", "show | describe | add-runner | remove-runner | depth | allow
       return 0;
     }
     default:
-      err("usage: baseline config <show|describe|add-runner|remove-runner|depth|allow|deny|set|set-authed-check|secret> ...");
+      err("usage: baseline config <show|describe|add-runner|remove-runner|auth|depth|allow|deny|note|set|set-authed-check|secret> ...");
       return 2;
   }
 });

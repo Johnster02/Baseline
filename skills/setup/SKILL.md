@@ -18,7 +18,9 @@ choices. Re-running setup edits what is there; it never starts over.
    - a short key (lowercase, like `customer` or `admin`) and the persona it plays;
    - how it signs in: **with an email and password** (ask for the sign-in page path, e.g.
      `/login`) or **by hand once** (for SSO, MFA or magic links);
-   - `baseline config add-runner <key> <persona> form <loginPath>` or `... session`;
+   - `baseline config add-runner <key> <persona> form <loginPath>` or `... session`. To change how
+     a runner that already exists signs in, use `baseline config auth <key> <form <loginPath>|session>`,
+     which keeps its depth, protected areas and standing instructions. Never remove and re-add it;
    - for a password runner, run `baseline config secret <key> --form --url <test site URL>`. It
      opens a one-time form in the user's browser, and the details go straight to a private file.
      They are only ever typed on that site, so use the site the user is testing (the form shows it). **Never ask for a

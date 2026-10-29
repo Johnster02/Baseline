@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { CATEGORIES, CATEGORY_LABEL, projectConfigSchema, runnerSchema } from "./schema";
+import { CATEGORIES, CATEGORY_LABEL, defaultPatterns, projectConfigSchema, runnerSchema } from "./schema";
 import type { Patterns, ProjectConfig, Runner } from "./schema";
 
 export const configDir = (projectDir: string) => join(projectDir, ".baseline");
@@ -51,17 +51,29 @@ const DEPTH_CAN: Record<Runner["depth"], string[]> = {
   workflow: ["browse pages and read what they show", "create its own test objects labelled with the run ID", "take its own test objects through every step of a flow", "edit and delete only what it created"],
 };
 
+/**
+ * What each runner may and may not do, in plain words. Setup shows this as its final
+ * confirmation, so the words the user added themselves are listed in full and never truncated:
+ * the defaults are long enough that a user's own additions always fell off the end of the old
+ * six-item cut, which meant setup never confirmed what they had just typed (spec 3.8).
+ */
 export function describePermissions(runner: Runner, patterns: Patterns): { can: string[]; cannot: string[] } {
   const can = [...DEPTH_CAN[runner.depth]];
   const cannot: string[] = [];
   if (runner.depth === "look") cannot.push("submit forms or change any data");
   else cannot.push("change or delete anything it did not create");
+  const defaults = defaultPatterns();
   for (const c of CATEGORIES) {
     const label = CATEGORY_LABEL[c];
     if (runner.allow.includes(c)) { can.push(label); continue; }
-    const p = c === "live" ? undefined : patterns[c];
-    const named = p && (p.words.length || p.urls.length) ? ` (watching for: ${[...p.words, ...p.urls].slice(0, 6).join(", ")})` : "";
-    cannot.push(label + named);
+    if (c === "live") { cannot.push(label); continue; }
+    const p = patterns[c], d = defaults[c];
+    const stock = [...p.words.filter((w) => d.words.includes(w)), ...p.urls.filter((u) => d.urls.includes(u))];
+    const mine = [...p.words.filter((w) => !d.words.includes(w)), ...p.urls.filter((u) => !d.urls.includes(u))];
+    const parts: string[] = [];
+    if (stock.length) parts.push(`watching for: ${stock.slice(0, 6).join(", ")}${stock.length > 6 ? `, and ${stock.length - 6} more` : ""}`);
+    if (mine.length) parts.push(`yours: ${mine.join(", ")}`);
+    cannot.push(parts.length ? `${label} (${parts.join("; ")})` : label);
   }
   return { can, cannot };
 }

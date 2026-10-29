@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { main } from "../src/cli";
 import "../src/commands";
 import { loadConfig } from "../src/config/store";
+import { getSecret, setSecret } from "../src/config/secrets";
 
 let out = "";
 let cwd: string;
@@ -138,5 +139,59 @@ describe("config set-authed-check", () => {
     await addRunner();
     expect(await main(["config", "set-authed-check", "customer", "/account"])).toBe(2);
     expect(await main(["config", "set-authed-check", "nobody", "/account", "--text", "x"])).toBe(2);
+  });
+});
+
+describe("config auth", () => {
+  const fullRunner = async () => {
+    await main(["config", "add-runner", "customer", "customer", "form", "/login"]);
+    await main(["config", "depth", "customer", "create"]);
+    await main(["config", "allow", "customer", "email"]);
+    await main(["config", "note", "customer", "only touch the staging workspace"]);
+    await main(["config", "set-authed-check", "customer", "/account", "--text", "Sign out"]);
+  };
+
+  it("switching to manual sign-in keeps depth, allowed areas, notes and the signed-in check", async () => {
+    await fullRunner();
+    setSecret(process.env.BASELINE_DATA!, cwd, "customer", { username: "u", password: "p", origin: "https://staging.acme.dev" });
+    expect(await main(["config", "auth", "customer", "session"])).toBe(0);
+    const r = loadConfig(cwd).runners[0]!;
+    expect(r).toMatchObject({ depth: "create", allow: ["email"], auth: { kind: "session" } });
+    expect(r.notes).toEqual(["only touch the staging workspace"]);
+    expect(r.authedCheck).toEqual({ path: "/account", expect: { text: "Sign out" } });
+    // Leaving the password form drops the stored password with it.
+    expect(getSecret(process.env.BASELINE_DATA!, cwd, "customer")).toBeUndefined();
+  });
+
+  it("switching to a password form keeps everything else and takes the login path", async () => {
+    await main(["config", "add-runner", "admin", "admin", "session"]);
+    await main(["config", "depth", "admin", "workflow"]);
+    expect(await main(["config", "auth", "admin", "form", "/sign-in"])).toBe(0);
+    expect(loadConfig(cwd).runners[0]).toMatchObject({ depth: "workflow", auth: { kind: "form", loginUrl: "/sign-in" } });
+  });
+
+  it("refuses an unknown runner, a missing kind and a form with no login path", async () => {
+    await fullRunner();
+    expect(await main(["config", "auth", "nobody", "session"])).toBe(2);
+    expect(await main(["config", "auth", "customer"])).toBe(2);
+    expect(await main(["config", "auth", "customer", "form"])).toBe(2);
+    expect(await main(["config", "auth", "customer", "magic-link"])).toBe(2);
+  });
+});
+
+describe("config describe says whether a sign-in can be proved", () => {
+  it("names the signed-in check when there is one", async () => {
+    await main(["config", "add-runner", "customer", "customer", "form", "/login"]);
+    await main(["config", "set-authed-check", "customer", "/account", "--text", "Sign out"]);
+    out = "";
+    await main(["config", "describe"]);
+    expect(out).toMatch(/signed in when \/account shows "Sign out"/);
+  });
+
+  it("says plainly when a sign-in cannot be proved", async () => {
+    await main(["config", "add-runner", "admin", "admin", "session"]);
+    out = "";
+    await main(["config", "describe"]);
+    expect(out).toMatch(/can't prove|cannot prove/i);
   });
 });

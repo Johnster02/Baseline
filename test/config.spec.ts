@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, saveConfig, ensureGitignored, newRunner, checkTarget, describePermissions } from "../src/config/store";
 import { secretsPath, setSecret, getSecret } from "../src/config/secrets";
-import { defaultPatterns, projectConfigSchema } from "../src/config/schema";
+import { defaultPatterns, patternsSchema, projectConfigSchema } from "../src/config/schema";
 import { isProduction } from "../src/config/target";
 
 const tmp = (p = "cfg-") => mkdtempSync(join(tmpdir(), p));
@@ -187,5 +187,27 @@ describe("where Baseline keeps its data", () => {
     withEnv({ HOME: home, BASELINE_DATA: undefined, CLAUDE_PLUGIN_DATA: undefined }, () => {
       expect(dataDirCandidates()).toContain(join(home, ".config", "baseline"));
     });
+  });
+});
+
+describe("the setup summary names the user's own risky words", () => {
+  it("shows every word the user added, past the first few defaults", () => {
+    const p = patternsSchema.parse({ delete: { words: ["nuke the workspace", "obliterate tenant"] } });
+    const r = newRunner("customer", "customer", { kind: "session" });
+    const d = describePermissions(r, p);
+    const line = d.cannot.join(" | ");
+    expect(line).toContain("nuke the workspace");
+    expect(line).toContain("obliterate tenant");
+  });
+
+  it("marks them as the user's own, so a default is never mistaken for one they chose", () => {
+    const p = patternsSchema.parse({ finance: { urls: ["/pay/**"] } });
+    const d = describePermissions(newRunner("c", "c", { kind: "session" }), p);
+    expect(d.cannot.join(" | ")).toMatch(/yours:.*\/pay\/\*\*/);
+  });
+
+  it("says nothing extra when the user added nothing", () => {
+    const d = describePermissions(newRunner("c", "c", { kind: "session" }), patternsSchema.parse({}));
+    expect(d.cannot.join(" | ")).not.toMatch(/yours:/);
   });
 });
