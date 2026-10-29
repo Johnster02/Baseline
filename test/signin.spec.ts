@@ -3,7 +3,8 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startFixture, FIXTURE_USER } from "./fixture-app/server";
-import { signIn, SignedOutError, chooseSignInUrl, looksSignedOut } from "../src/browser/signin";
+import { signIn, SignedOutError, captureSession, chooseSignInUrl, looksSignedOut } from "../src/browser/signin";
+import { chooseChannel } from "../src/browser/launch";
 import { openSession } from "../src/browser/session";
 import { trustRun } from "./helpers/trust";
 import { loadConfig, newRunner } from "../src/config/store";
@@ -171,4 +172,77 @@ describe("proving a runner is signed in", () => {
     expect(r.ok).toBe(false);
     expect(existsSync(sessionPath(s.data, s.proj, "customer"))).toBe(false);
   }, 30000);
+});
+
+describe("which browser a hand-driven sign-in uses", () => {
+  it("prefers a real Chrome, then Edge, then bundled Chromium", () => {
+    expect(chooseChannel((n) => n === "chrome").channel).toBe("chrome");
+    expect(chooseChannel((n) => n === "msedge").channel).toBe("msedge");
+    expect(chooseChannel((n) => n === "chrome" || n === "msedge").channel).toBe("chrome");
+    expect(chooseChannel(() => false).channel).toBeUndefined();
+  });
+
+  it("never launches with the flags that mark the browser as automated", () => {
+    for (const c of [chooseChannel(() => false), chooseChannel(() => true)]) {
+      expect(c.ignoreDefaultArgs).toContain("--enable-automation");
+      expect(c.args).toContain("--disable-blink-features=AutomationControlled");
+    }
+  });
+});
+
+describe("capturing a hand-driven sign-in", () => {
+  let pub: Awaited<ReturnType<typeof startFixture>>;
+  beforeAll(async () => { pub = await startFixture(0, { publicHome: true }); });
+  afterAll(() => pub.stop());
+
+  const runner = () => newRunner("admin", "admin", { kind: "session" }, { path: "/account", expect: { text: "Sign out" } });
+
+  it("a window closed while still signed out reports failure and saves no session", async () => {
+    const s = setup(FIXTURE_USER.password, pub.url);
+    const r = await captureSession(runner(), { ...s.cfg, runners: [runner()] }, { projectDir: s.proj, data: s.data, baseUrl: pub.url }, {
+      headless: true,
+      onReady: async (ctx) => { for (const p of ctx.pages()) await p.close(); },
+    });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/signed out|did not show/i);
+    expect(existsSync(sessionPath(s.data, s.proj, "admin"))).toBe(false);
+  }, 60000);
+
+  it("a signed-in window that is closed saves the session and proves it", async () => {
+    const s = setup(FIXTURE_USER.password, pub.url);
+    const r = await captureSession(runner(), { ...s.cfg, runners: [runner()] }, { projectDir: s.proj, data: s.data, baseUrl: pub.url }, {
+      headless: true,
+      onReady: async (ctx) => {
+        const page = ctx.pages()[0]!;
+        await page.goto(pub.url + "/login");
+        await page.fill('input[type="email"]', FIXTURE_USER.username);
+        await page.fill('input[type="password"]', FIXTURE_USER.password);
+        await page.press('input[type="password"]', "Enter");
+        await page.waitForURL(/\/cart/);
+        await page.close();
+      },
+    });
+    expect(r).toMatchObject({ ok: true, strength: "proved" });
+    expect(existsSync(sessionPath(s.data, s.proj, "admin"))).toBe(true);
+  }, 60000);
+
+  it("a popup closing does not end the capture", async () => {
+    const s = setup(FIXTURE_USER.password, pub.url);
+    let popupClosed = false, endedBeforePopup = false;
+    const r = await captureSession(runner(), { ...s.cfg, runners: [runner()] }, { projectDir: s.proj, data: s.data, baseUrl: pub.url }, {
+      headless: true,
+      onReady: async (ctx) => {
+        const popup = await ctx.newPage();
+        await popup.goto(pub.url + "/login");
+        await popup.close();
+        popupClosed = true;
+        // Still waiting: the capture ends when the window goes, not when a popup does.
+        await new Promise((r2) => setTimeout(r2, 300));
+        for (const p of ctx.pages()) await p.close();
+      },
+    });
+    expect(popupClosed).toBe(true);
+    expect(endedBeforePopup).toBe(false);
+    expect(r.ok).toBe(false);
+  }, 60000);
 });

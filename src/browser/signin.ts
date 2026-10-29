@@ -1,10 +1,11 @@
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
-import type { Page } from "playwright";
+import { chmodSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import type { BrowserContext, Page } from "playwright";
 import type { ProjectConfig, Runner } from "../config/schema";
 import { checkTarget } from "../config/store";
-import { getSecret, originOf, sessionPath } from "../config/secrets";
+import { getSecret, originOf, projectHash, sessionPath } from "../config/secrets";
 import { loadPlaywright } from "./session";
+import { chooseChannel } from "./launch";
 
 export class SignedOutError extends Error {
   constructor(public runner: string, public at: string) {
@@ -185,24 +186,96 @@ export async function signIn(runner: Runner, cfg: ProjectConfig, ctx: SignInCont
   }
 }
 
-/** Opens a visible browser; the user signs in by hand and closes it. The session is saved as they go. */
-export async function captureSession(runner: Runner, cfg: ProjectConfig, ctx: SignInContext): Promise<SignInResult> {
+export type CaptureOptions = {
+  /** Visible by default: the whole point is that a person drives it. Tests override. */
+  headless?: boolean;
+  /** Called once the window is open, with the live context. A test seam. */
+  onReady?: (context: BrowserContext) => Promise<void> | void;
+};
+
+/**
+ * Opens a browser; the user signs in by hand and closes it.
+ *
+ * Three things here were defects (spec 3.2). It used Playwright's bundled Chromium with its
+ * automation flags, which some identity providers refuse to sign in under — so it now prefers a
+ * real Chrome or Edge with those flags off, in a persistent profile, so a popup-based OAuth flow
+ * behaves the way it does in the user's own browser. It ended on the FIRST page close, so an
+ * OAuth popup closing ended the capture — it now ends when the last window goes. And it reported
+ * success whenever the save timer had written anything at all, signed in or not — the captured
+ * state is now checked in a fresh context before it is kept at all.
+ */
+export async function captureSession(runner: Runner, cfg: ProjectConfig, ctx: SignInContext, opts: CaptureOptions = {}): Promise<SignInResult> {
   const target = checkTarget(ctx.baseUrl, cfg, ctx.live ?? runner.allow.includes("live"));
   if (!target.ok) return { key: runner.key, ok: false, error: "refusing: that URL is marked as production or is invalid" };
   const file = sessionPath(ctx.data, ctx.projectDir, runner.key);
-  const { chromium } = loadPlaywright();
-  const browser = await chromium.launch({ headless: false });
-  const context = await browser.newContext({ baseURL: ctx.baseUrl });
-  const page = await context.newPage();
+  const pending = `${file}.capturing`;
   const start = runner.auth.kind === "form" ? new URL(runner.auth.loginUrl, ctx.baseUrl) : new URL(ctx.baseUrl);
-  if (start.host !== new URL(ctx.baseUrl).host) { await browser.close(); return { key: runner.key, ok: false, error: "The login URL is on a different site from the test URL. Refusing to open it." }; }
-  await page.goto(start.toString());
+  if (start.host !== new URL(ctx.baseUrl).host) return { key: runner.key, ok: false, error: "The login URL is on a different site from the test URL. Refusing to open it." };
+
+  const { chromium } = loadPlaywright();
+  const choice = chooseChannel();
+  // A persistent profile, per project and runner, kept in the data folder with everything else
+  // an agent may not read.
+  const profile = join(ctx.data, "profiles", projectHash(ctx.projectDir), runner.key);
+  mkdirSync(profile, { recursive: true, mode: 0o700 });
+  const context = await chromium.launchPersistentContext(profile, {
+    headless: opts.headless ?? false,
+    ...(choice.channel ? { channel: choice.channel } : {}),
+    args: choice.args,
+    ignoreDefaultArgs: choice.ignoreDefaultArgs,
+    baseURL: ctx.baseUrl,
+  });
+
   let saved = false;
-  const timer = setInterval(async () => {
-    try { saveState(file, await context.storageState()); saved = true; } catch { /* window closing */ }
-  }, 2000);
-  await new Promise<void>((res) => { page.on("close", () => res()); browser.on("disconnected", () => res()); });
-  clearInterval(timer);
-  await browser.close().catch(() => {});
-  return saved ? { key: runner.key, ok: true } : { key: runner.key, ok: false, error: "The window closed before a session was saved." };
+  const save = async () => { try { saveState(pending, await context.storageState()); saved = true; } catch { /* window closing */ } };
+  // Set the end condition up before anything can close, so a fast close is not missed.
+  const closed = new Promise<void>((res) => {
+    context.on("close", () => res());
+    const watch = (p: Page) => p.on("close", () => { if (context.pages().length === 0) res(); });
+    context.on("page", watch);
+    context.pages().forEach(watch);
+  });
+
+  const timer = setInterval(() => { void save(); }, 2000);
+  try {
+    const page = context.pages()[0] ?? (await context.newPage());
+    await page.goto(start.toString()).catch(() => { /* the user can navigate themselves */ });
+    await opts.onReady?.(context);
+    await closed;
+  } finally {
+    clearInterval(timer);
+    await save();
+    await context.close().catch(() => {});
+  }
+
+  if (!saved || !existsSync(pending)) {
+    rmSync(pending, { force: true });
+    return { key: runner.key, ok: false, error: "The window closed before a session was saved. Run it again and sign in before closing the window." };
+  }
+  // Nothing is kept until it is checked: a window closed while signed out must not leave a
+  // session behind for a run to pick up.
+  const v = await verifyCaptured(runner, ctx, pending);
+  if (!v.ok) {
+    rmSync(pending, { force: true });
+    return { key: runner.key, ok: false, strength: v.strength, error: `${v.reason} Nothing was saved. Run it again and finish signing in before closing the window.` };
+  }
+  renameSync(pending, file);
+  chmodSync(file, 0o600);
+  return { key: runner.key, ok: true, strength: v.strength, ...(v.reason ? { note: v.reason } : {}) };
+}
+
+/** Load the captured state in a fresh, headless context and ask the site who we are. */
+async function verifyCaptured(runner: Runner, ctx: SignInContext, state: string): Promise<Verification> {
+  const { chromium } = loadPlaywright();
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const check = await browser.newContext({ baseURL: ctx.baseUrl, storageState: state });
+    const page = await check.newPage();
+    await page.goto(ctx.baseUrl, { waitUntil: "load" });
+    return await verifySignedIn(page, runner);
+  } catch (e) {
+    return { ok: false, strength: "weak", reason: `the captured session could not be checked (${(e instanceof Error && e.name) || "error"}).` };
+  } finally {
+    await browser.close().catch(() => {});
+  }
 }

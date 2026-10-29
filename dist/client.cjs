@@ -43,6 +43,8 @@ var COMMANDS = [
   "title",
   "shot",
   "created",
+  "fixture",
+  "upload",
   "close"
 ];
 
