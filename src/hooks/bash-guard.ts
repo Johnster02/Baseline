@@ -32,8 +32,19 @@ const AGENT_FROZEN = /^baseline\s+(run\s+(new|finish)\b|signin\b|config\s+(?!(sh
 const WRITES_FILES = /(^|[^<>&0-9])>>?|(^|[\s;&|(])(tee|cp|mv|rm|rmdir|ln|install|truncate|touch|mkdir|dd|chmod|chown|rsync|unlink)(\s|$)|(^|\s)(sed|perl|ruby)\s+(-\S*\s+)*-i/;
 /** A run started with --live may sign its runners in and check its own target with --live. */
 const LIVE_OK = /^baseline\s+(signin|target-check)\s/;
-/** Overrides that would point baseline at another run, data folder or an unguarded browser. */
-const ENV_OVERRIDE = /\b(BASELINE_(SHARED_BROWSER|RUN_DIR|DATA)|CLAUDE_PLUGIN_DATA)\s*=/;
+/**
+ * Overrides that would point baseline at another run, data folder or an unguarded browser. Only an
+ * assignment at the start of a command counts, so `grep -rn "BASELINE_DATA=" src` reads its own
+ * source without being refused.
+ */
+const ENV_OVERRIDE = /^(BASELINE_(SHARED_BROWSER|RUN_DIR|DATA)|CLAUDE_PLUGIN_DATA)\s*=/i;
+/** Wrappers and earlier, harmless assignments stripped while looking for a leading assignment. */
+const ENV_PREFIX = new RegExp([
+  String.raw`^[({!]\s*`,
+  String.raw`^(?:env|export|declare|readonly|local|typeset|command|exec|nohup|time|builtin|sudo|doas|xargs|eval|set)(?:\s+(?:-u\s+\S+|-{1,2}[\w-]+(?:=\S*)?))*(?:\s+|$)`,
+  String.raw`^(?:ba|z|da|k)?sh(?:\s+-\w+)*\s+-c\s+`,
+  String.raw`^[A-Za-z_]\w*=\S*\s+`,
+].join("|"));
 const BEFORE = String.raw`(^|[\s;&|(\x60'"/])`;
 const HTTP_TOOL = new RegExp(BEFORE + String.raw`(curl|wget|http|https|xh|httpie)['"]?(\s|$)`, "i");
 const SCRIPT_TOOL = new RegExp(BEFORE + String.raw`(python[0-9.]*|node|deno|bun|ruby|php|perl)['"]?(\s|$)`, "i");
@@ -70,6 +81,20 @@ export function normalizeSegment(seg: string): string {
     .replace(/^node(?:\s+-\S+)*\s+\S*\/cli\.cjs(?=\s|$)/, "baseline");
 }
 
+/** True when a command segment starts by setting one of baseline's own variables. */
+export function setsBaselineEnv(command: string): boolean {
+  for (const seg of command.split(SEGMENT_SPLIT)) {
+    let s = seg.replace(/\$'/g, "'").replace(/['"\\]/g, "").trim();
+    for (let i = 0; i < 20 && s; i++) {
+      if (ENV_OVERRIDE.test(s)) return true;
+      const m = ENV_PREFIX.exec(s);
+      if (!m || !m[0]) break;
+      s = s.slice(m[0].length).trimStart();
+    }
+  }
+  return false;
+}
+
 export type GuardResult = { allow: true } | { deny: string };
 
 const DATA_DENY = "Baseline's data folder holds passwords, saved sessions and tracker tokens: tools can't read or change it. Use `baseline` commands instead.";
@@ -87,46 +112,154 @@ function dataSpellings(dirs: string[], home: string): string[] {
   return [...out];
 }
 
-/** True when a command names one of Baseline's data folders. */
+const WILD = /[*?[{$`]/;
+/** Commands that print their arguments: a word of theirs is text, not a path to open. */
+const PRINTS_ARGS = /^(echo|printf|print)$/;
+/** Commands whose first argument is a regex or a script, not a path. */
+const PATTERN_FIRST = /^(grep|egrep|fgrep|zgrep|rg|ag|ack|sed|awk)$/;
+/** Flags of those commands that take a pattern or a pattern file, so the next word is their value. */
+const TAKES_PATTERN = /^--?(regexp|file|expression)\b|^-[a-zA-Z]*[ef]/;
+/** Words that run the next word rather than being the command themselves. */
+const WRAPPER = /^(env|command|exec|nohup|time|builtin|sudo|doas|xargs|eval|export|declare|readonly|local|typeset|then|else|do|!)$/;
+
+/**
+ * The words of a command that sit where a path can go. A quoted regex (`sed -n '/\.config/p'`), a
+ * search pattern (`grep -rn 'BASELINE_DATA=' src`) and text being echoed are not paths, so they
+ * are left out — matching them against path patterns is what made the guard refuse its own
+ * helpers. Anything after a redirect is a path again, and the exemptions only apply to a command
+ * that stands alone: `echo ~/.config/baseline/x | xargs cat` is a read, not a print.
+ */
+export function pathWords(command: string): string[] {
+  const segs = command.split(SEGMENT_SPLIT);
+  const solo = segs.filter((s) => s.trim()).length === 1;
+  const out: string[] = [];
+  for (const seg of segs) {
+    const parts = seg.replace(/\$'/g, "'").replace(/['"\\]/g, "").toLowerCase().split(/([\s;&|()<>]+)/);
+    let cmd = "";
+    let patternSeen = false;
+    let valueFlag = false;
+    let redirected = false;
+    for (let i = 0; i < parts.length; i += 2) {
+      const word = parts[i] ?? "";
+      if (i > 0 && /[<>]/.test(parts[i - 1] ?? "")) redirected = true;
+      if (!word) continue;
+      const flag = word.startsWith("-");
+      if (!cmd) {
+        // Wrappers, leading assignments and their flags come before the program name.
+        out.push(word);
+        if (!flag && !/^[a-z_][\w.]*=/.test(word) && !WRAPPER.test(word)) cmd = word.slice(word.lastIndexOf("/") + 1);
+        continue;
+      }
+      if (flag && TAKES_PATTERN.test(word)) valueFlag = true;
+      if (!redirected && solo && PRINTS_ARGS.test(cmd)) continue;
+      if (!redirected && !flag && !patternSeen && !valueFlag && PATTERN_FIRST.test(cmd)) { patternSeen = true; continue; }
+      out.push(word);
+    }
+  }
+  return out;
+}
+
+/** One glob segment as a regex. `*`, `?`, `[…]` and `{a,b}` stay inside their own segment. */
+function segmentRe(seg: string): RegExp {
+  let re = "";
+  for (let i = 0; i < seg.length; i++) {
+    const c = seg[i] as string;
+    if (c === "*") re += "[^/]*";
+    else if (c === "?") re += "[^/]";
+    else if (c === "[" && seg.includes("]", i + 1)) { const end = seg.indexOf("]", i + 1); re += seg.slice(i, end + 1); i = end; }
+    else if (c === "{" && seg.includes("}", i + 1)) {
+      const end = seg.indexOf("}", i + 1);
+      re += "(" + seg.slice(i + 1, end).split(",").map((a) => a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")";
+      i = end;
+    } else re += c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+  return new RegExp(`^${re}$`);
+}
+
+/** A segment that could stand for any number of folders: `**`, or a variable that may hold a path. */
+const anySeg = (s: string) => s === "**" || /[$`]/.test(s);
+
+/**
+ * Could a glob's segments line up with a path's, from the same starting point? True both when the
+ * glob can name something inside the path and when it can name a folder above it, since a glob
+ * there expands into it. A malformed glob fails closed.
+ */
+function reaches(pat: string[], dir: string[]): boolean {
+  try {
+    let cur = new Set<number>([0]);
+    for (let i = 0; ; i++) {
+      if (cur.has(pat.length)) return true; // the glob ran out: it names dir, or a folder above it
+      if (i === dir.length) return cur.size > 0; // dir ran out: the glob points inside it
+      const next = new Set<number>();
+      for (const p of cur) {
+        const seg = pat[p] as string;
+        if (anySeg(seg)) { next.add(p); next.add(p + 1); }
+        else if (segmentRe(seg).test(dir[i] as string)) next.add(p + 1);
+      }
+      if (!next.size) return false;
+      cur = next;
+    }
+  } catch { return true; }
+}
+
+const segsOf = (p: string) => p.split("/").filter((s) => s && s !== "." && s !== "..");
+
+/**
+ * A relative glob could reach a data folder if its folder names line up with part of one: with the
+ * working folder unknown, `../.claude/plugins/data/*` is as good as the absolute spelling. Only a
+ * hidden folder (`.config`, `.claude`) anchors the comparison — lining `data/*` or `plugins/*` up
+ * with a data folder's middle would refuse ordinary project paths for no gain.
+ */
+function relativeGlobReaches(word: string, prot: string[]): boolean {
+  if (!word.includes("/") || !WILD.test(word)) return false;
+  const pat = segsOf(posix.normalize(word));
+  for (let i = 0; i < pat.length; i++) {
+    const seg = pat[i] as string;
+    if (WILD.test(seg) || !seg.startsWith(".")) continue;
+    for (const d of prot) {
+      const dir = segsOf(d);
+      for (let k = 0; k < dir.length; k++) if (dir[k] === seg && reaches(pat.slice(i), dir.slice(k))) return true;
+    }
+  }
+  return false;
+}
+
+/** True when a command could read or write one of Baseline's data folders. */
 export function mentionsDataDir(command: string, dirs: string[]): boolean {
   const home = resolve(process.env.HOME || homedir()).toLowerCase();
   const prot = dirs.map((d) => resolve(d).toLowerCase());
-  const lower = command.replace(/['"\\]/g, "").toLowerCase();
-  if (/\$\{?claude_plugin_data\b/.test(lower)) return true;
-  // Any spelling of a data folder anywhere in the command (`@/…`, `file://…`, `-o/…` included),
-  // after collapsing // and /./.
-  const flat = lower.replace(/\/(\.\/)+/g, "/").replace(/\/{2,}/g, "/");
-  for (const d of dataSpellings(prot, home)) {
-    for (let i = flat.indexOf(d); i >= 0; i = flat.indexOf(d, i + 1)) {
-      const next = flat[i + d.length];
-      if (next === undefined || !/[a-z0-9._-]/.test(next)) return true;
+  const spellings = dataSpellings(prot, home);
+  for (const word of pathWords(command)) {
+    // The plugin data folder's variable, wherever it sits in a path word.
+    if (/\$\{?claude_plugin_data\b/.test(word)) return true;
+    // Any spelling of a data folder inside the word (`@/…`, `file://…`, `-o/…` included), after
+    // collapsing // and /./.
+    const flat = word.replace(/\/(\.\/)+/g, "/").replace(/\/{2,}/g, "/");
+    for (const d of spellings) {
+      for (let i = flat.indexOf(d); i >= 0; i = flat.indexOf(d, i + 1)) {
+        const next = flat[i + d.length];
+        if (next === undefined || !/[a-z0-9._-]/.test(next)) return true;
+      }
     }
-  }
-  if (/\.config\/baseline(?![a-z0-9._-])/.test(flat)) return true;
-  for (const word of lower.split(/[\s;&|()<>=]+/)) {
-    // A path can start partway into a word (`@/x`, `file:///x`, `-o~/x`): check from there.
-    // Any word, relative or not: a glob or variable in a path through .config or .claude could
-    // expand to a data folder.
-    if (/[*?[{$`]/.test(word) && /(^|\/)\.(config|claude)(\/|$)/.test(posix.normalize(word))) return true;
+    // The legacy folder named relatively (`../../.config/baseline/…`).
+    if (/\.config\/baseline(?![a-z0-9._-])/.test(flat)) return true;
     const w = word.replace(/^-{1,2}[a-z]+(?=[~/$])/, "");
     const at = w.search(/~\/|~$|\$\{?home\b|\//);
     // Mid-word only after a separator (`@`, `:`): `src/x` is a relative path, not `/x`.
-    if (at < 0 || (at > 0 && /[a-z0-9._-]/.test(w[at - 1] ?? ""))) continue;
-    const raw = w.slice(at);
-    // Expand ~ and $HOME, then normalise (//, /./ and ..) the way the shell's path lookup will.
-    const expanded = raw.replace(/^(~|\$home|\$\{home\})(?=\/|$)/, home);
-    const t = posix.normalize(expanded);
-    const wild = t.search(/[*?[{$`]/);
-    if (wild >= 0) {
-      // A glob or variable could expand anywhere under its fixed prefix: refuse when that prefix
-      // holds a data folder, or the path goes through .config or .claude.
-      const fixed = t.slice(0, wild);
-      const root = fixed.slice(0, fixed.lastIndexOf("/") + 1) || "/";
-      if (/(^|\/)\.(config|claude)(\/|$)/.test(t)) return true;
-      if (root.startsWith("/") && prot.some((d) => isInside(posix.normalize(root), d) || isInside(d, posix.normalize(root)))) return true;
+    if (at < 0 || (at > 0 && /[a-z0-9._-]/.test(w[at - 1] ?? ""))) {
+      if (relativeGlobReaches(w, prot)) return true;
       continue;
     }
-    if (/(^|\/)\.config\/baseline(\/|$)/.test(t)) return true;
+    const raw = w.slice(at);
+    // Expand ~ and $HOME, then normalise (//, /./ and ..) the way the shell's path lookup will.
+    const t = posix.normalize(raw.replace(/^(~|\$home|\$\{home\})(?=\/|$)/, home));
+    if (WILD.test(t)) {
+      // A glob or variable: refuse only when it could line up with a data folder, either reaching
+      // into one or naming a folder above one.
+      if (!t.startsWith("/")) { if (relativeGlobReaches(t, prot)) return true; continue; }
+      if (prot.some((d) => reaches(segsOf(t), segsOf(d)))) return true;
+      continue;
+    }
     if (t.startsWith("/") && prot.some((d) => isInside(d, t))) return true;
   }
   return false;
@@ -179,34 +312,49 @@ export type BashContext = {
   cwd?: string | undefined;
 };
 
-export function bashGuard(command: string, ctx: BashContext): GuardResult {
-  if (ctx.protectedDirs && (mentionsDataDir(command, ctx.protectedDirs) || sweepsHome(command))) return { deny: DATA_DENY };
+/** A guard decision with the name of the rule that made it, for `baseline guard explain`. */
+export type BashExplain = { decision: "allow" } | { decision: "deny"; rule: string; deny: string };
+
+/**
+ * Every Bash rule in order, each named. `bashGuard` is this without the names: when the guard
+ * refuses something it should not, `baseline guard explain '<command>'` says which rule to look at
+ * instead of leaving it to be guessed.
+ */
+export function explainBash(command: string, ctx: BashContext): BashExplain {
+  const no = (rule: string, deny: string): BashExplain => ({ decision: "deny", rule, deny });
+  if (ctx.protectedDirs && mentionsDataDir(command, ctx.protectedDirs)) return no("data-folder", DATA_DENY);
+  if (ctx.protectedDirs && sweepsHome(command)) return no("home-sweep", DATA_DENY);
   const urls = ctx.runUrls?.length ? ctx.runUrls : ctx.runUrl ? [ctx.runUrl] : [];
-  if (!urls.length) return { allow: true };
+  if (!urls.length) return { decision: "allow" };
   const segments = command.split(SEGMENT_SPLIT).map((s) => normalizeSegment(s)).filter(Boolean);
   const frozen = "Baseline run in progress: permissions, runners and production settings can't change until the run finishes.";
   if (ctx.agent) {
-    if (segments.some((s) => AGENT_FROZEN.test(s))) return { deny: "Baseline run in progress: only the main session starts or finishes runs, signs runners in or changes config. Report back instead." };
-    if (ctx.projectDir && writesProjectState(command, ctx.projectDir, ctx.cwd ?? ctx.projectDir)) return { deny: "Baseline run in progress: nothing under .baseline/ changes outside the run folders until the run finishes." };
+    if (segments.some((s) => AGENT_FROZEN.test(s))) return no("agent-frozen", "Baseline run in progress: only the main session starts or finishes runs, signs runners in or changes config. Report back instead.");
+    if (ctx.projectDir && writesProjectState(command, ctx.projectDir, ctx.cwd ?? ctx.projectDir)) return no("agent-project-state", "Baseline run in progress: nothing under .baseline/ changes outside the run folders until the run finishes.");
   }
-  if (segments.some((s) => (MUTATING.test(s) && !(ctx.live && LIVE_OK.test(s))) || (MUTATING_ANYWHERE.test(s) && !(ctx.live && LIVE_OK.test(s))))) return { deny: frozen };
-  if (ENV_OVERRIDE.test(command)) {
-    return { deny: "Baseline run in progress: baseline's run, data folder and shared browser can't be overridden mid-run." };
+  if (segments.some((s) => (MUTATING.test(s) && !(ctx.live && LIVE_OK.test(s))) || (MUTATING_ANYWHERE.test(s) && !(ctx.live && LIVE_OK.test(s))))) return no("config-frozen", frozen);
+  if (setsBaselineEnv(command)) {
+    return no("env-override", "Baseline run in progress: baseline's run, data folder and shared browser can't be overridden mid-run.");
   }
-  if (/^\s*baseline\s/.test(command) && !SHELL_META.test(command)) return { allow: true };
+  if (/^\s*baseline\s/.test(command) && !SHELL_META.test(command)) return { decision: "allow" };
 
   const lower = command.toLowerCase();
   const hitsSite = urls.flatMap(hostAliases).some((h) => lower.includes(h));
   if (hitsSite && HTTP_TOOL.test(command) && (METHOD_FLAG.test(command) || LONG_DATA.test(command) || SHORT_DATA.test(command) || HTTPIE_METHOD.test(command))) {
-    return { deny: "Baseline run in progress: writes to the site under test must go through `baseline script`, which carries the safety guard." };
+    return no("site-write", "Baseline run in progress: writes to the site under test must go through `baseline script`, which carries the safety guard.");
   }
   if (hitsSite && SCRIPT_TOOL.test(command) && SCRIPT_WRITE.test(command)) {
-    return { deny: "Baseline run in progress: don't call the site under test from scripts. Use `baseline script`." };
+    return no("site-write-script", "Baseline run in progress: don't call the site under test from scripts. Use `baseline script`.");
   }
   if (RUNS_PLAYWRIGHT.test(command)) {
-    return { deny: "Baseline run in progress: drive the browser only with `baseline script <runner> <file>`, never Playwright directly." };
+    return no("playwright", "Baseline run in progress: drive the browser only with `baseline script <runner> <file>`, never Playwright directly.");
   }
-  return { allow: true };
+  return { decision: "allow" };
+}
+
+export function bashGuard(command: string, ctx: BashContext): GuardResult {
+  const e = explainBash(command, ctx);
+  return e.decision === "allow" ? { allow: true } : { deny: e.deny };
 }
 
 /** Browser-driving MCP tools skip the guard entirely, so they are off while a run is active. */
