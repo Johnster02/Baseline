@@ -28,6 +28,13 @@ const MUTATING = /^baseline\s+(config\s+(allow|deny|depth|note|set|secret|add-ru
 const MUTATING_ANYWHERE = /(^|\s)config\s+(allow|deny|depth|note|set|secret|add-runner|remove-runner)\b|\s--live\b/;
 /** What a subagent may never run mid-run: start or finish runs, sign in, change config. */
 const AGENT_FROZEN = /^baseline\s+(run\s+(new|finish)\b|signin\b|config\s+(?!(show|describe)\b)\S)/;
+/**
+ * The same, anywhere in a segment, like MUTATING_ANYWHERE. A list of wrapper names can never be
+ * complete — `flock`, `watch`, `taskset`, `env -` and `systemd-run` all run the next word — so
+ * the subcommand is matched wherever it appears rather than only at the start. The cost is that a
+ * subagent searching for the text "baseline run finish" is refused too; it reports back instead.
+ */
+const AGENT_FROZEN_ANYWHERE = /(^|\s)baseline\s+(run\s+(new|finish)\b|signin\b)/;
 /** Shell commands that write files: a redirect, tee, copy/move/remove, in-place edits. */
 const WRITES_FILES = /(^|[^<>&0-9])>>?|(^|[\s;&|(])(tee|cp|mv|rm|rmdir|ln|install|truncate|touch|mkdir|dd|chmod|chown|rsync|unlink)(\s|$)|(^|\s)(sed|perl|ruby)\s+(-\S*\s+)*-i/;
 /** A run started with --live may sign its runners in and check its own target with --live. */
@@ -38,11 +45,42 @@ const LIVE_OK = /^baseline\s+(signin|target-check)\s/;
  * source without being refused.
  */
 const ENV_OVERRIDE = /^(BASELINE_(SHARED_BROWSER|RUN_DIR|DATA)|CLAUDE_PLUGIN_DATA)\s*=/i;
+/**
+ * Wrappers that run the next word, and the flags of each that take a separate value. Per program,
+ * not one shared character class: `strace -c` takes no value, so a shared `-[sknoeic]\s+\S+` ate
+ * the program name and let `strace -c baseline run finish` through (review 3, I3).
+ */
+const RUNNERS: Record<string, string[]> = {
+  timeout: ["-s", "-k", "--signal", "--kill-after"],
+  nice: ["-n", "--adjustment"],
+  ionice: ["-c", "-n", "-p", "--class", "--classdata", "--pid"],
+  stdbuf: ["-i", "-o", "-e", "--input", "--output", "--error"],
+  strace: ["-o", "-e", "-p", "-E", "-s", "-P"],
+  ltrace: ["-o", "-e", "-p", "-s"],
+  chrt: ["-p"],
+  taskset: ["-c", "-p"],
+  flock: ["-w", "-E", "--timeout", "--conflict-exit-code"],
+  watch: ["-n", "-d", "--interval"],
+  setsid: [],
+  unbuffer: [],
+  "systemd-run": ["-p", "--property", "--unit", "--slice"],
+};
+
+/** `timeout -s SIGKILL 3600 …` and friends, consumed so what follows is read as the command. */
+const runnerPrefixes = Object.entries(RUNNERS).map(([name, valued]) => {
+  // Grouped, so the value applies to every one of this program's flags and not just the last.
+  const withValue = valued.length
+    ? `(?:${valued.map((f) => f.replace(/-/g, "\\-")).join("|")})(?:=\\S*|\\s+\\S+)|`
+    : "";
+  // Its own flags, a duration (1.5, 30s), or a bare negative adjustment (nice -10).
+  return `^${name}(?:\\s+(?:${withValue}-{1,2}[\\w-]+(?:=\\S*)?|\\d+(?:\\.\\d+)?[smhd]?(?=\\s|$)))*(?:\\s+|$)`;
+});
+
 /** Wrappers and earlier, harmless assignments stripped while looking for a leading assignment. */
 const ENV_PREFIX = new RegExp([
   String.raw`^[({!]\s*`,
-  String.raw`^(?:env|export|declare|readonly|local|typeset|command|exec|nohup|time|builtin|sudo|doas|xargs|eval|set)(?:\s+(?:-u\s+\S+|-{1,2}[\w-]+(?:=\S*)?))*(?:\s+|$)`,
-  String.raw`^(?:timeout|nice|stdbuf|ionice|setsid|strace|chrt|ltrace)(?:\s+(?:(?:-[sknoeic]|--(?:signal|kill-after))\s+\S+|-{1,2}[\w-]+(?:=\S*)?|\d+(?:\.\d+)?[smhd]?(?=\s|$)))*(?:\s+|$)`,
+  String.raw`^(?:env|export|declare|readonly|local|typeset|command|exec|nohup|time|builtin|sudo|doas|xargs|eval|set)(?:\s+(?:-u\s+\S+|-{1,2}[\w-]+(?:=\S*)?|-(?=\s|$)))*(?:\s+|$)`,
+  ...runnerPrefixes,
   String.raw`^(?:ba|z|da|k)?sh(?:\s+-\w+)*\s+-c\s+`,
   String.raw`^[A-Za-z_]\w*=\S*\s+`,
 ].join("|"));
@@ -64,8 +102,8 @@ const RUNS_PLAYWRIGHT = /((npx|bunx|yarn)\s+|(pnpm|npm)\s+(exec|dlx)\s+)playwrig
 const PREFIX = new RegExp([
   String.raw`^[({!]\s*`,
   String.raw`^[A-Za-z_]\w*=\S*\s+`,
-  String.raw`^(?:env|command|exec|nohup|time|builtin|sudo|doas|xargs|eval)(?:\s+(?:-u\s+\S+|-{1,2}[\w-]+(?:=\S*)?))*(?:\s+|$)`,
-  String.raw`^(?:timeout|nice|stdbuf|ionice|setsid|strace|chrt|ltrace)(?:\s+(?:(?:-[sknoeic]|--(?:signal|kill-after))\s+\S+|-{1,2}[\w-]+(?:=\S*)?|\d+(?:\.\d+)?[smhd]?(?=\s|$)))*(?:\s+|$)`,
+  String.raw`^(?:env|command|exec|nohup|time|builtin|sudo|doas|xargs|eval)(?:\s+(?:-u\s+\S+|-{1,2}[\w-]+(?:=\S*)?|-(?=\s|$)))*(?:\s+|$)`,
+  ...runnerPrefixes,
   String.raw`^(?:ba|z|da|k)?sh(?:\s+-\w+)*\s+-c\s+`,
 ].join("|"));
 
@@ -83,7 +121,16 @@ export function normalizeSegment(seg: string): string {
     .replace(/^node(?:\s+-\S+)*\s+\S*\/cli\.cjs(?=\s|$)/, "baseline");
 }
 
-/** True when a command segment starts by setting one of baseline's own variables. */
+/**
+ * True when a command segment sets one of baseline's own variables for a baseline invocation.
+ *
+ * Two ways in. A leading assignment, after peeling wrappers — the precise case. And, because no
+ * list of wrapper names can ever be complete (`flock` takes a lock file, `env` takes `-`,
+ * `systemd-run` takes properties), any word in the segment that assigns one of these variables a
+ * value when that same segment also names `baseline`. Searching for the variable's name is
+ * untouched by both: `grep -rn "BASELINE_DATA=" src` has no value and no baseline invocation, and
+ * that false positive is the whole reason this check was anchored in the first place.
+ */
 export function setsBaselineEnv(command: string): boolean {
   for (const seg of command.split(SEGMENT_SPLIT)) {
     let s = seg.replace(/\$'/g, "'").replace(/['"\\]/g, "").trim();
@@ -93,6 +140,9 @@ export function setsBaselineEnv(command: string): boolean {
       if (!m || !m[0]) break;
       s = s.slice(m[0].length).trimStart();
     }
+    const words = seg.replace(/\$'/g, "'").replace(/['"\\]/g, "").split(/\s+/).filter(Boolean);
+    const assigns = words.some((w) => ENV_OVERRIDE.test(w) && /=\S/.test(w));
+    if (assigns && words.some((w) => w.replace(/^\S*\//, "") === "baseline")) return true;
   }
   return false;
 }
@@ -123,73 +173,84 @@ const WILD = /[*?[{$`]/;
 const GLOB = /[*?[{]/;
 /** Commands that print their arguments: a word of theirs is text, not a path to open. */
 const PRINTS_ARGS = /^(echo|printf|print)$/;
-/** Commands whose first argument is a regex or a script, not a path. */
-const PATTERN_FIRST = /^(grep|egrep|fgrep|zgrep|rg|ag|ack|sed|awk)$/;
-/** Flags of those commands that take a pattern or a pattern file, so the next word is their value. */
-const TAKES_PATTERN = /^--?(regexp|file|expression)\b|^-[a-zA-Z]*[ef]/;
 /** Words that run the next word rather than being the command themselves. */
 const WRAPPER = /^(env|command|exec|nohup|time|builtin|sudo|doas|xargs|eval|export|declare|readonly|local|typeset|then|else|do|!|timeout|nice|stdbuf|ionice|setsid|strace|chrt|ltrace)$/;
 
 /**
- * One shell word per entry, with quoting honoured. An empty quoted argument is an empty word, not
- * nothing: it has to keep its place, or every later argument shifts a slot — which is how
- * `grep -r '' <data folder>` came to print every saved password. Patching the two spellings ''
- * and "" was not enough, because an argument made only of characters the old code stripped
- * reduces to the same thing, so the quoting is parsed here rather than stripped.
+ * One shell word per entry, with quoting honoured, plus where the segment boundaries are.
+ *
+ * Quoting is parsed, never stripped: an empty quoted argument is an empty word, and a `;`, `|` or
+ * `` ` `` inside quotes is a literal, not a boundary. Both of those were bypasses — stripping
+ * quotes made `grep -r '' <data>` lose its path, and splitting on a quoted metacharacter made
+ * `grep -rE '.|grep x' <data>` lose its path — so the splitter and the tokeniser have to be the
+ * same pass. A quote still open at the end is reported, and the caller fails closed.
  */
-function shellWords(seg: string): { text: string; redirected: boolean }[] {
-  const out: { text: string; redirected: boolean }[] = [];
-  let cur = "", started = false, redirected = false, i = 0;
-  const end = () => { if (started) out.push({ text: cur.toLowerCase(), redirected }); cur = ""; started = false; };
-  while (i < seg.length) {
-    const c = seg[i] as string;
-    if (c === "\\") { if (i + 1 < seg.length) { cur += seg[i + 1]; started = true; i += 2; } else i++; continue; }
+type Word = { text: string; redirected: boolean; segment: number };
+function shellWords(command: string): { words: Word[]; segments: number; unterminated: boolean } {
+  const words: Word[] = [];
+  let cur = "", started = false, redirected = false, segment = 0, unterminated = false, i = 0;
+  const end = () => {
+    if (started) words.push({ text: cur.trim().toLowerCase(), redirected, segment });
+    cur = ""; started = false;
+  };
+  while (i < command.length) {
+    const c = command[i] as string;
+    if (c === "\\") { if (i + 1 < command.length) { cur += command[i + 1]; started = true; i += 2; } else i++; continue; }
     if (c === "'" || c === '"') {
       // A quote opens a word even when there is nothing inside it.
       const q = c;
       started = true; i++;
-      while (i < seg.length && seg[i] !== q) {
-        if (q === '"' && seg[i] === "\\" && i + 1 < seg.length) { cur += seg[i + 1]; i += 2; } else { cur += seg[i]; i++; }
+      let closed = false;
+      while (i < command.length) {
+        if (command[i] === q) { closed = true; i++; break; }
+        if (q === '"' && command[i] === "\\" && i + 1 < command.length) { cur += command[i + 1]; i += 2; continue; }
+        cur += command[i]; i++;
       }
-      i++;
+      if (!closed) unterminated = true;
       continue;
     }
-    if (/\s/.test(c)) { end(); i++; continue; }
+    if (/\s/.test(c)) { if (c === "\n") { end(); segment++; redirected = false; } else end(); i++; continue; }
     if (/[<>]/.test(c)) { end(); redirected = true; i++; continue; }
-    if (/[;&|()]/.test(c)) { end(); i++; continue; }
+    // A metacharacter outside quotes ends the segment: what follows is a different command.
+    if (c === ";" || c === "&" || c === "|" || c === "(" || c === ")" || c === "`") { end(); segment++; redirected = false; i++; continue; }
+    if (c === "$" && command[i + 1] === "(") { end(); segment++; redirected = false; i += 2; continue; }
     cur += c; started = true; i++;
   }
   end();
-  return out;
+  return { words, segments: segment + 1, unterminated };
 }
 
 /**
- * The words of a command that sit where a path can go. A quoted regex, a search pattern and text
- * being echoed are not paths, so they are left out — matching those against path patterns is what
- * made the guard refuse its own helpers. Anything after a redirect is a path again, and the
- * exemptions only apply to a command that stands alone: `echo <data>/x | xargs cat` is a read.
+ * The words of a command that could name a path — which is all of them, bar one case.
+ *
+ * There is deliberately no attempt to work out which argument is a search pattern. Three reviews
+ * found five ways past that idea (an empty argument, an argument of only strippable characters, a
+ * metacharacter inside quotes, a pattern starting with `-`, and `--`), because it needs every
+ * tool's CLI grammar to be right and fails open when it is wrong. The false positives it was
+ * added for — `sed -n '/[a-z]*\.config/p'`, `grep -rn "BASELINE_DATA=" src` — are handled by the
+ * reachability and env checks instead, which look at what a path can actually reach.
+ *
+ * The one exemption: a lone `echo`/`printf` prints its arguments rather than opening them, so a
+ * literal path is text. A glob is not, because the shell expands it first, and a pipe or a
+ * redirect means something else consumes the words.
  */
 export function pathWords(command: string): string[] {
-  const segs = command.split(SEGMENT_SPLIT);
-  const solo = segs.filter((s) => s.trim()).length === 1;
+  const { words, segments, unterminated } = shellWords(command.replace(/\$'/g, "'"));
+  const solo = segments === 1;
+  const cmdOf = new Map<number, string>();
   const out: string[] = [];
-  for (const seg of segs) {
-    let cmd = "";
-    let patternSeen = false;
-    let valueFlag = false;
-    for (const { text: word, redirected } of shellWords(seg.replace(/\$'/g, "'"))) {
-      const flag = word.startsWith("-");
-      if (!cmd) {
-        // Wrappers, leading assignments and their flags come before the program name.
-        out.push(word);
-        if (!flag && !/^[a-z_][\w.]*=/.test(word) && !WRAPPER.test(word)) cmd = word.slice(word.lastIndexOf("/") + 1);
-        continue;
-      }
-      if (flag && TAKES_PATTERN.test(word)) valueFlag = true;
-      if (!redirected && solo && PRINTS_ARGS.test(cmd) && !GLOB.test(word)) continue;
-      if (!redirected && !flag && !patternSeen && !valueFlag && PATTERN_FIRST.test(cmd)) { patternSeen = true; continue; }
+  for (const { text: word, redirected, segment } of words) {
+    if (!word) continue;
+    const flag = word.startsWith("-");
+    const cmd = cmdOf.get(segment);
+    if (cmd === undefined) {
       out.push(word);
+      // Wrappers, leading assignments and their flags come before the program name.
+      if (!flag && !/^[a-z_][\w.]*=/.test(word) && !WRAPPER.test(word)) cmdOf.set(segment, word.slice(word.lastIndexOf("/") + 1));
+      continue;
     }
+    if (!redirected && solo && !unterminated && PRINTS_ARGS.test(cmd) && !GLOB.test(word)) continue;
+    out.push(word);
   }
   return out;
 }
@@ -377,7 +438,7 @@ export function explainBash(command: string, ctx: BashContext): BashExplain {
   const segments = command.split(SEGMENT_SPLIT).map((s) => normalizeSegment(s)).filter(Boolean);
   const frozen = "Baseline run in progress: permissions, runners and production settings can't change until the run finishes.";
   if (ctx.agent) {
-    if (segments.some((s) => AGENT_FROZEN.test(s))) return no("agent-frozen", "Baseline run in progress: only the main session starts or finishes runs, signs runners in or changes config. Report back instead.");
+    if (segments.some((s) => AGENT_FROZEN.test(s) || AGENT_FROZEN_ANYWHERE.test(s))) return no("agent-frozen", "Baseline run in progress: only the main session starts or finishes runs, signs runners in or changes config. Report back instead.");
     if (ctx.projectDir && writesProjectState(command, ctx.projectDir, ctx.cwd ?? ctx.projectDir)) return no("agent-project-state", "Baseline run in progress: nothing under .baseline/ changes outside the run folders until the run finishes.");
   }
   if (segments.some((s) => (MUTATING.test(s) && !(ctx.live && LIVE_OK.test(s))) || (MUTATING_ANYWHERE.test(s) && !(ctx.live && LIVE_OK.test(s))))) return no("config-frozen", frozen);

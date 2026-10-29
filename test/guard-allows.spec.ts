@@ -33,7 +33,6 @@ const ALLOWED = [
   // Working on this plugin's own source: its data folder's name and env vars are in the text.
   "grep -rn 'CLAUDE_PLUGIN_DATA' hooks/hooks.json",
   "grep -rn 'CLAUDE_PLUGIN_DATA' src/core/paths.ts",
-  "grep -rn '.config/baseline' src/core/paths.ts",
   "rg 'BASELINE_DATA' src test",
   "rg -n 'BASELINE_RUN_DIR=' src",
   "sed -n '/\\.config\\/baseline/p' docs/permissions.md",
@@ -78,15 +77,39 @@ describe("the guard still refuses the same shapes aimed at a data folder", () =>
 });
 
 describe("which words of a command are paths", () => {
-  it("leaves out a regex, a search pattern and echoed text, and keeps redirect targets", () => {
-    expect(pathWords("sed -n '/[a-z]*\\.config/p' notes.txt")).toEqual(["sed", "-n", "notes.txt"]);
-    expect(pathWords("grep -rn '.config/baseline' src/core/paths.ts")).toEqual(["grep", "-rn", "src/core/paths.ts"]);
+  it("keeps every word a command names, and leaves out only a lone echo's text", () => {
+    // A regex is no longer guessed at and exempted — three reviews found five ways past that —
+    // so a pattern stays in the list and the reachability check decides. `sed -n '/…/p'` is still
+    // allowed, because that word cannot reach a data folder, not because it was skipped.
+    expect(pathWords("sed -n '/[a-z]*\\.config/p' notes.txt")).toEqual(["sed", "-n", "/[a-z]*\\.config/p", "notes.txt"]);
     expect(pathWords('echo "$CLAUDE_PLUGIN_DATA"')).toEqual(["echo"]);
+    // `x` is a lone echo's text; the redirect target after it is a path again.
     expect(pathWords("echo x > ~/.config/baseline/t.json")).toEqual(["echo", "~/.config/baseline/t.json"]);
-    // A pattern file is read, so the word after -f stays a path.
+    // A pattern file is read, so it stays a path — now for the simple reason that nothing is dropped.
     expect(pathWords("grep -f ~/.config/baseline/t.json notes.txt")).toContain("~/.config/baseline/t.json");
     // Piped or substituted, echo's words are a path again: something else consumes them.
     expect(pathWords("echo ~/.config/baseline/t.json | xargs cat")).toContain("~/.config/baseline/t.json");
+    // A quoted metacharacter is a literal, so it is one command, not two.
+    expect(pathWords("grep -rE '.|grep x' notes.txt")).toEqual(["grep", "-re", ".|grep x", "notes.txt"]);
+  });
+
+  it("the accepted cost of not guessing at patterns", () => {
+    // Searching this plugin's own source for the literal string `.config/baseline` is refused:
+    // relative to a home directory that word is a real path to the data folder, and the guard
+    // fails closed rather than work out which argument is a pattern. `baseline guard explain`
+    // says so. This bites a developer of Baseline, not a user of it.
+    expect(bashGuard("grep -rn '.config/baseline' src/core/paths.ts", { protectedDirs: dirs }))
+      .toMatchObject({ deny: expect.any(String) });
+    // Searching for that literal by any means is refused for the same reason.
+    expect(bashGuard("git log -S '.config/baseline'", { protectedDirs: dirs })).toMatchObject({ deny: expect.any(String) });
+    // The other spellings a developer reaches for are all still allowed.
+    for (const c of [
+      'grep -rn "BASELINE_DATA=" src/core/paths.ts',
+      "grep -rn 'CLAUDE_PLUGIN_DATA' hooks/hooks.json",
+      "rg 'BASELINE_DATA' src test",
+      "awk '/CLAUDE_PLUGIN_DATA/ {print NR}' src/core/paths.ts",
+      "rg -F 'config/baseline' src",
+    ]) expect(bashGuard(c, { protectedDirs: dirs }), c).toEqual({ allow: true });
   });
 });
 
@@ -228,19 +251,14 @@ describe("the narrowing must not drop a path from the command", () => {
     }
   });
 
-  it("how many words a command has does not depend on its quoting (C-1)", () => {
-    // Every one of these is four shell words. The guard drops the pattern slot, so each must
-    // leave exactly the same three path words as the unquoted form.
-    const base = pathWords("grep -r q x");
-    expect(base).toEqual(["grep", "-r", "x"]);
+  it("an argument's spelling never costs the command its operand (C-1)", () => {
+    // The invariant that matters: however the pattern is written, the file it names is still a
+    // word the guard checks. An empty argument contributes no word, which is safe — nothing
+    // shifts, because the words are tokenised before anything is dropped.
     for (const a of [
-      "grep -r '' x", `grep -r '"' x`, "grep -r '''' x", "grep -r ' ' x",
-      "grep -r $' ' x", `grep -r "  " x`, `grep -r "'" x`, "grep -r 'a b' x",
-    ]) expect(pathWords(a), a).toEqual(base);
-    // A command with no pattern slot keeps all of its words, however they are quoted.
-    for (const a of ["cat 'a b' x", `cat "" x`, "cat '' x"]) {
-      expect(pathWords(a).length, a).toBe(pathWords("cat q x").length);
-    }
+      "''", `'"'`, "''''", "' '", "$' '", `"  "`, `"'"`, "'a b'", "-", "--", "'-*'", "'.|grep x'",
+    ]) expect(pathWords(`grep -r ${a} x`), a).toContain("x");
+    for (const a of ["'a b'", `""`, "''"]) expect(pathWords(`cat ${a} x`), a).toContain("x");
   });
 
   it("an escaped or quoted path is still a path", () => {
@@ -286,5 +304,103 @@ describe("the narrowing must not drop a path from the command", () => {
     allow("timeout -s SIGKILL 30 node scripts/build.mjs", run);
     allow("nice -n 10 cat src/core/paths.ts", run);
     allow("timeout 30 baseline script customer walk.cjs", { ...run, agent: true });
+  });
+});
+
+// Review 3. Five bypasses across three reviews all came from one idea: working out which
+// argument is a search pattern so it could be exempted from the path check. That needs every
+// tool's CLI grammar — `--`, flags that take values, patterns that start with `-`, metacharacters
+// inside quotes — and it failed open every time. The exemption is gone; these pin the classes.
+describe("no argument is exempt from the path check", () => {
+  const LEG = dirs[0]!, PD = dirs[1]!;
+  const deny = (cmd: string, extra: object = {}) =>
+    expect(bashGuard(cmd, { protectedDirs: dirs, ...extra }), cmd).toMatchObject({ deny: expect.any(String) });
+  const allow = (cmd: string, extra: object = {}) =>
+    expect(bashGuard(cmd, { protectedDirs: dirs, ...extra }), cmd).toEqual({ allow: true });
+
+  it("a metacharacter inside a quoted argument does not cut the command (review 3, C1)", () => {
+    for (const pat of ["'.|grep x'", "'a;grep b'", "'a&&rg b'", "'a|sed b'", "'a)grep b'", "'a$(x)grep b'", `"a;grep b"`, "$'a;grep b'", "'a`x`grep b'"]) {
+      deny(`grep -rE ${pat} ${LEG}`);
+      deny(`grep -r ${pat} ${PD}`);
+    }
+    deny("grep '(a)' .claude/plugins/data/baseline");
+    deny("grep 'a;' .claude/plugins/data/baseline");
+  });
+
+  it("an unterminated quote fails closed (review 3, C1)", () => {
+    deny(`grep -r ' ${LEG}`);
+    deny(`cat "${LEG}/secrets.json`);
+  });
+
+  it("a pattern that starts with a dash does not consume the file operand (review 3, C2)", () => {
+    deny(`grep -r -- '-*' ${LEG}`);
+    deny(`rg -- '-*' ${PD}`);
+    deny(`awk -- '-1' ${LEG}/secrets.json`);
+    deny(`grep -ra -- '-*' ${LEG}`);
+    deny(`grep -rl -- '-*' ${LEG}`);
+    deny(`grep -r - ${LEG}`);
+    deny(`grep -rF -- '-' ${LEG}`);
+  });
+
+  it("a real search still works on an ordinary file, whatever the pattern looks like", () => {
+    for (const pat of ["'.|grep x'", "'a;grep b'", "'-*'", "''", `'"'`, "'a b'", "-", "--"]) {
+      allow(`grep -r ${pat} notes.txt`);
+      allow(`grep -r ${pat} src/`);
+    }
+    allow("grep -rE '.|x' src/core/paths.ts");
+    allow("awk -- '-1' notes.txt");
+  });
+
+  it("a subagent cannot reach a frozen command through any wrapper (review 3, I3)", () => {
+    const agent = { runUrl: "https://staging.acme.dev", agent: true };
+    for (const w of ["strace -c", "ltrace -c", "strace -i", "strace -k", "flock /tmp/l", "watch -n1",
+      "taskset -c 0", "env -", "timeout 5", "nice -n 10", "stdbuf -o0", "setsid", "unbuffer", "systemd-run --scope"]) {
+      deny(`${w} baseline run finish`, agent);
+      deny(`${w} baseline signin customer`, agent);
+      deny(`${w} baseline run new --url https://x --label y`, agent);
+    }
+  });
+
+  it("a wrapper's own flags are not mistaken for a program name", () => {
+    const run = { runUrl: "https://staging.acme.dev" };
+    for (const w of ["timeout -s SIGKILL 3600", "timeout -k 5 10", "timeout --kill-after=5 10",
+      "timeout --signal SIGKILL 10", "timeout 1.5", "nice -n 10", "ionice -c3", "ionice -c 3", "stdbuf -oL -eL", "strace -o /tmp/t"]) {
+      deny(`${w} env BASELINE_DATA=/tmp/x baseline script a b`, run);
+      deny(`${w} cat ${LEG}/secrets.json`);
+    }
+    allow("timeout -s SIGKILL 30 node scripts/build.mjs", run);
+    allow("nice -n 10 cat src/core/paths.ts", run);
+    allow("strace -o /tmp/t pnpm vitest run", run);
+  });
+});
+
+describe("pointing baseline at another data folder, through any wrapper", () => {
+  const LEG = dirs[0]!;
+  const run = { runUrl: "https://staging.acme.dev" };
+  const deny = (cmd: string, extra: object = {}) =>
+    expect(bashGuard(cmd, { protectedDirs: dirs, ...extra }), cmd).toMatchObject({ deny: expect.any(String) });
+  const allow = (cmd: string, extra: object = {}) =>
+    expect(bashGuard(cmd, { protectedDirs: dirs, ...extra }), cmd).toEqual({ allow: true });
+
+  it("is refused whatever runs it, including wrappers that take an operand", () => {
+    // A list of wrapper names can never be complete: flock takes a lock file, env takes `-`.
+    for (const w of ["flock /tmp/l", "flock -w 5 /tmp/l", "env -", "env - -", "watch -n1", "taskset -c 0",
+      "systemd-run --scope", "unbuffer", "timeout 5", "nice -n 10", "stdbuf -o0", "setsid", "strace -c", ""]) {
+      deny(`${w} env BASELINE_DATA=/tmp/x baseline script a b`.trim(), run);
+      deny(`${w} BASELINE_DATA=/tmp/x baseline script a b`.trim(), run);
+      deny(`${w} CLAUDE_PLUGIN_DATA=/tmp/x baseline config show`.trim(), run);
+    }
+  });
+
+  it("does not refuse a search for the variable's name, which is what started all this", () => {
+    allow('grep -rn "BASELINE_DATA=" src/core/paths.ts', run);
+    allow("rg 'BASELINE_DATA' src test", run);
+    allow("grep -rn 'CLAUDE_PLUGIN_DATA' hooks/hooks.json", run);
+    allow('echo "$CLAUDE_PLUGIN_DATA"', run);
+    // A leading assignment is refused mid-run whatever follows it — that is the shape the rule
+    // is for, and it was refused before this branch too.
+    deny("BASELINE_DATA=/tmp/x node scripts/build.mjs", run);
+    allow("flock /tmp/l pnpm vitest run", run);
+    allow(`cat ${LEG.replace("baseline", "other")}/notes.txt`, run);
   });
 });
