@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startFixture, FIXTURE_USER } from "./fixture-app/server";
 import { signIn, SignedOutError, captureSession, chooseSignInUrl, looksSignedOut } from "../src/browser/signin";
+import type { CaptureOptions } from "../src/browser/signin";
 import { chooseChannel } from "../src/browser/launch";
 import { openSession } from "../src/browser/session";
 import { trustRun } from "./helpers/trust";
@@ -284,5 +285,45 @@ describe("capturing a hand-driven sign-in", () => {
     expect(stillOpenAfterPopup).toBe(true);
     expect(ended).toBe(true);
     expect(r.ok).toBe(false);
+  }, 60000);
+});
+
+describe("what a capture keeps is never older than the last navigation", () => {
+  let pub: Awaited<ReturnType<typeof startFixture>>;
+  beforeAll(async () => { pub = await startFixture(0, { publicHome: true }); });
+  afterAll(() => pub.stop());
+
+  const signInThen = async (after: (ctx: Parameters<NonNullable<CaptureOptions["onReady"]>>[0]) => Promise<void>) => {
+    const s = setup(FIXTURE_USER.password, pub.url);
+    const runner = newRunner("admin", "admin", { kind: "session" }, { path: "/account", expect: { text: "Sign out" } });
+    const r = await captureSession(runner, { ...s.cfg, runners: [runner] }, { projectDir: s.proj, data: s.data, baseUrl: pub.url }, {
+      headless: true,
+      onReady: async (ctx) => {
+        const page = ctx.pages()[0]!;
+        await page.goto(pub.url + "/login");
+        await page.fill('input[type="email"]', FIXTURE_USER.username);
+        await page.fill('input[type="password"]', FIXTURE_USER.password);
+        await page.press('input[type="password"]', "Enter");
+        await page.waitForURL(/\/cart/);
+        await after(ctx);
+      },
+    });
+    return { r, kept: existsSync(sessionPath(s.data, s.proj, "admin")) };
+  };
+
+  it("keeps the signed-in session when the window is closed normally", async () => {
+    const { r, kept } = await signInThen(async (ctx) => { for (const p of ctx.pages()) await p.close(); });
+    expect(r).toMatchObject({ ok: true, strength: "proved" });
+    expect(kept).toBe(true);
+  }, 60000);
+
+  it("never keeps a session it could not re-capture after the sign-in navigation", async () => {
+    // Tearing the context down immediately makes the save that follows the navigation fail, which
+    // is the shape CI hit. The one outcome that must never happen is success with stale state.
+    const { r, kept } = await signInThen(async (ctx) => { await ctx.close(); });
+    if (r.ok) expect(r.strength).toBe("proved");
+    else expect(kept).toBe(false);
+    // Either a proved success, or a failure that says the session was not saved.
+    expect(r.ok === true || /saved/i.test(r.error ?? ""), r.error).toBe(true);
   }, 60000);
 });

@@ -230,12 +230,37 @@ export async function captureSession(runner: Runner, cfg: ProjectConfig, ctx: Si
     baseURL: ctx.baseUrl,
   });
 
-  let saved = false;
-  const save = async () => { try { saveState(pending, await context.storageState()); saved = true; } catch { /* window closing */ } };
-  // Set the end condition up before anything can close, so a fast close is not missed.
+  /**
+   * The captured state has to be newer than the last navigation, because a sign-in ends in one.
+   * Counting both lets the two failures be told apart: a save that completed after the last
+   * navigation is a real session, and one that did not is "nothing was saved" — never a stale
+   * pre-sign-in session, and never a real session thrown away. CI found both halves: the save
+   * that runs once the window has gone fails (with a persistent profile the context goes with
+   * it), so what survived was a timer tick from before the sign-in, and the capture reported a
+   * signed-out account for a user who had just signed in.
+   */
+  let navs = 0, freshAt = -1;
+  let inflight: Promise<void> = Promise.resolve();
+  const save = () => {
+    const at = navs;
+    inflight = inflight.then(async () => {
+      try { saveState(pending, await context.storageState()); freshAt = Math.max(freshAt, at); } catch { /* the window is going */ }
+    });
+    return inflight;
+  };
+  const fresh = () => freshAt >= navs;
+  // Set the end condition up before anything can close, so a fast close is not missed. Each page
+  // also saves on every navigation: a sign-in ends in one, so the kept state is never older than
+  // the last page load. Relying on the 2-second timer plus one save after the window closed meant
+  // that when the final save failed — the persistent context is gone by then — what survived was
+  // a tick from BEFORE the sign-in completed, and the capture kept signed-out state while
+  // reporting the check it had just failed. CI caught it; locally the timing hid it.
   const closed = new Promise<void>((res) => {
     context.on("close", () => res());
-    const watch = (p: Page) => p.on("close", () => { if (context.pages().length === 0) res(); });
+    const watch = (p: Page) => {
+      p.on("load", () => { navs++; void save(); });
+      p.on("close", () => { if (context.pages().length === 0) res(); });
+    };
     context.on("page", watch);
     context.pages().forEach(watch);
   });
@@ -251,13 +276,16 @@ export async function captureSession(runner: Runner, cfg: ProjectConfig, ctx: Si
     await ready.catch(() => {});
   } finally {
     clearInterval(timer);
-    await save();
+    // Let a save started by the sign-in's own navigation finish before judging freshness, then
+    // try once more if it is still behind.
+    await inflight.catch(() => {});
+    if (!fresh()) await save().catch(() => {});
     await context.close().catch(() => {});
   }
 
-  if (!saved || !existsSync(pending)) {
+  if (!fresh() || !existsSync(pending)) {
     rmSync(pending, { force: true });
-    return { key: runner.key, ok: false, error: "The window closed before a session was saved. Run it again and sign in before closing the window." };
+    return { key: runner.key, ok: false, error: "The window closed before the signed-in session could be saved. Run it again, and give it a moment after signing in before you close the window." };
   }
   // Nothing is kept until it is checked: a window closed while signed out must not leave a
   // session behind for a run to pick up. A failure to even launch the checking browser must not
