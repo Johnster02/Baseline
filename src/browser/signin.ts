@@ -259,7 +259,9 @@ export async function captureSession(runner: Runner, cfg: ProjectConfig, ctx: Si
     context.on("close", () => res());
     const watch = (p: Page) => {
       p.on("load", () => { navs++; void save(); });
-      p.on("close", () => { if (context.pages().length === 0) res(); });
+      // Let a save the navigation started finish before ending: it is the one that carries the
+      // signed-in state, and the window closing should not discard work already under way.
+      p.on("close", () => { if (context.pages().length === 0) inflight.then(() => res(), () => res()); });
     };
     context.on("page", watch);
     context.pages().forEach(watch);

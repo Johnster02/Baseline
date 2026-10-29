@@ -220,6 +220,12 @@ describe("capturing a hand-driven sign-in", () => {
         await page.fill('input[type="password"]', FIXTURE_USER.password);
         await page.press('input[type="password"]', "Enter");
         await page.waitForURL(/\/cart/);
+        // Settle before closing, the way a person does. waitForURL can resolve before the load
+        // event, and closing in that same tick kills the save the navigation starts — which is
+        // real behaviour (the capture then reports an honest failure, covered below), not what
+        // this test is about. This one is the ordinary path: sign in, look at the page, close it.
+        await page.waitForLoadState("load");
+        await page.locator("text=Mug").first().waitFor({ state: "visible" });
         await page.close();
       },
     });
