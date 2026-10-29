@@ -8,7 +8,7 @@ import { dataDir, isInside, realPath, trustedFiles } from "../core/paths";
 import { readTrustedRun } from "../core/trusted-run";
 import { ClickAttribution } from "./click-attribution";
 import { decide, redactUrl, wsDecide } from "./guard";
-import { OwnedTracker, appendCreated, ownedFile } from "./owned";
+import { OwnedTracker, appendCreated, isPlaceholderUrl, ownedFile } from "./owned";
 import { isSignedOut, SignedOutError } from "./signin";
 
 export type BlockedEntry = {
@@ -446,9 +446,41 @@ function actions(c: Ctx, page: Page, browser: Browser): Session {
       // folder a moment ago (before the round-trip above) is not proof enough on its own.
       await l.setInputFiles(uploadPaths(o.runDir, paths));
     },
+    /**
+     * What this runner says it created. The cleaner navigates from these entries, so an address
+     * here has to be real: the page the browser is actually on is always recorded as `pageUrl`,
+     * a `url` on another site is refused outright, and a template (`/projects/<id>`) is kept as
+     * `urlUnusable` rather than stored as somewhere to go (spec 3.7).
+     */
     created(kind: string, label: string, url?: string) {
+      const pageUrl = page.url();
+      const base = new URL(c.baseUrl);
+      let address: string | undefined;
+      let unusable = false;
+      if (url === undefined) {
+        // Nothing given: the page it is on is the best answer, and it is ours, not the agent's.
+        try { const u = new URL(pageUrl); if (u.origin === base.origin) address = u.pathname + u.search; } catch { /* no address */ }
+      } else if (isPlaceholderUrl(url)) {
+        unusable = true;
+      } else {
+        let u: URL | undefined;
+        try { u = new URL(url, base); } catch { u = undefined; }
+        if (!u || u.origin !== base.origin) {
+          throw new Error(`created() refuses "${url}": it is on another site, not ${base.origin}. Pass the record's own path, or leave it out and Baseline records the page you are on.`);
+        }
+        address = u.pathname + u.search;
+      }
       // Labels start with "Baseline <runId>" (see agents/cleaner.md).
-      const entry = { runner: o.runner.key, kind, label, ...(url ? { url } : {}), labelled: label.trim().startsWith(`Baseline ${o.runId}`), at: new Date().toISOString() };
+      const entry = {
+        runner: o.runner.key, kind, label,
+        ...(address ? { url: address } : {}),
+        urlUnusable: unusable,
+        pageUrl,
+        // Only true when the browser itself watched the site create this path.
+        confirmed: !!address && c.owned.paths.includes(address.split("?")[0] ?? address),
+        labelled: label.trim().startsWith(`Baseline ${o.runId}`),
+        at: new Date().toISOString(),
+      };
       appendJsonl(join(o.runDir, "created.jsonl"), entry);
       // Baseline's own copy, out of agents' reach: `baseline created` reads this one.
       appendCreated(o.runDir, entry);

@@ -5,6 +5,8 @@ import type { AddressInfo } from "node:net";
 
 export const FIXTURE_USER = { username: "customer@acme.test", password: "pw" };
 export const FIXTURE_COMMIT = "a41c9e2";
+/** The id the fixture hands back when a draft is created. */
+export const DRAFT_ID = "4b1e7a90-2c6d-4f83-9a51-7e0d3b8c6f12";
 
 const page = (title: string, body: string) => `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title></head>
 <body><nav><a href="/cart">Cart</a> <a href="/checkout">Checkout</a> <a href="/admin">Admin</a></nav><main><h1>${title}</h1>${body}</main>
@@ -55,6 +57,7 @@ const PAGES: Record<string, string> = {
         .catch(() => document.getElementById('status').textContent = 'failed');
     }
     </script>`),
+  "/drafts": page("Drafts", `<button onclick="call('/api/drafts')">Create draft</button>`),
   "/users/7/delete": page("Removed", `<p>Member removed.</p>`),
   "/logout": page("Logged out", `<p>Bye.</p>`),
   "/tracked": page("Tracked", `<p>This page reports a view on load.</p><script>fetch('/api/track', {method: 'POST', body: '{}'})</script>`),
@@ -132,6 +135,12 @@ export async function startFixture(port = 0, opts: FixtureOptions = {}): Promise
       return;
     }
     if (path === "/graphql") { res.writeHead(200, { "content-type": "application/json" }); res.end('{"data":{}}'); return; }
+    // A create the site reports properly: 201 with the new record's address. owned.ts trusts this.
+    if (path === "/api/drafts" && method === "POST") {
+      res.writeHead(201, { "content-type": "application/json", location: `/drafts/${DRAFT_ID}` });
+      res.end(JSON.stringify({ id: DRAFT_ID }));
+      return;
+    }
     if (path.startsWith("/api/")) { res.writeHead(200, { "content-type": "application/json" }); res.end('{"ok":true}'); return; }
     res.writeHead(404); res.end("not found");
   });

@@ -92,13 +92,43 @@ export function createdFile(runDir: string): string {
   return join(trustedRunDir(runDir), "created.jsonl");
 }
 
-export type CreatedEntry = { runner: string; kind: string; label: string; url?: string; labelled: boolean; at: string };
+export type CreatedEntry = {
+  runner: string;
+  kind: string;
+  label: string;
+  /** The record's own address, same-site and usable. Absent when the agent gave a placeholder. */
+  url?: string;
+  /** The agent passed something template-shaped (`/projects/<id>`), so there is no address. */
+  urlUnusable: boolean;
+  /** Where the browser actually was when this was recorded. Baseline's own observation. */
+  pageUrl: string;
+  /** This entry's path is one the browser independently watched the site create. */
+  confirmed: boolean;
+  labelled: boolean;
+  /** When it was recorded. */
+  at: string;
+};
 
 const isCreated = (v: unknown): CreatedEntry => {
   const o = v as Partial<CreatedEntry> | null;
   if (!o || typeof o.runner !== "string" || typeof o.kind !== "string" || typeof o.label !== "string") throw new Error("not a created entry");
-  return { runner: o.runner, kind: o.kind, label: o.label, ...(typeof o.url === "string" ? { url: o.url } : {}), labelled: o.labelled === true, at: String(o.at ?? "") };
+  // Entries written before pageUrl/confirmed/urlUnusable existed still read, as unconfirmed.
+  return {
+    runner: o.runner, kind: o.kind, label: o.label,
+    ...(typeof o.url === "string" ? { url: o.url } : {}),
+    urlUnusable: o.urlUnusable === true,
+    pageUrl: typeof o.pageUrl === "string" ? o.pageUrl : "",
+    confirmed: o.confirmed === true,
+    labelled: o.labelled === true,
+    at: String(o.at ?? ""),
+  };
 };
+
+/**
+ * A url an agent passed that is a template, not an address: `/projects/<id>`, `{id}`, `:id`, `*`.
+ * Recording one as the record's address is what nearly sent the cleaner to the wrong place.
+ */
+export const isPlaceholderUrl = (url: string) => /[<>{}*]|(^|\/):[A-Za-z_]/.test(url);
 
 export function appendCreated(runDir: string, entry: CreatedEntry): void {
   const f = createdFile(runDir);

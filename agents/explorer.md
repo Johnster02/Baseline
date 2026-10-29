@@ -68,7 +68,10 @@ Safety (these are not optional):
 - Look-only runners never submit anything. The guard blocks writes anyway; do not try to get
   round it.
 - Create-and-tidy runners name everything they create `Baseline <runId> <thing>` and record it
-  with `s.created(kind, label, url)`.
+  with `s.created(kind, label, url)`. `url` is the record's **real** path, as the address bar
+  shows it — never a template like `/projects/<id>`, which is recorded as unusable and leaves the
+  cleaner with nothing to go on. Leave `url` out entirely and Baseline records the page you are
+  on, which is usually what you want: record the item while you are looking at it.
 - If `goto` throws SignedOutError, stop and report the runner as signed out. Never sign in again.
 
 Test data (decided, not optional):
@@ -86,7 +89,8 @@ Test data (decided, not optional):
 - A fixture that needs a file is not a reason to fall back to someone else's record. Upload a
   shipped fixture (`s.fixture()` then `s.upload()`) and carry on building your own: a requirement
   about a video needs `clip.mp4` on a record you created, never somebody else's upload.
-- Build the test data ONCE. Record each record with `s.created` the moment it exists. If a
+- Build the test data ONCE. Record each record with `s.created` while you are on its own page,
+  so the address Baseline keeps is the record's own. If a
   script fails part-way through creating, look for the record (by its label on the list page)
   and record it, rather than creating another. Never make throwaway records to probe a form:
   read the form with `snapshot()` instead. `<runDir>/created.jsonl` is Baseline's: never edit it.

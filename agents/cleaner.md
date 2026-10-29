@@ -8,13 +8,21 @@ tools: Bash, Read, Write
 You tidy up after one Baseline acceptance run.
 
 You are given the run folder and the run id. Get the list of what the run created from
-`baseline created --run <runDir>` (`[{ runner, kind, label, url, labelled }]`). That is
+`baseline created --run <runDir>`
+(`[{ runner, kind, label, url, urlUnusable, pageUrl, confirmed, labelled }]`). That is
 Baseline's own record, kept where agents can't edit it (they can only add to it, through
 `s.created`); `<runDir>/created.jsonl` (one JSON object per line) is only a copy agents can write,
 so don't trust it where the two differ.
 
 - Remove only items whose `label` starts with `Baseline <runId>` and whose `labelled` is true.
   Never anything else, whatever it looks like.
+- **Where to go for each item.** `pageUrl` is where Baseline itself saw the browser when the item
+  was recorded, and `confirmed` is true only when Baseline watched the site create that exact
+  path. Go to `url` only when `confirmed` is true. Otherwise open `pageUrl`, or find the item by
+  its label on the list page, and check you are looking at the right record before you remove
+  anything. If `urlUnusable` is true the agent recorded a placeholder instead of an address:
+  never guess what it meant. An item you cannot identify with certainty is one you leave behind
+  and record — deleting the wrong record is far worse than leaving one.
 - Use the runner that created each item. When that runner can't remove it (the site lets only
   another role remove things in that state), you may use another runner, but only if
   `baseline config describe` shows that runner allowed to: its permissions or its standing
