@@ -260,8 +260,15 @@ export async function captureSession(runner: Runner, cfg: ProjectConfig, ctx: Si
     return { key: runner.key, ok: false, error: "The window closed before a session was saved. Run it again and sign in before closing the window." };
   }
   // Nothing is kept until it is checked: a window closed while signed out must not leave a
-  // session behind for a run to pick up.
-  const v = await verifyCaptured(runner, ctx, pending);
+  // session behind for a run to pick up. A failure to even launch the checking browser must not
+  // leave the half-captured file behind either (review finding M-2).
+  let v: Verification;
+  try {
+    v = await verifyCaptured(runner, ctx, pending);
+  } catch (e) {
+    rmSync(pending, { force: true });
+    return { key: runner.key, ok: false, error: `The captured session could not be checked (${(e instanceof Error && e.name) || "error"}), so nothing was saved.` };
+  }
   if (!v.ok) {
     rmSync(pending, { force: true });
     return { key: runner.key, ok: false, strength: v.strength, error: `${v.reason} Nothing was saved. Run it again and finish signing in before closing the window.` };

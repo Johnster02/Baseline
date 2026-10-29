@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync, readFileSync, realpathSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { OwnedTracker, LANDING_WINDOW_MS } from "../src/browser/owned";
+import { OwnedTracker, LANDING_WINDOW_MS, isPlaceholderUrl } from "../src/browser/owned";
 
 const SITE = "https://app.example.test";
 const NEW_ID = "7c9e1b42-5a3f-4d68-b2e1-9f0a6c3d8e25";
@@ -220,5 +220,32 @@ describe("OwnedTracker across runners and client-side routes", () => {
     b.seeReplyPath(`/orders/${NEW_ID}`);
     b.clicked();
     expect(b.landed(`${SITE}/orders/${NEW_ID}`, 1200, false, { document: false })).toBe(`/orders/${NEW_ID}`);
+  });
+});
+
+describe("telling a template apart from a real address (review M-1)", () => {
+  it("treats framework templates as placeholders", () => {
+    for (const u of ["/projects/<id>", "/projects/{id}", "/projects/:id", "/projects/*",
+      "/projects/[id]", "/posts/[...slug]", "/projects/${id}", "/projects/%7Bid%7D"]) {
+      expect(isPlaceholderUrl(u), u).toBe(true);
+    }
+  });
+
+  it("keeps a genuine address whose query string uses brackets or dollars", () => {
+    // Dropping these left a record the runner really created with no address at all.
+    for (const u of [
+      "/articles?filter[status]=published",
+      "/orders?ids[]=1&ids[]=2",
+      "/api/v1/items?$top=10&$select=name",
+      "/odata/$metadata",
+      "/files/a$b.txt",
+      "/notes/cost-%24100-report",
+      "/t/%5Bdraft%5D-notes",
+      // A bare $segment is ambiguous — /odata/$metadata is real — so it is kept. `confirmed`
+      // is what stops the cleaner acting on an address Baseline did not watch being created.
+      "/projects/$id",
+      "/orders/7",
+      "/drafts/4b1e7a90-2c6d-4f83-9a51-7e0d3b8c6f12",
+    ]) expect(isPlaceholderUrl(u), u).toBe(false);
   });
 });

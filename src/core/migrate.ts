@@ -5,7 +5,7 @@
 // Copy, not move: the legacy folder keeps its copy, and stays a protected candidate in
 // dataDirCandidates(), so nothing is lost and the guards keep covering both places.
 // Kept free of heavy imports: the hook bundle uses it.
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 /** What a Baseline data folder holds. Nothing else is touched. */
@@ -36,12 +36,18 @@ function copyTree(from: string, to: string, rel: string, skipped: string[]): num
     // A newer file at the target always wins: this runs on every session start, and a password
     // saved since the migration must never be rolled back to the legacy copy.
     if (existsSync(dst)) { skipped.push(r); continue; }
-    // Write beside it and rename, so a concurrent `baseline` never reads half a secrets file
-    // (review minor 2). Same directory, so the rename is atomic.
+    // Write beside it and rename, so a concurrent `baseline` never reads half a secrets file.
+    // Same directory, so the rename is atomic. On any failure the partial copy goes with it: it
+    // holds a secret, and this runs again every session (review findings minor 2 and M-3).
     const tmp = `${dst}.${process.pid}.tmp`;
-    copyFileSync(src, tmp);
-    chmodSync(tmp, 0o600);
-    renameSync(tmp, dst);
+    try {
+      copyFileSync(src, tmp);
+      chmodSync(tmp, 0o600);
+      renameSync(tmp, dst);
+    } catch (e) {
+      rmSync(tmp, { force: true });
+      throw e;
+    }
     copied++;
   }
   return copied;

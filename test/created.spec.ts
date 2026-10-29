@@ -60,7 +60,7 @@ describe("recording what a run created", () => {
   it("treats framework-style placeholders as unusable too (minor 4)", async () => {
     const dir = await withSession(async (s) => {
       await s.goto("/cart");
-      for (const bad of ["/projects/[id]", "/projects/$id", "/projects/${id}", "/projects/%7Bid%7D"]) {
+      for (const bad of ["/projects/[id]", "/posts/[...slug]", "/projects/${id}", "/projects/%7Bid%7D"]) {
         s.created("project", "Baseline r-1 project", bad);
       }
     });

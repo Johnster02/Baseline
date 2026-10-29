@@ -462,8 +462,9 @@ function actions(c: Ctx, page: Page, browser: Browser): Session {
     /**
      * What this runner says it created. The cleaner navigates from these entries, so an address
      * here has to be real: the page the browser is actually on is always recorded as `pageUrl`,
-     * a `url` on another site is refused outright, and a template (`/projects/<id>`) is kept as
-     * `urlUnusable` rather than stored as somewhere to go (spec 3.7).
+     * and anything Baseline will not vouch for as an address — a url on another site, or a
+     * template like `/projects/<id>` — is kept as `urlUnusable` with no `url` at all, rather
+     * than stored as somewhere to go (spec 3.7).
      */
     created(kind: string, label: string, url?: string) {
       const pageUrl = page.url();

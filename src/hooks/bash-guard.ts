@@ -42,7 +42,7 @@ const ENV_OVERRIDE = /^(BASELINE_(SHARED_BROWSER|RUN_DIR|DATA)|CLAUDE_PLUGIN_DAT
 const ENV_PREFIX = new RegExp([
   String.raw`^[({!]\s*`,
   String.raw`^(?:env|export|declare|readonly|local|typeset|command|exec|nohup|time|builtin|sudo|doas|xargs|eval|set)(?:\s+(?:-u\s+\S+|-{1,2}[\w-]+(?:=\S*)?))*(?:\s+|$)`,
-  String.raw`^(?:timeout|nice|stdbuf|ionice|setsid|strace|chrt|ltrace)(?:\s+(?:-{1,2}[\w-]+(?:=\S*)?|\d+[smhd]?))*(?:\s+|$)`,
+  String.raw`^(?:timeout|nice|stdbuf|ionice|setsid|strace|chrt|ltrace)(?:\s+(?:(?:-[sknoeic]|--(?:signal|kill-after))\s+\S+|-{1,2}[\w-]+(?:=\S*)?|\d+(?:\.\d+)?[smhd]?(?=\s|$)))*(?:\s+|$)`,
   String.raw`^(?:ba|z|da|k)?sh(?:\s+-\w+)*\s+-c\s+`,
   String.raw`^[A-Za-z_]\w*=\S*\s+`,
 ].join("|"));
@@ -65,7 +65,7 @@ const PREFIX = new RegExp([
   String.raw`^[({!]\s*`,
   String.raw`^[A-Za-z_]\w*=\S*\s+`,
   String.raw`^(?:env|command|exec|nohup|time|builtin|sudo|doas|xargs|eval)(?:\s+(?:-u\s+\S+|-{1,2}[\w-]+(?:=\S*)?))*(?:\s+|$)`,
-  String.raw`^(?:timeout|nice|stdbuf|ionice|setsid|strace|chrt|ltrace)(?:\s+(?:-{1,2}[\w-]+(?:=\S*)?|\d+[smhd]?))*(?:\s+|$)`,
+  String.raw`^(?:timeout|nice|stdbuf|ionice|setsid|strace|chrt|ltrace)(?:\s+(?:(?:-[sknoeic]|--(?:signal|kill-after))\s+\S+|-{1,2}[\w-]+(?:=\S*)?|\d+(?:\.\d+)?[smhd]?(?=\s|$)))*(?:\s+|$)`,
   String.raw`^(?:ba|z|da|k)?sh(?:\s+-\w+)*\s+-c\s+`,
 ].join("|"));
 
@@ -131,31 +131,53 @@ const TAKES_PATTERN = /^--?(regexp|file|expression)\b|^-[a-zA-Z]*[ef]/;
 const WRAPPER = /^(env|command|exec|nohup|time|builtin|sudo|doas|xargs|eval|export|declare|readonly|local|typeset|then|else|do|!|timeout|nice|stdbuf|ionice|setsid|strace|chrt|ltrace)$/;
 
 /**
- * The words of a command that sit where a path can go. A quoted regex (`sed -n '/\.config/p'`), a
- * search pattern (`grep -rn 'BASELINE_DATA=' src`) and text being echoed are not paths, so they
- * are left out — matching them against path patterns is what made the guard refuse its own
- * helpers. Anything after a redirect is a path again, and the exemptions only apply to a command
- * that stands alone: `echo ~/.config/baseline/x | xargs cat` is a read, not a print.
+ * One shell word per entry, with quoting honoured. An empty quoted argument is an empty word, not
+ * nothing: it has to keep its place, or every later argument shifts a slot — which is how
+ * `grep -r '' <data folder>` came to print every saved password. Patching the two spellings ''
+ * and "" was not enough, because an argument made only of characters the old code stripped
+ * reduces to the same thing, so the quoting is parsed here rather than stripped.
+ */
+function shellWords(seg: string): { text: string; redirected: boolean }[] {
+  const out: { text: string; redirected: boolean }[] = [];
+  let cur = "", started = false, redirected = false, i = 0;
+  const end = () => { if (started) out.push({ text: cur.toLowerCase(), redirected }); cur = ""; started = false; };
+  while (i < seg.length) {
+    const c = seg[i] as string;
+    if (c === "\\") { if (i + 1 < seg.length) { cur += seg[i + 1]; started = true; i += 2; } else i++; continue; }
+    if (c === "'" || c === '"') {
+      // A quote opens a word even when there is nothing inside it.
+      const q = c;
+      started = true; i++;
+      while (i < seg.length && seg[i] !== q) {
+        if (q === '"' && seg[i] === "\\" && i + 1 < seg.length) { cur += seg[i + 1]; i += 2; } else { cur += seg[i]; i++; }
+      }
+      i++;
+      continue;
+    }
+    if (/\s/.test(c)) { end(); i++; continue; }
+    if (/[<>]/.test(c)) { end(); redirected = true; i++; continue; }
+    if (/[;&|()]/.test(c)) { end(); i++; continue; }
+    cur += c; started = true; i++;
+  }
+  end();
+  return out;
+}
+
+/**
+ * The words of a command that sit where a path can go. A quoted regex, a search pattern and text
+ * being echoed are not paths, so they are left out — matching those against path patterns is what
+ * made the guard refuse its own helpers. Anything after a redirect is a path again, and the
+ * exemptions only apply to a command that stands alone: `echo <data>/x | xargs cat` is a read.
  */
 export function pathWords(command: string): string[] {
   const segs = command.split(SEGMENT_SPLIT);
   const solo = segs.filter((s) => s.trim()).length === 1;
   const out: string[] = [];
   for (const seg of segs) {
-    // An empty quoted argument (`grep '' <path>`) is still an argument: stripping the quotes made
-    // it disappear, so the path after it slid into the pattern slot and was dropped as a regex —
-    // which let `grep -r '' <data folder>` print every saved password. Keep its place with a
-    // token that can never look like a path.
-    const parts = seg.replace(/\$'/g, "'").replace(/(^|\s)(''|"")(?=\s|$)/g, "$1\u0001")
-      .replace(/['"\\]/g, "").toLowerCase().split(/([\s;&|()<>]+)/);
     let cmd = "";
     let patternSeen = false;
     let valueFlag = false;
-    let redirected = false;
-    for (let i = 0; i < parts.length; i += 2) {
-      const word = parts[i] ?? "";
-      if (i > 0 && /[<>]/.test(parts[i - 1] ?? "")) redirected = true;
-      if (!word) continue;
+    for (const { text: word, redirected } of shellWords(seg.replace(/\$'/g, "'"))) {
       const flag = word.startsWith("-");
       if (!cmd) {
         // Wrappers, leading assignments and their flags come before the program name.
@@ -225,17 +247,26 @@ const segsOf = (p: string) => p.split("/").filter((s) => s && s !== "." && s !==
  */
 function relativePathReaches(word: string, prot: string[]): boolean {
   // Literal as well as glob: `../../.claude/plugins/data/baseline/x/secrets.json` names the
-  // folder outright, and only the glob spelling used to be caught. The loop below anchors on a
-  // literal hidden segment, so an ordinary relative path (`ls data/*`, `cat src/x.ts`) is
-  // untouched (review finding I5).
+  // folder outright, and only the glob spelling used to be caught (review finding I5).
+  //
+  // The two differ in what "runs out" means. A glob that stops above a data folder still expands
+  // into it, so it is refused. A literal path that stops above one only names a parent — `ls
+  // .claude/` lists a folder, it does not read the data inside it — so a literal word has to go
+  // at least as deep as the data folder to count. Without that, every `ls .claude/` and
+  // `git add .claude/` in any project was refused (review finding I-2).
   if (!word.includes("/")) return false;
   const pat = segsOf(posix.normalize(word));
+  const literal = !WILD.test(word);
   for (let i = 0; i < pat.length; i++) {
     const seg = pat[i] as string;
     if (WILD.test(seg) || !seg.startsWith(".")) continue;
     for (const d of prot) {
       const dir = segsOf(d);
-      for (let k = 0; k < dir.length; k++) if (dir[k] === seg && reaches(pat.slice(i), dir.slice(k))) return true;
+      for (let k = 0; k < dir.length; k++) {
+        if (dir[k] !== seg) continue;
+        if (literal && pat.length - i < dir.length - k) continue;
+        if (reaches(pat.slice(i), dir.slice(k))) return true;
+      }
     }
   }
   return false;

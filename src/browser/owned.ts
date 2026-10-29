@@ -126,14 +126,24 @@ const isCreated = (v: unknown): CreatedEntry => {
 
 /**
  * A url an agent passed that is a template, not an address: `/projects/<id>`, `{id}`, `[id]`
- * (Next.js), `$id`, `:id`, `*`. Recording one as the record's address is what nearly sent the
- * cleaner to the wrong place. Percent-encoded braces count too, since an agent may have built
- * the string through a URL helper.
+ * (Next.js), `[...slug]`, `${id}`, `$id`, `:id`, `*`. Recording one as the record's address is
+ * what nearly sent the cleaner to the wrong place.
+ *
+ * Only the path is examined, and only whole segments count. A real query string often carries
+ * brackets and dollars of its own — `?filter[status]=published`, `?ids[]=1`, OData's `?$top=10` —
+ * and treating those as templates dropped the address of a record that really existed, leaving it
+ * behind on the site (review finding M-1).
  */
 export const isPlaceholderUrl = (url: string) => {
-  let t = url;
-  try { t = decodeURIComponent(url); } catch { /* compare what we have */ }
-  return /[<>{}*[\]$]|(^|\/):[A-Za-z_]/.test(t);
+  const path = url.split(/[?#]/)[0] ?? url;
+  let t = path;
+  try { t = decodeURIComponent(path); } catch { /* compare what we have */ }
+  if (/[<>{}*]/.test(t)) return true;
+  // A whole segment that is a placeholder: [id], [...slug], $id, ${id}, :id.
+  // `${id}` is unambiguously a template. A bare `$name` segment is not — `/odata/$metadata` is a
+  // real endpoint — and it costs nothing to allow, because an address Baseline did not watch the
+  // site create is `confirmed: false`, and the cleaner never navigates to one of those.
+  return t.split("/").some((seg) => /^\[.*\]$/.test(seg) || /^\$\{.*\}$/.test(seg) || /^:[A-Za-z_]/.test(seg));
 };
 
 export function appendCreated(runDir: string, entry: CreatedEntry): void {

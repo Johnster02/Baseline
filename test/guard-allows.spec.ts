@@ -203,4 +203,88 @@ describe("the narrowing must not drop a path from the command", () => {
     allow("ls plugins/*");
     allow("cat src/core/paths.ts");
   });
+  // The property, not a list of spellings. The first fix for this placeholded '' and "" and still
+  // lost to `grep -r '"' <data>` — an argument made only of characters the splitter stripped.
+  const ARGS = [
+    "''", '""', "''''", '""""', `'""'`, `""''`,
+    "' '", '"  "', `"'"`, `'"'`, "$' '",
+    "'a'", '"a"', "a", "-e", "''a''", "'a b'",
+  ];
+
+  it("no argument spelling can shift a data folder out of a command (C-1)", () => {
+    for (const dir of dirs) {
+      for (const a of ARGS) {
+        for (const tool of ["grep -r", "grep", "rg", "ag", "sed", "awk", "egrep", "zgrep", "grep -rl"]) {
+          deny(`${tool} ${a} ${dir}`);
+        }
+      }
+    }
+  });
+
+  it("the same spellings on an ordinary file are all still allowed", () => {
+    for (const a of ARGS) {
+      allow(`grep -r ${a} notes.txt`);
+      allow(`sed ${a} notes.txt`);
+    }
+  });
+
+  it("how many words a command has does not depend on its quoting (C-1)", () => {
+    // Every one of these is four shell words. The guard drops the pattern slot, so each must
+    // leave exactly the same three path words as the unquoted form.
+    const base = pathWords("grep -r q x");
+    expect(base).toEqual(["grep", "-r", "x"]);
+    for (const a of [
+      "grep -r '' x", `grep -r '"' x`, "grep -r '''' x", "grep -r ' ' x",
+      "grep -r $' ' x", `grep -r "  " x`, `grep -r "'" x`, "grep -r 'a b' x",
+    ]) expect(pathWords(a), a).toEqual(base);
+    // A command with no pattern slot keeps all of its words, however they are quoted.
+    for (const a of ["cat 'a b' x", `cat "" x`, "cat '' x"]) {
+      expect(pathWords(a).length, a).toBe(pathWords("cat q x").length);
+    }
+  });
+
+  it("an escaped or quoted path is still a path", () => {
+    for (const dir of dirs) {
+      deny(`cat '${dir}/secrets.json'`);
+      deny(`cat "${dir}/secrets.json"`);
+      deny(`cat ${dir}/'secrets.json'`);
+    }
+  });
+
+  it("ordinary work in a project's own .claude or .config folder is allowed (I-2)", () => {
+    for (const c of [
+      "ls .claude/", "ls -la .claude/", "grep -rn todo .claude/", "git add .claude/",
+      "du -sh .claude/", "find .claude/ -name '*.md'", "ls .claude/plugins/", "tree .claude/plugins",
+      "ls .claude/plugins/data", "cat ./.claude/", "ls ../.claude/", "ls .config/",
+      "cp -r .claude/ backup/", "cat .claude/settings.json", "ls .claude",
+    ]) allow(c);
+  });
+
+  it("but a relative path that reaches into a data folder is still refused (I-2)", () => {
+    deny("cat .claude/plugins/data/baseline/secrets.json");
+    deny("cat ../../.claude/plugins/data/baseline/x/secrets.json");
+    deny("ls .claude/plugins/data/baseline");
+    deny("cat .config/baseline/secrets.json");
+    deny("ls .claude/plugins/data/*/secrets");
+  });
+
+  it("a wrapper's real argument syntax does not excuse what follows it (I-1)", () => {
+    const run = { runUrl: "https://staging.acme.dev" };
+    const agent = { ...run, agent: true };
+    for (const w of ["timeout 5", "timeout 999.5", "timeout 1.5", "timeout 3600.0", "timeout -s SIGKILL 3600",
+      "timeout -k 5 10", "timeout --kill-after=5 10", "nice", "nice -10", "nice -n 10", "stdbuf -oL -eL", "setsid"]) {
+      deny(`${w} env BASELINE_DATA=/tmp/x baseline script a b`, run);
+      deny(`${w} baseline run finish`, agent);
+      deny(`${w} baseline signin customer`, agent);
+      deny(`${w} cat ${dirs[0]}/secrets.json`);
+    }
+  });
+
+  it("those wrappers in front of ordinary work are still allowed (I-1)", () => {
+    const run = { runUrl: "https://staging.acme.dev" };
+    allow("timeout 1.5 pnpm vitest run", run);
+    allow("timeout -s SIGKILL 30 node scripts/build.mjs", run);
+    allow("nice -n 10 cat src/core/paths.ts", run);
+    allow("timeout 30 baseline script customer walk.cjs", { ...run, agent: true });
+  });
 });
